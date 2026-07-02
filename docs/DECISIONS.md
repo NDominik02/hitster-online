@@ -22,3 +22,15 @@ Ha lejár a 90 mp és nincs véglegesített lerakás: **a kártya elveszik** (ro
 
 ## D7 — Anti-leak szint F1-ben (Q7)
 F1: a preview URL-t **csak a host kliens kapja meg** (Edge Function válaszban, RLS-sel védve); az iTunes preview URL önmagában nem tartalmaz cím/előadó metaadatot, így ez elegendő. A teljes opaque streaming-proxy **F2**-re csúszik (0 Ft költségcél).
+
+## D8 — Élő tükrözés a player nézeten (DESIGN D-Q1)
+F1-ben a soron lévő játékos húzása **csak a host képernyőn** tükröződik élőben, a többi player telefonon nem (kevesebb realtime-forgalom, egyszerűbb state). Gazdagabb player-oldali tükrözés F2.
+
+## D9 — Márka-akcentszín (DESIGN D-Q2)
+Marad a Designer javaslata: **lila `#7C5CFF`**.
+
+## D10 — Gyors mód győzelmi képernyő (DESIGN D-Q3)
+Ugyanaz a végigpörgetős H6, csak rövidebb idővonalon — nincs külön variáns, kevesebb karbantartandó felület.
+
+## D11 — Tap-to-place fallback (DESIGN D-Q4)
+Bekerül **F1-be** — accessibility-minimum és sok androidos böngészőben a drag&drop touch-eseményei megbízhatatlanok, ez nem halasztható F2-re.
