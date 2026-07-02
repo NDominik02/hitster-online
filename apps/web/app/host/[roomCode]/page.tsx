@@ -223,12 +223,41 @@ export default function HostRoomPage() {
   }
 
   // Deadline-lejárat figyelése: amikor letelik, a host hívja a resolve_round-ot (D6, A2).
+  //
+  // MEGBÍZHATÓSÁGI JAVÍTÁS (2026-07-02 hotfix): háttérbe kerülő tab-okban a böngésző
+  // energiatakarékossági szabályai miatt a setTimeout drasztikusan késhet/throttle-ölődhet
+  // (Chrome dokumentált viselkedés), így ha a host laptopja nincs fókuszban (pl. a tulaj a
+  // telefonján nézte a visszaszámlálót), a resolve_round hívás simán soha nem fut le a régi
+  // időzítővel — a player véglegesen "Lejárt az idő!" állapotban ragad, mert a
+  // round_revealed broadcast sosem érkezik meg.
+  //
+  // Megoldás: a setTimeout MELLETT egy `visibilitychange` listener is figyeli, amikor a tab
+  // visszakerül előtérbe — ilyenkor azonnal újra-ellenőrizzük, hogy a deadline időközben nem
+  // járt-e már le (a régi timer pontossága ekkor már nem megbízható), és ha igen, azonnal
+  // hívjuk a resolve_round-ot ahelyett, hogy megvárnánk a (esetleg soha le nem futó) régi
+  // setTimeout-ot. Ez tisztán UX-jellegű robusztusság — az A2 döntést nem töri: a
+  // resolve_round Edge Function maga is ellenőrzi szerveroldalon, hogy a deadline tényleg
+  // lejárt-e, tehát a kliensoldali hívás időzítése nem biztonsági kérdés.
   useEffect(() => {
     if (!round || round.phase === "reveal" || round.phase === "done" || !round.placingDeadline) return;
     const deadline = new Date(round.placingDeadline).getTime();
     const msLeft = Math.max(0, deadline - Date.now());
     const t = setTimeout(() => handleResolve(), msLeft + 500);
-    return () => clearTimeout(t);
+
+    function handleVisibilityChange() {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() >= deadline) {
+        // A tab háttérben volt, amíg a deadline lejárt — a setTimeout esetleg még nem
+        // futott le (vagy throttle-ölve van). Ne várjunk rá, azonnal próbáljuk kiértékelni.
+        handleResolve();
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [round?.id, round?.placingDeadline, round?.phase]);
 

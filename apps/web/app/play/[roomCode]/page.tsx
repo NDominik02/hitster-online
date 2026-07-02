@@ -104,6 +104,21 @@ export default function PlayRoomPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomCode]);
 
+  // Reveal-frissítés kiszervezve, hogy a broadcast-esemény ÉS a lenti fallback polling
+  // (round_revealed kiesés esetére) ugyanazt az egy útvonalat használja.
+  const applyRevealedRound = useCallback(
+    async (rid: string) => {
+      if (!roomId) return;
+      const r = await refreshRound(rid);
+      if (me) setMyTimeline(await refreshTimelineFor(roomId, me.id));
+      if (r) {
+        setActiveTimeline(await refreshTimelineFor(roomId, r.activePlayerId));
+        setPlacedOutcome(r.outcome as "correct" | "wrong" | "timeout" | null);
+      }
+    },
+    [roomId, me, refreshRound, refreshTimelineFor]
+  );
+
   const { sendDragUpdate, broadcastEvent } = useRoomChannel({
     roomId,
     presenceKey: me?.id,
@@ -123,14 +138,7 @@ export default function PlayRoomPage() {
       } else if (event === "card_placed") {
         if (round) await refreshRound(round.id);
       } else if (event === "round_revealed") {
-        if (round) {
-          const r = await refreshRound(round.id);
-          if (me) setMyTimeline(await refreshTimelineFor(roomId, me.id));
-          if (r) {
-            setActiveTimeline(await refreshTimelineFor(roomId, r.activePlayerId));
-            setPlacedOutcome(r.outcome as "correct" | "wrong" | "timeout" | null);
-          }
-        }
+        if (round) await applyRevealedRound(round.id);
       } else if (event === "game_finished") {
         setRoomFinished(true);
         const ids = (payload as { winnerPlayerIds?: string[] })?.winnerPlayerIds ?? [];
@@ -138,6 +146,64 @@ export default function PlayRoomPage() {
       }
     },
   });
+
+  // FALLBACK POLLING (2026-07-02 hotfix): ha a `round_revealed` broadcast valamiért nem
+  // érkezik meg (pl. a host tab háttérbe kerül és a setTimeout throttle-ölődik, vagy a
+  // broadcast-csatorna épp nem volt feliratkozva), a player kliens korábban véglegesen
+  // beragadt a "Lejárt az idő!" képernyőn — semmi nem mentette meg. Ez a tartalék: ha a
+  // kör fázisa még nem reveal/done, DE a placingDeadline már (jó ráhagyással) a múltban
+  // van, rövid intervallumban újraolvassuk a round_public nézetet, amíg a fázis ténylegesen
+  // reveal-re nem vált (vagy amíg a broadcast közben meg nem érkezik — ilyenkor a round.phase
+  // már reveal lesz, és ez az effect magától leáll).
+  const roundIdForPolling = round?.id;
+  const roundPhaseForPolling = round?.phase;
+  const placingDeadlineForPolling = round?.placingDeadline;
+  useEffect(() => {
+    if (!roomId || !roundIdForPolling) return;
+    if (roundPhaseForPolling === "reveal" || roundPhaseForPolling === "done") return;
+    if (!placingDeadlineForPolling) return;
+
+    const deadline = new Date(placingDeadlineForPolling).getTime();
+    const GRACE_MS = 4000; // ráhagyás, hogy a hostnak legyen ideje a normál úton reagálni
+    const POLL_INTERVAL_MS = 2500;
+
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    function scheduleNextCheck() {
+      const msUntilPollingShouldStart = Math.max(0, deadline + GRACE_MS - Date.now());
+      timeoutId = setTimeout(tick, msUntilPollingShouldStart || POLL_INTERVAL_MS);
+    }
+
+    async function tick() {
+      if (cancelled) return;
+      if (Date.now() < deadline + GRACE_MS) {
+        scheduleNextCheck();
+        return;
+      }
+      try {
+        const row = await fetchRoundPublic(roundIdForPolling!);
+        const r = adaptRoundPublic(row);
+        if (cancelled || !r) return;
+        if (r.phase === "reveal" || r.phase === "done") {
+          // A szerver már kiértékelte (a host feldolgozta a resolve_round-ot valamelyik
+          // úton) — csak a broadcast maradt el. Frissítsük az UI-t, mintha megjött volna.
+          await applyRevealedRound(roundIdForPolling!);
+          return; // ne ütemezzünk további pollingot, a phase-változás úgyis leállítja az effectet
+        }
+      } catch (err) {
+        console.warn("[fallback-poll round_public]", err);
+      }
+      if (!cancelled) scheduleNextCheck();
+    }
+
+    scheduleNextCheck();
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, roundIdForPolling, roundPhaseForPolling, placingDeadlineForPolling]);
 
   async function handleJoin() {
     if (!name.trim() || !color) return;
