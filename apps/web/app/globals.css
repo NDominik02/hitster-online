@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+/* Hitster Online — dark party theme (DESIGN.md 6. Style guide) */
+:root {
+  /* Alap / felület (sötét) */
+  --bg: #0b0b14;
+  --surface: #16161f;
+  --surface-2: #22222e;
+  --border: #33333f;
+  --text: #f2f2f7;
+  --text-muted: #a0a0b0;
+
+  /* Szemantikus */
+  --accent: #7c5cff; /* D9 */
+  --accent-hover: #9179ff;
+  --success: #2ecc71;
+  --danger: #ff4d5e;
+  --warning: #ffb020;
+
+  /* 8 játékos-szín (DESIGN 6.2) */
+  --player-green: #2ecc71;
+  --player-blue: #3b9dff;
+  --player-purple: #b15cff;
+  --player-orange: #ff8a3d;
+  --player-red: #ff4d5e;
+  --player-yellow: #ffd23f;
+  --player-teal: #1ed9c9;
+  --player-pink: #ff6fb5;
+
+  /* Spacing skála (4px alap) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Radius */
+  --radius-card: 16px;
+  --radius-button: 12px;
+  --radius-pill: 999px;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-player-green: var(--player-green);
+  --color-player-blue: var(--player-blue);
+  --color-player-purple: var(--player-purple);
+  --color-player-orange: var(--player-orange);
+  --color-player-red: var(--player-red);
+  --color-player-yellow: var(--player-yellow);
+  --color-player-teal: var(--player-teal);
+  --color-player-pink: var(--player-pink);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Számokhoz (évszámok, szobakód, timer): tabular-nums a stabil szélességért (DESIGN 6.3) */
+.font-numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+.font-code {
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reduced motion (DESIGN 6.5 / 7.) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Fókusz-gyűrű minden interaktív elemen (accessibility minimum, DESIGN 7.) */
+button:focus-visible,
+input:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Vízszintes scroll sáv elrejtése az idővonalon, de görgethető marad */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
