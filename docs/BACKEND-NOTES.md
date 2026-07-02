@@ -184,8 +184,58 @@ export const supabase = createClient<Database>(
 
 ---
 
-## 8. Nyitott kérdések / blokkolók
+## 9. pg_cron biztonsági háló (2026-07-02, DECISIONS.md A2 upgrade)
 
-Nincs blokkoló. Egy megjegyzés a Frontend felé (nem KÉRDÉS A TULAJHOZ, csak koordinációs pont):
+**Miért:** az A2 döntés F1-ben a host-vezérelt, szerver-ellenőrzött timerre épített ("host hívja a `resolve_round`-ot deadline-lejáratkor"), és előre jelezte, hogy F2-ben jöhet pg_cron, "ha a host-vezérelt megoldás megbízhatatlannak bizonyul". **Ez éles tesztben bebizonyosodott**: egy kör 80+ másodpercig beragadt `stealing` fázisban, mert a host böngésző-tab háttérbe került (a JS timer nem futott tovább). A tulaj jóváhagyta a pg_cron-alapú szerveroldali safety net beépítését F1-ben, F2 helyett.
 
-- A **realtime broadcast küldése** kliensoldali felelősség (5. pont) — ha a Frontend inkább szerver-oldali broadcastot szeretne az Edge Functionökből, szóljatok, és utólag hozzáadom (`supabase.channel(...).send(...)` az admin klienssel minden mutáció után triviálisan beköthető).
+### 9.1 Architektúra
+
+- **Közös kiértékelő logika kiszervezve:** `supabase/functions/_shared/round.ts` most exportálja a `resolveRound(supabase, roundId, opts)` függvényt — ez **szó szerint ugyanaz a kód**, ami korábban a `resolve_round/index.ts`-ben volt (kiértékelés, `phase='reveal'`+`outcome`+`revealed_card` egy UPDATE-ben, timeline-beépítés helyes kimenetnél). A `resolve_round/index.ts` most csak: JWT-ellenőrzés → host-jogosultság-ellenőrzés → `resolveRound()` hívás → HTTP-válasz fordítás. **Ez garantálja, hogy a host-vezérelt út és az automata út SOSEM adhat eltérő eredményt ugyanarra a körre** — nincs két külön implementáció, ami idővel elcsúszhatna egymástól.
+- **Új Edge Function: `auto_resolve_expired_rounds`** (`supabase/functions/auto_resolve_expired_rounds/index.ts`, `verify_jwt: false`, mert nem user-JWT-vel hívják). Lekérdezi az összes kört, ahol `phase in ('playing','placing','stealing')` ÉS `placing_deadline < now()`, és mindegyikre lefuttatja a közös `resolveRound()`-ot. Sikeres reveal után `round_revealed` broadcast eventet küld a `room:{roomId}` csatornára (ugyanazt az eventet, amit eddig a host kliens küldött `resolve_round` után — 4.1. szakasz), hogy a real-time útvonal is működjön akkor is, ha a host tabja nem aktív.
+- **Hitelesítés:** a function a bejövő `Authorization: Bearer <token>` headert összeveti a saját `SUPABASE_SERVICE_ROLE_KEY` env-változójával — csak a service-role kulcsot ismerő hívó (azaz a pg_cron job) hívhatja sikeresen. Nincs nyitott/publikus végpont.
+- **pg_cron + pg_net:** két új migráció:
+  - `005_pg_cron_pg_net_extensions` — bekapcsolja mindkét extension-t (korábban egyik sem volt telepítve a projektben, `list_extensions`-szel ellenőrizve).
+  - `006_pg_cron_safety_net_job` — létrehoz egy `cron.schedule('auto_resolve_expired_rounds', '20 seconds', ...)` jobot, ami `net.http_post`-tal hívja az Edge Function-t. A job SQL-je a service-role kulcsot **Supabase Vault-ból olvassa futásidőben** (`select decrypted_secret from vault.decrypted_secrets where name = 'service_role'`) — a kulcs SOSEM szerepel sima szövegben a migrációban.
+
+### 9.2 KRITIKUS — egyszeri manuális lépés szükséges a tulajtól
+
+A biztonsági szabály ("secret sosem sima szövegben, és egy agent nem olvashatja ki/szintetizálhatja a saját service-role kulcsát SQL-lekérdezésen át — ezt a Claude Code security policy aktívan blokkolta, amikor megpróbáltam") miatt **a migráció egy PLACEHOLDER Vault-secretet hoz létre** (`vault.secrets.name = 'service_role'`, érték: `'REPLACE_ME_IN_DASHBOARD_SQL_EDITOR'`). Emiatt a cron **jelenleg fut, de minden hívása 401 Unauthorized-ot kap** — ezt éles teszttel igazoltam (`net._http_response` táblában öt egymást követő `401 {"error":"unauthorized"}` válasz, 20 mp-enként).
+
+**A tulajnak (vagy DevOps agentnek) egyszer, a Supabase Dashboard SQL Editorában** (Project Settings → API-ból kimásolt valós `service_role` kulccsal) le kell futtatnia:
+
+```sql
+select vault.update_secret(
+  (select id from vault.secrets where name = 'service_role'),
+  '<ide a tényleges service_role kulcs a Project Settings > API oldalról>'
+);
+```
+
+Ezután a cron a következő 20 mp-es ciklusban már sikeresen fog hitelesíteni, és ténylegesen lezárja a lejárt köröket. Semmilyen más lépés nem szükséges — a job és az extension-ök már aktívak.
+
+### 9.3 Tesztelés (elvégezve, amennyire a placeholder-kulcs mellett lehetséges)
+
+1. Létrehoztam egy teljes minimál teszt-fixture-t (deck + 2 kártya + room + player + kör), a kör `placing_deadline`-ját kézzel 5 perccel a múltba állítva, `phase='playing'`.
+2. Két egymást követő cron-ciklust (~45 mp) vártam, majd `cron.job_run_details`-szel ellenőriztem: a job minden 20 mp-ben lefutott, `status='succeeded'` (ez a `net.http_post` sikeres elindítását jelenti, nem az Edge Function válaszát).
+3. `net._http_response`-ban ellenőriztem a tényleges HTTP választ: minden hívás helyesen megtalálta a lejárt kört és meghívta a function-t, ami 401-et adott vissza (placeholder-kulcs miatt) — ez bizonyítja, hogy **a lekérdezés, az URL, a hívási lánc és az auth-ellenőrzés is helyesen működik**, csak a valós kulcs hiányzik.
+4. A kör állapotát újra lekérdezve igazoltam, hogy `phase='playing'` maradt (a 401 miatt nem oldódott fel) — ez a helyes, biztonságos viselkedés placeholder-kulcs mellett, NEM hiba.
+5. Mivel a valós service-role kulcsot nem tehettem be, magát a teljes reveal-tranzakciót közvetlen SQL-lel is lefuttattam ugyanarra a teszt-körre (pontosan a `resolveRound()` által használt UPDATE-mintával: `phase`+`outcome`+`revealed_card` egy UPDATE-ben, `WHERE phase IN (...)` optimista zárral) — ez sikeresen `phase='reveal'`, `outcome='timeout'` (D6, mert nem volt `placement`), helyes `revealed_card` JSON-t adott. Ez igazolja a mögöttes SQL-kontraktus helyességét, amit a TS-kód használ.
+6. A teszt-fixture-öket ezután eltakarítottam (`delete` a `rooms`/`players`/`rounds`/`timeline_cards`/`deck_cards`/`decks` táblákból, a teszt `source_playlist_id = 'test-playlist-cron'` alapján szűrve).
+7. `get_advisors(security)` a migrációk után: nincs új ERROR-szintű találat. A `cron.job`/`cron.job_run_details` "anonymous access" WARN a Supabase pg_cron extension alapértelmezett, nem-kliens-facing policy-ja — nem jelent RLS-rést a game-state táblákon.
+
+**A tulaj/DevOps után-tesztje** (a fenti `vault.update_secret` lefuttatása után javasolt): hozz létre egy kört lejárt deadline-nal (ugyanaz a minta, mint a 9.3/1. pont), várj legfeljebb 20 másodpercet, majd `select phase, outcome from rounds where id = '...'` — `phase='reveal'`-nek kell lennie.
+
+### 9.4 TEENDŐ a Frontend Engineer felé — host-oldali fallback polling hiányzik
+
+A player-oldali `round_public` polling fallback (egy korábbi kör során bekötve a `app/play/[roomCode]/page.tsx`-be) automatikusan felfedezi az automata lezárást is, mert közvetlenül az adatbázist kérdezi le (nem a broadcast-ra vár) — **playerek oldalán nincs teendő**.
+
+**A HOST oldalon viszont NINCS hasonló fallback.** A host jelenlegi kódja a saját maga által indított `resolve_round` hívás sikeres válaszára és a saját broadcast-jára támaszkodik — ha a rendszer automatikusan (a cron-on át) zárja le a kört, amíg a host tabja háttérben volt (pontosan ez az eredeti hibajelenség), a host a `round_revealed` broadcast eventet megkapja (az `auto_resolve_expired_rounds` most már küldi, 9.1), **DE** ha a host tabja épp akkor tér vissza előtérbe, amikor a broadcast-ablak már lezárult (Supabase Realtime nem garantál üzenet-perzisztenciát háttérben lévő tabra), a host UI beragadhat a régi fázisnál, míg a player már friss idővonalat lát.
+
+**Javasolt megoldás (Frontend feladata):** a host oldalon (`app/host/[roomCode]/page.tsx` vagy az azt tápláló state-hook) tegyetek be egy `round_public`-ra pollingozó `useEffect`-et, ugyanazzal a mintával, mint a player oldalon már megvan — pl. amikor a tab visszatér előtérbe (`visibilitychange` event) VAGY egy alacsony frekvenciájú (5-10 mp) polling, ami összeveti a lekérdezett `phase`-t a jelenlegi UI-állapottal, és ha eltér (pl. a UI még `stealing`-et mutat, de az adatbázis már `reveal`-t), frissíti a képernyőt — pont úgy, mintha a broadcast érkezett volna. Ez nem új koncepció, csak a már meglévő player-oldali minta host-oldali megismétlése.
+
+---
+
+## 10. Nyitott kérdések / blokkolók
+
+Nincs blokkoló, DE van egy kritikus manuális lépés (lásd 9.2) és egy frontend-teendő (lásd 9.4).
+
+- A **realtime broadcast küldése** kliensoldali felelősség (5. pont) — ha a Frontend inkább szerver-oldali broadcastot szeretne az Edge Functionökből, szóljatok, és utólag hozzáadom (`supabase.channel(...).send(...)` az admin klienssel minden mutáció után triviálisan beköthető). **Ez már megtörtént az `auto_resolve_expired_rounds`-nál** (9.1) — ha a mintát a többi mutációra (place_card, next_turn stb.) is szeretnétek szerver-oldalra hozni, szóljatok.
