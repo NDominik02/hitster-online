@@ -1,0 +1,150 @@
+# Backend Notes — F1 (Backend Engineer agent)
+
+*Készült: 2026-07-02 · Backend Engineer · Forrás: ARCHITECTURE.md 9. szakasz Fázis A–B*
+
+Ez a dokumentum a Frontend Engineer agentnek szól: mi készült el a backend oldalon,
+és hogyan kell integrálni a Next.js appból. A teljes API-szerződés az
+`ARCHITECTURE.md` 3. szakaszában van részletesen leírva — ez itt a gyors
+integrációs összefoglaló + a ténylegesen megvalósult apró eltérések.
+
+---
+
+## 1. Projekt
+
+- **Supabase projekt:** `hitster-online` (region: `eu-central-1`, free tier, 0 Ft/hó)
+- **Project ID:** `cynedrshuqneztnymbxu`
+- **Project URL:** `https://cynedrshuqneztnymbxu.supabase.co`
+- **Publishable (anon) key — biztonságosan kliens-oldalra tehető:**
+  - Legacy anon key (JWT, ezt használd a supabase-js kliensben):
+    `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN5bmVkcnNodXFuZXp0bnltYnh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5OTk1MDQsImV4cCI6MjA5ODU3NTUwNH0.qQ1t9AxqR5yIRWEEtRzpkeRr0R0xJfzcJTdIO2vysro`
+  - Modern publishable key (alternatíva, ha az SDK verzió támogatja):
+    `sb_publishable_KW_FDK3TUUlPYkga6b7fiQ_WdgzsAm9`
+  - **A service_role/secret kulcs SOSEM kerül ide vagy a frontend kódba** — csak az Edge Functionök használják, environment variable-ből (`SUPABASE_SERVICE_ROLE_KEY`, a Supabase automatikusan injektálja az Edge Function futtató környezetbe).
+
+### Javasolt `.env.local` (Next.js) változónevek
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://cynedrshuqneztnymbxu.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<a fenti anon key>
+```
+
+---
+
+## 2. Adatbázis séma + RLS — elkészült (Fázis A, 1–4. lépés)
+
+3 migráció ment fel (`001_schema`, `002_storage`, `003_rls_and_views`) + egy negyedik javító migráció (`004_fix_advisors`):
+
+- Minden tábla az ARCHITECTURE.md 1. szakasza szerint: `decks`, `deck_cards`, `rooms`, `players`, `rounds`, `timeline_cards`, plusz `mb_year_cache` (globális MusicBrainz-cache, 3.1).
+- RLS mindenhol bekapcsolva, default-deny. A `deck_cards` táblán **szándékosan nincs SELECT policy** semmilyen kliens-role-nak — ez az anti-leak mag (2.3). Ez a `get_advisors` biztonsági listában is megjelenik INFO szinten ("RLS Enabled No Policy") — ez **elvárt, nem hiba**.
+- `mb_year_cache` is RLS-védett, policy nélkül — csak az Edge Function (service-role) éri el.
+- **`round_public` VIEW** — a player-facing kör-állapot, `security_invoker = true`. **Ezt olvasd a kliensből, SOHA ne a `rounds` táblát közvetlenül** — a `rounds` tábla `card_id` mezője a megfejtés kulcsa, amit a nézet szándékosan nem ad ki.
+- **`get_timeline(p_room_id uuid)` RPC (nem VIEW!)** — eltérés az ARCHITECTURE.md 2.7-től: a tervezett `timeline_public` SECURITY DEFINER view-t a Supabase linter ERROR szinten jelezte (definer view megkerülheti a hívó RLS-ét), ezért az A4 döntés alapján ("ha kétség, RPC") egy explicit `security definer` **RPC-re** váltottam, ami a tagságot a függvénytörzsben ellenőrzi. Hívás módja kliensből:
+  ```ts
+  const { data, error } = await supabase.rpc('get_timeline', { p_room_id: roomId });
+  ```
+  A visszatérési oszlopok ugyanazok, mint amit a doksi a `timeline_public` view-hoz ígért: `id, player_id, position, is_start, placed_round_no, room_id, title, artist, year, artwork_url` (audio_url/spotify_uri szándékosan nincs benne).
+- `is_room_member(room_id)` és `is_room_host(room_id)` SQL RPC-k is elérhetők a kliensből (`supabase.rpc(...)`), ha a Frontendnek szüksége lenne rájuk — de a policy-k már automatikusan használják őket minden SELECT-nél, külön hívás normál esetben nem kell.
+- **Storage:** `deck-audio` bucket, **privát** (nincs publikus/anon/authenticated SELECT policy). A hangfájlokhoz kizárólag a `draw_card`/`start_game` válaszában kapott, rövid élettartamú (5 perc TTL) signed URL-en át lehet hozzáférni — **kizárólag a host kliens kapja meg**.
+
+`get_advisors` (security) lefutott a séma + RLS + Edge Functionök után: nincs ERROR szintű találat. A maradék INFO/WARN szintűek szándékos tervezési döntések (dokumentálva fent + a migrációk kommentjeiben).
+
+---
+
+## 3. Edge Functions — elkészült (Fázis B, 5–9. lépés)
+
+Mind a 10 tervezett function deployolva, `ACTIVE` státuszban, `verify_jwt: true` (minden hívásnak érvényes Supabase JWT-t kell küldenie az `Authorization: Bearer <jwt>` headerben — az anonymous auth sessionből ez automatikus, ha a supabase-js klienst használod).
+
+| Function | Hívó | Megjegyzés |
+|---|---|---|
+| `generate_deck` | host | `{ playlistUrl }` → létrehozza a `decks` sort `status='generating'`-gal azonnal, majd szinkron fut le a function invocation-ön belül (ld. 4. pont), a végén `status='ready'`/`'failed'`. **Pollingozd a `decks.report` mezőt** (2 mp-enként javasolt) a progresshez: `{ processed, total, step }`, ahol `step` egyike: `fetching_playlist`, `resolving_years`, `uploading_audio`, `done`, `failed`. |
+| `create_room` | host | `{ deckId, settings? }` → `{ roomId, code, status }`. `deck.usable_count >= 60` kötelező (D4). |
+| `join_room` | player | `{ code, name, color }` → `{ roomId, playerId, seatOrder, status }`. Reconnect-barát: ha az `auth_uid` már tag, a meglévő sort adja vissza. |
+| `start_game` | host | `{ roomId }` → `{ status, roundId, activePlayerId }`. Min. 2 játékos kell. |
+| `draw_card` | host | `{ roomId }` → `{ roundId, roundNo, activePlayerId, audioUrl, placingDeadline }`. **Az `audioUrl` csak ide kerül ki, csak a hostnak.** Normál esetben `start_game`/`next_turn` már meghívja belsőleg; ezt a hostnak explicit is lehet hívnia (pl. ha a signed URL lejárt, újat kér anélkül, hogy új kártyát húzna). |
+| `place_card` | soron lévő player | `{ roundId, position }` → `{ phase, stealDeadline }`. Csak az `active_player_id`-hez tartozó auth_uid hívhatja. |
+| `resolve_round` | host | `{ roundId }` → `{ phase: 'reveal', outcome, revealedCard }`. D6: ha nincs `placement` és a `placing_deadline` még nem járt le, 409 `deadline_not_reached`-et ad — a host kliens csak a deadline után hívja. |
+| `next_turn` | host | `{ roomId }` → `{ next: 'draw', roundId }` VAGY `{ next: 'finished', winnerPlayerIds }`. |
+| `reconnect` | player/host | `{ code }` → `{ roomId, role: 'host'|'player', ..., status, currentRoundId }`. Ezt hívd meg induláskor localStorage JWT-vel, mielőtt `join_room`-ot hívnál (S15). |
+| `leave_room` | player | `{ roomId }` → `{ ok: true }`. Explicit kilépés; a tényleges disconnect-detekció Presence-alapú, kliensoldali. |
+
+**`register_steal` szándékosan NINCS implementálva** (F2-stub, az ARCHITECTURE.md 3.7 kifejezetten kéri, hogy ne készüljön el F1-ben). A `stealing` fázis a sémában/fázis-gépben megvan, de `place_card` gyakorlatilag azonnal átengedi (F1: `stealEnabled` mindig false) — a host közvetlenül `resolve_round`-ot hívhat utána.
+
+### Hívási minta a kliensből
+
+```ts
+const { data: { session } } = await supabase.auth.getSession();
+const res = await fetch(`${SUPABASE_URL}/functions/v1/create_room`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${session.access_token}`,
+    apikey: NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  },
+  body: JSON.stringify({ deckId, settings: { winTarget: 10, timeLimitSec: 90 } }),
+});
+const json = await res.json();
+```
+
+Vagy a supabase-js `functions.invoke` helper-rel (ez automatikusan felteszi az Authorization headert az aktuális sessionből):
+```ts
+const { data, error } = await supabase.functions.invoke('create_room', {
+  body: { deckId, settings: { winTarget: 10, timeLimitSec: 90 } },
+});
+```
+
+Hibaválasz formátuma mindenhol egységes: `{ error: string, messageHu?: string }`, HTTP státusz kóddal (400/401/403/404/409/422/500).
+
+---
+
+## 4. `generate_deck` — fontos működési megjegyzés a Frontendnek
+
+Az ARCHITECTURE.md 3.1 szakasza `EdgeRuntime.waitUntil`-lal háttérfeladatot javasolt, hogy a HTTP-válasz ne blokkoljon. **A megvalósítás ehhez képest egyszerűbb: a function szinkron fut le a kérés-válasz cikluson belül**, és a végén adja vissza a teljes eredményt (`deckId, totalTracks, usableCount, coveragePct, meetsMinimum, excluded, uncertainYearCount`). Eközben a `decks.report` mezőt inkrementálisan frissíti minden 5. tracknél, úgyhogy **a H2 progress-képernyő pollingozhatja a `decks` táblát a `deckId`-n** (RLS: a `decks_select` policy engedi, ha `owner_id = auth.uid()` vagy `is_public`), amíg a function válasza meg nem érkezik.
+
+Gyakorlati következmény: egy 100 track-es playlist generálása kb. 2-4 percig tarthat (MusicBrainz 1 req/s + iTunes throttle + audio letöltés/feltöltés), és a HTTP kérés ennyi ideig nyitva marad a host kliens oldalán. Ha ez problémát okoz (timeout a Vercel/böngésző oldalán), jelezd — a Function átalakítható `waitUntil`-os, ténylegesen aszinkron mintára, a `decks.report` polling interfész változatlan maradna.
+
+**iTunes-év fallback minden playlistre fut** (F0-REPORT 2./6. tanulsága) — nem csak akkor, ha nincs Spotify embed forrás. Kettős-forrás kereszt-ellenőrzés: ha `|MB-év − iTunes-év| >= 3`, a korábbi évet vesszük és `year_uncertain=true`-t kap a kártya.
+
+---
+
+## 5. Realtime — a kliens oldali bekötés a Frontend feladata
+
+A backend oldalon nincs külön "realtime setup" migráció szükséges — a Supabase Realtime broadcast/presence kliensoldali csatorna-feliratkozással működik, szerver-oldali séma nélkül. Az ARCHITECTURE.md 4. szakasza szerint:
+
+- **Broadcast csatorna:** `room:{roomId}` — a kliens kódnak kell broadcast eventeket küldenie a megfelelő pillanatokban (pl. `place_card` sikeres hívása után a player broadcastol egy `card_placed` eventet a saját csatornájára), az Edge Functionök **nem küldenek automatikusan broadcast eventet** — ezt a hívó kliensnek kell megtennie a function sikeres válasza után. *(Ha ez a Frontend munkamódszerével ütközik — pl. szeretnétek, hogy a Function maga broadcastoljon szerver-oldalon a Supabase Realtime API-n át —, jelezzétek, ez utólag hozzáadható az Edge Functionökhöz.)*
+- **`room:{roomId}:drag` csatorna:** tisztán kliens-kliens broadcast, nincs szerver-komponense.
+- **Presence:** szintén kliensoldali, `track()`-kel.
+- `postgres_changes` a `rounds` táblán **nincs bekapcsolva és ne is legyen** (anti-leak: 2.6b) — mindig a `round_public` view-t/broadcast+refetch mintát használd.
+
+---
+
+## 6. TypeScript típusok
+
+Generálva és elmentve: `packages/shared-types/database.types.ts` (a `Database` típus a teljes sémával, `round_public` view-val, `get_timeline`/`is_room_member`/`is_room_host` RPC szignatúrákkal).
+
+Használat a Next.js oldalon:
+```ts
+import { createClient } from '@supabase/supabase-js';
+import type { Database } from '@hitster/shared-types/database.types'; // vagy relatív import, a monorepo-setuptól függően
+
+export const supabase = createClient<Database>(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  { auth: { persistSession: true, autoRefreshToken: true } } // localStorage-persist alapból bekapcsolva (7.1)
+);
+```
+
+---
+
+## 7. Amit a Frontendnek tudnia kell az anti-leakről (kritikus)
+
+- A player kliens **soha ne hívja** a `draw_card`-ot vagy a `resolve_round`-ot — ezek host-only endpointok (403-at adnak vissza, ha player hívja).
+- A player kliens **mindig a `round_public` view-t olvassa**, soha a `rounds` táblát (a policy technikailag engedi a `rounds` SELECT-et is a tagoknak, mert a host admin-lekérdezéseihez kell, de a `card_id` a view-ban nincs benne — a nyers táblában viszont ott van, tehát a kliens kód konvenció kérdése, hogy a view-t használja).
+- Audio lejátszás **kizárólag a host kliensen**, a `draw_card`/`start_game` válaszban kapott signed `audioUrl`-lel.
+
+---
+
+## 8. Nyitott kérdések / blokkolók
+
+Nincs blokkoló. Egy megjegyzés a Frontend felé (nem KÉRDÉS A TULAJHOZ, csak koordinációs pont):
+
+- A **realtime broadcast küldése** kliensoldali felelősség (5. pont) — ha a Frontend inkább szerver-oldali broadcastot szeretne az Edge Functionökből, szóljatok, és utólag hozzáadom (`supabase.channel(...).send(...)` az admin klienssel minden mutáció után triviálisan beköthető).
