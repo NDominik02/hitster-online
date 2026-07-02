@@ -143,7 +143,7 @@ export default function HostRoomPage() {
       const res = await startGame(roomId);
       setRoomStatus("playing");
       await refreshRound(res.roundId);
-      broadcastEvent("game_started", { roundId: res.roundId });
+      await broadcastEvent("game_started", { roundId: res.roundId });
       await beginRound(res.roundId);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Nem sikerült elindítani a játékot.");
@@ -156,7 +156,7 @@ export default function HostRoomPage() {
       const draw = await drawCard(roomId);
       setAudioUrl(draw.audioUrl);
       await refreshRound(draw.roundId);
-      broadcastEvent("round_started", { roundId: draw.roundId, activePlayerId: draw.activePlayerId });
+      await broadcastEvent("round_started", { roundId: draw.roundId, activePlayerId: draw.activePlayerId });
     } catch (err) {
       // draw_card 409-et ad, ha már húzva van erre a körre — ilyenkor csak frissítjük az állapotot.
       await refreshRound(roundId);
@@ -170,7 +170,7 @@ export default function HostRoomPage() {
       await resolveRound(round.id);
       await refreshRound(round.id);
       await refreshTimelines(roomId!);
-      broadcastEvent("round_revealed", { roundId: round.id });
+      await broadcastEvent("round_revealed", { roundId: round.id });
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Nem sikerült kiértékelni a kört.");
     }
@@ -184,9 +184,9 @@ export default function HostRoomPage() {
         setRoomStatus("finished");
         setWinnerPlayerIds(res.winnerPlayerIds);
         await refreshTimelines(roomId);
-        broadcastEvent("game_finished", { winnerPlayerIds: res.winnerPlayerIds });
+        await broadcastEvent("game_finished", { winnerPlayerIds: res.winnerPlayerIds });
       } else {
-        broadcastEvent("turn_advanced", { roundId: res.roundId });
+        await broadcastEvent("turn_advanced", { roundId: res.roundId });
         setAudioUrl(null);
         setDragGhostIndex(null);
         await beginRound(res.roundId);

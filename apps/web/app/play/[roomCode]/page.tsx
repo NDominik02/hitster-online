@@ -104,7 +104,7 @@ export default function PlayRoomPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomCode]);
 
-  const { sendDragUpdate } = useRoomChannel({
+  const { sendDragUpdate, broadcastEvent } = useRoomChannel({
     roomId,
     presenceKey: me?.id,
     presenceMeta: { role: "player", name: me?.name },
@@ -150,6 +150,9 @@ export default function PlayRoomPage() {
       const list = await refreshPlayers(res.roomId);
       const myPlayer = list.find((p) => p.id === res.playerId) ?? null;
       setMe(myPlayer);
+      // A useRoomChannel csak a roomId state-változás UTÁNI render-ciklusban iratkozik fel —
+      // a broadcastEvent belső retry-ja megvárja a SUBSCRIBED állapotot (max ~2 mp).
+      await broadcastEvent("player_joined", { playerId: res.playerId });
     } catch (err) {
       setJoinError(err instanceof Error ? err.message : "Nem sikerült csatlakozni a szobához.");
     } finally {
@@ -162,8 +165,9 @@ export default function PlayRoomPage() {
     try {
       await placeCard(round.id, slotIndex);
       await refreshRound(round.id);
-      // A host figyeli a placement-et és hívja a resolve_round-ot; itt csak jelezzük a broadcastot,
-      // hogy a host (és a többi player) tudja, hogy lerakás történt.
+      // A host figyeli a placement-et és hívja a resolve_round-ot; itt jelezzük a broadcastot,
+      // hogy a host (és a többi player) azonnal frissítse a round_public állapotot.
+      await broadcastEvent("card_placed", { roundId: round.id });
     } catch (err) {
       setJoinError(err instanceof Error ? err.message : "Nem sikerült lerakni a kártyát.");
     }

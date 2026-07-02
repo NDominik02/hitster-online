@@ -31,48 +31,43 @@ async function invoke<T>(name: string, body: Record<string, unknown>): Promise<T
   return data as T;
 }
 
-/** generate_deck (ARCHITECTURE 3.1 / BACKEND-NOTES 4.) — szinkron fut, a válasz a végleges eredmény. */
-export async function generateDeck(playlistUrl: string): Promise<Deck> {
-  const data = await invoke<{
-    deckId: string;
-    name: string;
-    totalTracks: number;
-    usableCount: number;
-    coveragePct: number;
-    meetsMinimum: boolean;
-    excluded: Array<{ title: string; artist: string; reason: "no_preview" | "no_year" }>;
-    uncertainYearCount?: number;
-  }>("generate_deck", { playlistUrl });
-
-  return {
-    id: data.deckId,
-    name: data.name,
-    sourcePlaylistUrl: playlistUrl,
-    totalTracks: data.totalTracks,
-    usableCount: data.usableCount,
-    coveragePct: data.coveragePct,
-    status: "ready",
-    report: {
-      usable: data.usableCount,
-      total: data.totalTracks,
-      coveragePct: data.coveragePct,
-      meetsMinimum: data.meetsMinimum,
-      excluded: data.excluded,
-      uncertainYearCount: data.uncertainYearCount,
-    },
-  };
+/**
+ * generate_deck (BACKEND-NOTES 4. — MÓDOSÍTVA 2026-07-02, aszinkron self-chaining batch-ekben fut).
+ *
+ * A HTTP hívás MOST MÁR AZONNAL (~1-2 mp) visszatér `{ deckId, status: 'generating' }`-vel — a
+ * régi válasz (totalTracks/usableCount/stb.) NINCS többé ebben a válaszban. A tényleges feldolgozás
+ * a szerveren self-chaining batch-ekben fut a 150 mp-es Edge Function wall-clock limit miatt, és
+ * percekig tarthat (60-100 track-es playlisteknél 1-4 perc). A hívó oldalnak a `pollDeckUntilReady`
+ * segédfüggvényt kell használnia a `generateDeck` visszatérése UTÁN, NEM szabad szinkron várni.
+ */
+export async function generateDeck(playlistUrl: string): Promise<{ deckId: string }> {
+  return invoke<{ deckId: string; status: string; message?: string }>("generate_deck", { playlistUrl });
 }
 
-/**
- * Pollingozza a decks.report mezőt, amíg a generálás fut (BACKEND-NOTES 4.: 2 mp-enként javasolt).
- * A H2 progress-képernyő ezt hívja PÁRHUZAMOSAN a generateDeck() hívással (utóbbi a generálás
- * végéig nyitva tartja a HTTP kapcsolatot, a polling addig mutatja az élő progresst).
- */
-export async function pollDeckProgress(deckId: string) {
+/** Egyszeri lekérdezés a decks tábláról (RLS: owner_id = auth.uid() vagy is_public). */
+export async function pollDeckProgress(deckId: string): Promise<Deck> {
   const client = getSupabaseClient();
   const { data, error } = await client.from("decks").select("*").eq("id", deckId).single();
   if (error) throw error;
   return adaptDeck(data);
+}
+
+/**
+ * Pollingozza a decks táblát ~2 mp-enként (BACKEND-NOTES 4. javaslat), amíg status 'ready' vagy
+ * 'failed' nem lesz. Az onProgress callback minden pollingnál meghívódik a friss állapottal, hogy a
+ * GenerationProgress komponens élőben frissülhessen.
+ */
+export async function pollDeckUntilReady(
+  deckId: string,
+  onProgress?: (deck: Deck) => void,
+  intervalMs = 2000
+): Promise<Deck> {
+  while (true) {
+    const deck = await pollDeckProgress(deckId);
+    onProgress?.(deck);
+    if (deck.status === "ready" || deck.status === "failed") return deck;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 }
 
 /** create_room (ARCHITECTURE 3.2) */

@@ -43,6 +43,7 @@ export const mockDeck: Deck = {
     excluded: mockExcludedTracks,
     uncertainYearCount: 21,
   },
+  progress: { processed: 100, total: 100, step: "done" },
 };
 
 export const mockDeckTooSmall: Deck = {
@@ -60,6 +61,7 @@ export const mockDeckTooSmall: Deck = {
     meetsMinimum: false,
     excluded: mockExcludedTracks.slice(0, 3),
   },
+  progress: { processed: 55, total: 55, step: "done" },
 };
 
 export const mockPlayers: Player[] = [

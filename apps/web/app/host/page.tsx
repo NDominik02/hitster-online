@@ -1,25 +1,24 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppButton } from "@/components/system/AppButton";
 import { SegmentedControl } from "@/components/system/SegmentedControl";
 import { GenerationProgress } from "@/components/game/GenerationProgress";
 import { CoverageReport } from "@/components/game/CoverageReport";
 import { ensureAnonymousSession } from "@/lib/supabase/client";
-import { generateDeck, createRoom } from "@/lib/supabase/functions";
+import { generateDeck, createRoom, pollDeckUntilReady } from "@/lib/supabase/functions";
 import type { Deck } from "@/lib/game/types";
-import type { DeckGenerationProgress } from "@/lib/supabase/adapters";
 
 /**
  * H1 — Létrehozás (host): playlist forrás + beállítások (DESIGN H1 wireframe).
  * H2 — Pakli-előkészítés / riport ugyanezen az oldalon, generálás közben (DESIGN H2 wireframe).
  *
- * generate_deck szinkron fut (BACKEND-NOTES 4.) — a HTTP kérés a generálás végéig nyitva marad.
- * Eközben a decks.report mezőt 2 mp-enként pollingozzuk a progress-bar frissítéséhez; a deckId-t
- * csak a generálás VÉGE után ismerjük meg a generateDeck() válaszából, ezért a polling addig a
- * "legutóbb generált saját deck" feltételezéssel nem működne — helyette a generateDeck() promise-t
- * és egy külön "becsült progress" pollingot futtatunk párhuzamosan: amint a válasz megjön, leállunk.
+ * generate_deck AZONNAL visszatér `{ deckId, status: 'generating' }`-vel (BACKEND-NOTES 4. —
+ * 2026-07-02 javítás: self-chaining batch-ekben fut a szerveren a 150 mp-es Edge Function
+ * wall-clock limit miatt). A tényleges feldolgozás percekig tarthat (60-100 track-es playlisteknél
+ * 1-4 perc) — ezt a decks táblát ~2 mp-enként pollingozva követjük (pollDeckUntilReady), amíg
+ * status 'ready' vagy 'failed' nem lesz.
  */
 export default function HostCreatePage() {
   const router = useRouter();
@@ -29,14 +28,13 @@ export default function HostCreatePage() {
   const [error, setError] = useState<string | null>(null);
 
   const [phase, setPhase] = useState<"form" | "generating" | "report">("form");
-  const [progress, setProgress] = useState<DeckGenerationProgress>({
+  const [progress, setProgress] = useState<{ processed: number; total: number; step: string }>({
     processed: 0,
     total: 0,
     step: "fetching_playlist",
   });
   const [deck, setDeck] = useState<Deck | null>(null);
   const [creatingRoom, setCreatingRoom] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const urlLooksValid = /^https:\/\/open\.spotify\.com\/playlist\/[a-zA-Z0-9]+/.test(playlistUrl.trim());
 
@@ -52,33 +50,30 @@ export default function HostCreatePage() {
     try {
       await ensureAnonymousSession();
 
-      // A generateDeck() a generálás végéig nyitva tartja a kérést (BACKEND-NOTES 4.).
-      // A deckId csak a válaszban derül ki, ezért a köztes progresst egyelőre csak a
-      // lépés-becsléssel jelezzük; ha a Backend a jövőben a deckId-t korábban visszaadná
-      // (pl. egy külön "started" eseményben), itt lehetne rákötni a valódi pollDeckProgress-t.
-      const resultPromise = generateDeck(playlistUrl.trim());
+      // A HTTP hívás azonnal visszatér a deckId-vel, a feldolgozás a szerveren fut tovább.
+      const { deckId } = await generateDeck(playlistUrl.trim());
 
-      // Amíg a fenti fut, egy egyszerű "step" animáció jelzi, hogy nem fagyott le (DESIGN H2:
-      // "a progress soha nem tűnhet fagyottnak"). Valós számokat a válasz megérkezése után mutatunk.
-      const steps: DeckGenerationProgress["step"][] = [
-        "fetching_playlist",
-        "resolving_years",
-        "uploading_audio",
-      ];
-      let stepIndex = 0;
-      pollRef.current = setInterval(() => {
-        stepIndex = Math.min(stepIndex + 1, steps.length - 1);
-        setProgress((p) => ({ ...p, step: steps[stepIndex] }));
-      }, 4000);
+      // Pollingozzuk a decks táblát ~2 mp-enként, amíg ready/failed nem lesz (BACKEND-NOTES 4.).
+      const result = await pollDeckUntilReady(deckId, (partial) => {
+        setProgress({
+          processed: partial.progress.processed,
+          total: partial.progress.total || 100,
+          step: partial.progress.step,
+        });
+      });
 
-      const result = await resultPromise;
+      if (result.status === "failed") {
+        const reason = result.progress.failReason;
+        throw new Error(
+          reason === "playlist_not_public"
+            ? "Csak nyilvános playlist használható. Tedd a playlistet nyilvánossá, majd próbáld újra."
+            : "Nem sikerült a pakli generálása. Ellenőrizd, hogy a playlist nyilvános-e, és próbáld újra."
+        );
+      }
 
-      if (pollRef.current) clearInterval(pollRef.current);
-      setProgress({ processed: result.totalTracks, total: result.totalTracks, step: "done" });
       setDeck(result);
       setPhase("report");
     } catch (err) {
-      if (pollRef.current) clearInterval(pollRef.current);
       setPhase("form");
       setError(err instanceof Error ? err.message : "Ismeretlen hiba történt a pakli generálása közben.");
     }

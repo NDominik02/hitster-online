@@ -118,6 +118,14 @@ export interface Deck {
   coveragePct: number;
   status: "generating" | "ready" | "failed";
   report: DeckReport;
+  /** Generálás közbeni progress (BACKEND-NOTES 4.: decks.report.{processed,total,step}). */
+  progress: {
+    processed: number;
+    total: number;
+    step: "fetching_playlist" | "resolving_years" | "uploading_audio" | "done" | "failed" | string;
+    /** Csak status='failed' esetén — a hiba oka (pl. playlist_not_public). */
+    failReason?: string;
+  };
 }
 
 /** A host draw_card válasza — KIZÁRÓLAG a host kliens kapja meg (D7 anti-leak). */

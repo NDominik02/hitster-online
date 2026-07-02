@@ -28,6 +28,8 @@ export function adaptDeck(row: DeckRow): Deck {
     processed?: number;
     total?: number;
     step?: string;
+    reason?: string;
+    errorCode?: string;
   };
   return {
     id: row.id,
@@ -44,6 +46,12 @@ export function adaptDeck(row: DeckRow): Deck {
       meetsMinimum: report.meetsMinimum ?? row.usable_count >= 60,
       excluded: report.excluded ?? [],
       uncertainYearCount: report.uncertainYearCount,
+    },
+    progress: {
+      processed: report.processed ?? 0,
+      total: report.total ?? row.total_tracks,
+      step: report.step ?? "fetching_playlist",
+      failReason: report.reason ?? report.errorCode,
     },
   };
 }

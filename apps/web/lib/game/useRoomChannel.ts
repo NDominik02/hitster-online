@@ -36,6 +36,14 @@ export interface UseRoomChannelOptions {
   onPresenceChange?: (state: Record<string, unknown>) => void;
   /** Csak a host figyeli (D8) — élő húzás tükrözés a :drag csatornán. */
   onDragUpdate?: (payload: DragBroadcastPayload) => void;
+  /**
+   * Meghívódik, amint a room:{roomId} csatorna ténylegesen SUBSCRIBED állapotba kerül.
+   * A broadcastEvent() ELŐTTE hívva no-op (a channel ref még nincs kész) — ha a hívó oldalnak
+   * egy akció UTÁN azonnal broadcastolnia kell (pl. join_room után), erre a callbackre vagy az
+   * isSubscribedRef-re kell támaszkodnia, nem feltételezheti, hogy a roomId state-beállítás
+   * után szinkron már küldhető az esemény.
+   */
+  onSubscribed?: () => void;
 }
 
 export function useRoomChannel({
@@ -45,13 +53,16 @@ export function useRoomChannel({
   onEvent,
   onPresenceChange,
   onDragUpdate,
+  onSubscribed,
 }: UseRoomChannelOptions) {
   const roomChannelRef = useRef<RealtimeChannel | null>(null);
   const dragChannelRef = useRef<RealtimeChannel | null>(null);
+  const isSubscribedRef = useRef(false);
 
   useEffect(() => {
     if (!roomId) return;
     const client = getSupabaseClient();
+    isSubscribedRef.current = false;
 
     const roomChannel = client
       .channel(`room:${roomId}`)
@@ -62,8 +73,10 @@ export function useRoomChannel({
         onPresenceChange?.(roomChannel.presenceState());
       })
       .subscribe((status) => {
-        if (status === "SUBSCRIBED" && presenceKey) {
-          roomChannel.track({ key: presenceKey, ...presenceMeta });
+        if (status === "SUBSCRIBED") {
+          isSubscribedRef.current = true;
+          if (presenceKey) roomChannel.track({ key: presenceKey, ...presenceMeta });
+          onSubscribed?.();
         }
       });
 
@@ -98,8 +111,15 @@ export function useRoomChannel({
   /**
    * Minden sikeres Edge Function hívás UTÁN ezt kell hívni (BACKEND-NOTES 5.) — a function
    * maga nem broadcastol, a kliens felelőssége jelezni a többieknek, hogy refetch-eljenek.
+   *
+   * Ha a hívás egy join_room/create_room UTÁN azonnal történik, a csatorna feliratkozása még
+   * folyamatban lehet (a `roomId` state-effect aszinkron) — ilyenkor rövid, néhány próbálkozásos
+   * polling-gal megvárjuk a SUBSCRIBED állapotot, hogy az esemény ne vesszen el csendben.
    */
-  function broadcastEvent(event: RoomChannelEvent, payload: unknown = {}) {
+  async function broadcastEvent(event: RoomChannelEvent, payload: unknown = {}) {
+    for (let attempt = 0; attempt < 20 && !isSubscribedRef.current; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
     roomChannelRef.current?.send({
       type: "broadcast",
       event,
