@@ -39,4 +39,16 @@ Bekerül **F1-be** — accessibility-minimum és sok androidos böngészőben a 
 A **Spotify embed preview** (`p.scdn.co` linkek) lesz az elsődleges audioforrás az iTunes helyett — 100%-os lefedettséget adott mindkét tesztelt playlisten, nincs fuzzy-matching bizonytalanság. Az Architect tervezze be: a linkeket a pakli-generáláskor **Supabase Storage-ba töltjük** (stabilitás — nem tudni, meddig élnek az eredeti linkek — és anti-leak, mert a Storage URL-ből nem derül ki cím/előadó). Az iTunes marad **tartalék forrás**, ha egy adott számhoz nincs Spotify embed-találat. Ez módosítja a PLAN.md 4. szakaszát (zene-pipeline) — az Architect az ARCHITECTURE.md-ben rögzítse a véglegeset, a PLAN.md-t nem kell utólag átírni, a DECISIONS.md az irányadó.
 
 ## D13 — 3. playlist pótlása
-A tulaj a Chrome extension csatlakoztatását választotta a 3. (privát) playlisthez, de a kapcsolat még nem él a session alatt. Az F0 a másik 2 playlist alapján lezárva (Playlist 2 önmagában is játszható paklinak elég); a 3. playlistet utólag pótoljuk, amint a Chrome-kapcsolat létrejön — ez nem blokkolja az Architect/F1 indulását.
+A tulaj a Chrome extension csatlakoztatását választotta a 3. (privát) playlisthez; a kapcsolat létrejött, a koordinátor DOM-scrape-pel kinyerte mind a 117 tracket, a pipeline lefutott rá. Eredmény: 76,9% használható (a D1 küszöb alatt, szorosan) — az iTunes-év fallback hiánya miatt; F1-ben ezt be kell kötni minden playlistre, nem csak Spotify-forrás hiányában. Lásd F0-REPORT.md 2. és 6. szakasz. Lezárva, nem blokkol.
+
+## A1 — 100-track embed-limit (Architect)
+F1-ben elfogadjuk a Spotify embed ~100 tracks/playlist limitjét (ha van); lapozásos megoldás F2. A pakli-generálási riportban (H2) jelezni kell, ha egy playlist gyanúsan pontosan 100 track hosszú (a valós lista hosszabb lehet).
+
+## A2 — Kör-timer megvalósítása (Architect)
+F1: host-kliens vezérelt, de szerver-ellenőrzött timer (`placing_deadline` mezőn a szerver validál, nem bízik a kliens jelzésében). pg_cron-alapú szerver-oldali timer F2, ha a host-vezérelt megoldás megbízhatatlannak bizonyul.
+
+## A3 — Host-reconnect eszközváltás (Architect)
+F1: a host csak ugyanarról az eszközről csatlakozhat vissza (localStorage-alapú azonosítás). Más eszközről történő host-átvétel (pl. lemerült telefon helyett laptop) F2.
+
+## A4 — Nézet vs. RPC a timeline_public-hoz (Architect)
+A Backend F1 implementáció közben döntheti el (definer-nézet vagy definer-RPC), a koordinátor nem köti meg előre — ez implementációs részlet, nem termékdöntés.

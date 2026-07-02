@@ -53,15 +53,25 @@ A MusicBrainz a friss magyar rap/pop szcénát (Horváth Tamás, Misshmusic, Abr
 
 ⚠️ Pontosan 100 track jött vissza — ha a valós playlist hosszabb, az embed levágta.
 
-### Playlist 3 — `5ID9QTUkVIztPYqRuoP7Vw` — **NEM FELDOLGOZHATÓ**
+### Playlist 3 — `5ID9QTUkVIztPYqRuoP7Vw` ("hallgatniarany", 117 track, ~100% nemzetközi angol nyelvű pop)
 
-- Anonim embed fetch: 404 ("Page not found" a `__NEXT_DATA__`-ban).
-- Sima `open.spotify.com/playlist/{id}` anonim: HTTP 404.
-- Chrome MCP fallback: a session során végig **nem volt csatlakoztatott böngésző** (`list_connected_browsers` → üres lista, többszöri próbálkozásra is).
+Ez a playlist **privát** (tulajdonos: kokuszgolyo + 2 további, közös/collaborative lista) — az anonim embed-fetch 404-et adott, a pipeline 1. lépése nem érte el. A koordinátor a Claude-in-Chrome extensionön keresztül (a tulaj bejelentkezett Spotify-munkamenetéből) DOM-scrape-pel kinyerte a teljes track-listát (cím+előadó+album, Spotify track URI és Spotify preview URL **nélkül** — ez utóbbi csak az embed API-ból jönne, ami privát playlistekre nem elérhető), majd a pipeline 2–3. lépését lefuttattuk erre a listára.
 
-Következtetés: a playlist **privát/nem nyilvános**, anonim kliens nem látja.
+Zenei profilja élesen eltér az első két playlisttől: **döntően friss angol nyelvű mainstream pop** (Sabrina Carpenter 15 dallal, Taylor Swift, Billie Eilish, Queen, The Beatles, klasszikus standardek), gyakorlatilag nincs magyar szám benne.
 
-**KÉRDÉS A TULAJHOZ:** az 5ID9QTUkVIztPYqRuoP7Vw playlist privátnak tűnik. Két opció: (a) tedd nyilvánossá a Spotify appban (Profilhoz adás nem kell, elég a "privát" kapcsoló kikapcsolása), és szólj — a pipeline cache-ből 2 percen belül lefuttatja; VAGY (b) csatlakoztasd a Claude-in-Chrome extensiont, és bejelentkezett sessionből szedjük ki. **Ez a v1 termékre is kihat:** ha a felhasználók privát playlistet akarnak használni, az anonim embed-út nekik sem fog működni — ezt a H1 képernyőn jelezni kell ("csak nyilvános playlist").
+| Metrika | Érték |
+|---|---|
+| Track-szám | 117 |
+| MusicBrainz évszám-találat | **92/117 (78,6%)** — a legjobb arány mindhárom playlist közül |
+| Év forrás nélkül (MB nem talált, iTunes-fallback ebben a futásban nem volt bekötve) | 25/117 (21,4%) |
+| iTunes preview-találat | **115/117 (98,3%)** |
+| Spotify embed preview | **nem elérhető** (privát playlist — az embed API csak nyilvános playlistekre ad preview-t, a D12 elsődleges audio-út erre a playlistre technikailag nem alkalmazható) |
+| Játszható (év ÉS preview együtt) | **90/117 (76,9%)** |
+| Alacsony konfidenciájú preview-match (score < 0,8, kézi review ajánlott) | 7 db (pl. "Busy Woman" → Vitamin String Quartet-verzióval párosult) |
+
+**Következtetés:** ez a playlist a D1 küszöb szerint (≥80% használható) **szorosan a határ alatt** marad (76,9% < 80%), kizárólag azért, mert nincs Spotify-embed-forrása (privát) és a jelenlegi pipeline-futásban nem volt bekötve az iTunes-év fallback a 25 MB-nélküli trackre. Ha az iTunes-év fallbacket is bekötjük (ahogy az 1–2. playlistnél), a lefedettség várhatóan 95%+ fölé kerül — ezt a Backend F1-ben, az Edge Function-ös pipeline-nál validálni kell.
+
+**Termék-következmény (H1 képernyőre):** privát playlist esetén a Spotify-embed audio-forrás nem érhető el, ezért ilyenkor a rendszernek automatikusan iTunes-only útra kell váltania, és ezt a host felé jeleznie kell ("ez a playlist privát, a zenefelismerés kicsit gyengébb lehet").
 
 ## 3. Magyar számok preview-lefedettsége (KIEMELT)
 
@@ -128,15 +138,20 @@ Az embed `__NEXT_DATA__` minden trackhez ad `audioPreview.url`-t: `https://p.scd
 |---|---|---|---|---|
 | 1 — "🎤" (24 magyar) | 21/24 = 87,5% | ✅ | ❌ (21) | **Önmagában NEM** — de csak a mérete miatt; más paklival kombinálva vagy bővítve OK |
 | 2 — "🚗🎤" (100 vegyes) | 100/100 = 100% (évszám-flag: ~21 kártya bizonytalan) | ✅ | ✅ (100) | **IGEN** |
-| 3 — privát | n/a | — | — | Nem mérhető (lásd KÉRDÉS A TULAJHOZ) |
+| 3 — "hallgatniarany" (117, privát, nemzetközi) | 90/117 = 76,9%** | ❌ (szorosan) | ✅ (90 vagy 117) | **Jelenlegi pipeline-nal NEM**, iTunes-év fallbackkel várhatóan igen — F1-ben validálandó |
 
-*\*Ajánlott pipeline = Spotify embed preview (Storage-ba mentve) + MB-év iTunes-keresztellenőrzéssel, bizonytalan-év flaggel.*
+*\*Ajánlott pipeline = Spotify embed preview (Storage-ba mentve, ahol elérhető) + MB-év iTunes-keresztellenőrzéssel, bizonytalan-év flaggel.*
+*\*\*A 3. playlistnél az iTunes-év fallback ebben a futásban nem volt bekötve (csak MB-év); ezzel együtt valószínűleg 95%+ lenne — lásd 2. szakasz.*
 
 - **Deezer-fallback: NEM szükséges.** Magyar iTunes preview 86,7% (>70%), Spotify embed previewval 100%. Deezer maradhat backlog-tétel arra az esetre, ha a Spotify lezárja az embed preview-t ÉS az iTunes-lefedettség kevésnek bizonyul.
-- A szigorú, terv szerinti lánc (MB-év + iTunes-preview) önmagában **megbukna** (20,8% / 64%) — a fallback-lánc (iTunes-év + Spotify-preview) emeli játszhatóra. Ez architekturális következménnyel jár: **az évszám-feloldást többforrásúra kell tervezni már F1-ben.**
+- A szigorú, terv szerinti lánc (MB-év + iTunes-preview) önmagában **megbukna** (20,8% / 64%) — a fallback-lánc (iTunes-év + Spotify-preview) emeli játszhatóra. Ez architekturális következménnyel jár: **az évszám-feloldást többforrásúra kell tervezni már F1-ben.** (Ezt az Architect az ARCHITECTURE.md-ben már beépítette: kettős forrás-keresztellenőrzés + "bizonytalan év" flag.)
+- **Privát playlistek** (mint a 3.) Spotify-embed-preview nélkül maradnak — az iTunes-only út is elfogadható (98,3% preview-lefedettség itt), de az évszám-fallback bekötése nélkül a D1 küszöböt szorosan elvéti. F1 implementációs teendő: az iTunes-év fallback minden playlist-típusra menjen, ne csak akkor, ha a Spotify-forrás nem elérhető.
+- **Összesített végső verdikt:** a projekt életképes, a zene-pipeline kockázata **elfogadható** — mindhárom teszt-playlist vagy önmagában, vagy a hiányzó iTunes-év-fallback bekötése után játszható méretű, jó minőségű paklit ad. A fő maradék kockázat nem a lefedettség, hanem az évszám-pontosság (4. szakasz) és a privát-playlist audio-forrás gyengébb minősége — mindkettőre van tervezett mitigáció (kereszt-ellenőrzés + Vitagomb, illetve iTunes-only jelzés a hostnak).
 
-## 7. Nyitott kérdések a tulajhoz
+## 7. Nyitott kérdések a tulajhoz — LEZÁRVA
 
-1. **KÉRDÉS A TULAJHOZ:** a 3. teszt-playlist (`5ID9QTUkVIztPYqRuoP7Vw`) privát — tedd nyilvánossá és szólj, vagy csatlakoztasd a Chrome extensiont (a session alatt végig offline volt), és lefuttatom rá is a pipeline-t.
-2. **KÉRDÉS A TULAJHOZ:** a 2. playlist pontosan 100 tracket adott az embed-en — ennyi a valós hossza, vagy hosszabb? Ha hosszabb, a 100-as embed-limit igazolt, és F1-ben lapozó megoldás kell (pl. bejelentkezett fetch vagy Spotify API kulcs igénylése).
-3. Elfogadod-e az 5. szakasz szerinti irányt (Spotify embed preview → Supabase Storage áttöltés mint elsődleges audio-út)? Ez a PLAN 4. szakaszának módosítását jelenti (iTunes fő-forrásból fallback-forrássá fokozódik le).
+A 3 nyitott kérdésre a tulaj döntött, az architektúra ez alapján készült el (`docs/DECISIONS.md` D12–D13):
+
+1. ~~A 3. playlist privát~~ → **megoldva**: Chrome extension csatlakoztatva, a koordinátor DOM-scrape-pel kinyerte a track-listát, a fenti eredmények ebből származnak.
+2. **Még nyitott, de nem blokkoló:** a 2. playlist pontosan 100 tracket adott — ha a valós lista hosszabb, ez az embed 100-as lapozási limitjét igazolja. Az Architect ezt A1 nyitott kérdésként vette át (F1: elfogadjuk a 100-as limitet, lapozás F2-re).
+3. ~~Spotify embed elsődleges audioforrás~~ → **jóváhagyva (D12)**, az ARCHITECTURE.md már erre épül (Storage-áttöltés generáláskor, iTunes fallback).
