@@ -56,7 +56,7 @@ Mind a 10 tervezett function deployolva, `ACTIVE` státuszban, `verify_jwt: true
 
 | Function | Hívó | Megjegyzés |
 |---|---|---|
-| `generate_deck` | host | `{ playlistUrl }` → létrehozza a `decks` sort `status='generating'`-gal azonnal, majd szinkron fut le a function invocation-ön belül (ld. 4. pont), a végén `status='ready'`/`'failed'`. **Pollingozd a `decks.report` mezőt** (2 mp-enként javasolt) a progresshez: `{ processed, total, step }`, ahol `step` egyike: `fetching_playlist`, `resolving_years`, `uploading_audio`, `done`, `failed`. |
+| `generate_deck` | host | `{ playlistUrl }` → **AZONNAL** (~1-2s) visszaadja `{ deckId, status: 'generating' }`-t, a tényleges munka háttérben, self-chaining batch-ekben fut (ld. RÉSZLETESEN a 4. pontban — 2026-07-02-i blokkoló-hiba javítás). **Pollingozd a `decks` táblát** (`status`, `total_tracks`, `usable_count`, `coverage_pct`, `report`) 2 mp-enként, amíg `status` `ready`/`failed` nem lesz. A `report` mező: `{ processed, total, step }`, `step` egyike: `fetching_playlist`, `resolving_years`, `uploading_audio`, `done`, `failed`. |
 | `create_room` | host | `{ deckId, settings? }` → `{ roomId, code, status }`. `deck.usable_count >= 60` kötelező (D4). |
 | `join_room` | player | `{ code, name, color }` → `{ roomId, playerId, seatOrder, status }`. Reconnect-barát: ha az `auth_uid` már tag, a meglévő sort adja vissza. |
 | `start_game` | host | `{ roomId }` → `{ status, roundId, activePlayerId }`. Min. 2 játékos kell. |
@@ -96,13 +96,54 @@ Hibaválasz formátuma mindenhol egységes: `{ error: string, messageHu?: string
 
 ---
 
-## 4. `generate_deck` — fontos működési megjegyzés a Frontendnek
+## 4. `generate_deck` — MÓDOSÍTVA (2026-07-02, blokkoló hiba javítva) — fontos működési megjegyzés a Frontendnek
 
-Az ARCHITECTURE.md 3.1 szakasza `EdgeRuntime.waitUntil`-lal háttérfeladatot javasolt, hogy a HTTP-válasz ne blokkoljon. **A megvalósítás ehhez képest egyszerűbb: a function szinkron fut le a kérés-válasz cikluson belül**, és a végén adja vissza a teljes eredményt (`deckId, totalTracks, usableCount, coveragePct, meetsMinimum, excluded, uncertainYearCount`). Eközben a `decks.report` mezőt inkrementálisan frissíti minden 5. tracknél, úgyhogy **a H2 progress-képernyő pollingozhatja a `decks` táblát a `deckId`-n** (RLS: a `decks_select` policy engedi, ha `owner_id = auth.uid()` vagy `is_public`), amíg a function válasza meg nem érkezik.
+> **Frissítés:** az eredeti implementáció (lásd fentebb, korábban ez a szakasz "szinkron, kb. 2-4 percig nyitva marad a HTTP kérés" leírást tartalmazott) **éles tesztben megbukott**: a Free-tier Edge Function 150 mp-es wall-clock limitje miatt egyetlen 60+ track-es playlist sem tudott végigfutni egyetlen HTTP invocation-ön belül — a hívás mindig `HTTP 546` (timeout) hibával szakadt meg kb. 150,1 mp-nél, a `decks` sor véglegesen `status='generating'`-ben ragadt. Ez közvetlenül blokkolta az F1 MVP-t (D4 minimum = 60 kártya). **Ez most javítva van** — a Frontend polling-logikáját az alábbi ÚJ válaszformához kell igazítani.
 
-Gyakorlati következmény: egy 100 track-es playlist generálása kb. 2-4 percig tarthat (MusicBrainz 1 req/s + iTunes throttle + audio letöltés/feltöltés), és a HTTP kérés ennyi ideig nyitva marad a host kliens oldalán. Ha ez problémát okoz (timeout a Vercel/böngésző oldalán), jelezd — a Function átalakítható `waitUntil`-os, ténylegesen aszinkron mintára, a `decks.report` polling interfész változatlan maradna.
+### Az új viselkedés
+
+**A HTTP válasz MOST MÁR AZONNAL (~1-2 másodpercen belül) visszatér**, mielőtt bármilyen playlist-feldolgozás elindulna:
+
+```json
+{ "deckId": "uuid", "status": "generating", "message": "A pakli generálása elindult. Kövesd a decks.report mezőt a folyamat állapotáért." }
+```
+
+**Ez NEM a régi, teljes eredményt tartalmazó válasz** (`totalTracks`, `usableCount`, `coveragePct`, stb. már NEM ebben a válaszban jönnek) — ha a Frontend a válaszból várta ezeket a mezőket, azt **a `decks` tábla pollingozására kell átállítani**:
+
+```ts
+const { data, error } = await supabase.functions.invoke('generate_deck', {
+  body: { playlistUrl },
+});
+const { deckId } = data; // csak ennyi jön azonnal
+
+// Poll decks tábla, pl. 2s-enként, amíg status ready/failed nem lesz:
+const { data: deck } = await supabase
+  .from('decks')
+  .select('status, total_tracks, usable_count, coverage_pct, report')
+  .eq('id', deckId)
+  .single();
+
+// deck.report: { processed, total, step } — step: 'fetching_playlist' | 'resolving_years' | 'uploading_audio' | 'done' | 'failed'
+// deck.status: 'generating' | 'ready' | 'failed'
+// deck.status === 'ready' esetén: total_tracks, usable_count, coverage_pct, és a report.{excluded, uncertainYearCount, meetsMinimum} tartalmazza a végeredményt (a korábbi HTTP-válasz mezői most ide kerültek).
+```
+
+### A tényleges implementáció (miért ez, technikai részletek)
+
+A munka a HTTP válasz visszaadása UTÁN, `EdgeRuntime.waitUntil()`-ban fut, **de** a Supabase dokumentáció szerint a `waitUntil` NEM terjeszti ki a wall-clock limitet (150s Free tier), csak megakadályozza a worker korai leállítását ugyanazon az ablakon belül. Ezért a feldolgozás **time-boxed batch-ekben, self-chaining módon** fut:
+
+1. Egy invocation legfeljebb ~90 másodpercig dolgozik (`BATCH_TIME_BUDGET_MS`), aztán checkpointol (`decks.report`-ba menti az addigi állapotot: feldolgozott track-lista, MB/iTunes cache).
+2. Ha van még hátralévő track, a function **önmagát hívja meg** egy új HTTP kéréssel (service-role hitelesítéssel, `x-internal-continue: 1` headerrel — ez a hívás a kliens felé sosem látszik és nem is hívható kívülről, mert a service-role kulcs sosem kerül klienshez).
+3. Ez a lánc addig folytatódik, amíg minden track fel nem dolgozódott (évszám-feloldás + preview-keresés), majd hasonlóan time-boxed módon lezajlik az audio-feltöltési fázis is.
+4. **Sebesség-javítás:** a MusicBrainz és iTunes lekérdezés track-enként MOST PÁRHUZAMOSAN fut (`Promise.all`, korábban szekvenciális volt) — ez kb. felezte a track-enkénti időt (2,6s → ~1,5-2s/track).
+
+**Mért teljesítmény (valós teszt, 2026-07-02):** a 100 track-es "🚗🎤" playlist (`3cmVUEjMK7RkTe6ONRTQeJ`) generálása **170 másodperc (2 perc 50 mp) alatt** ért `status='ready'`-be, **100/100 track használhatóként** (100% lefedettség, 19 track kapott `year_uncertain=true` flaget a kereszt-ellenőrzésből). A HTTP hívás maga **~1,7 másodperc alatt** tért vissza. A folyamat 2 self-chain láncszemet igényelt az évfeloldási fázisban + 1-et az audio-feltöltésnél (a `decks.report` mezőben ez láthatatlan a kliens felé, csak a `processed`/`total`/`step` számít).
+
+**Frontend polling-javaslat:** 2 másodperces intervallum ésszerű; a teljes generálás 60-100 track-es playlisteknél jellemzően 1-4 perc között várható (playlist-mérettől és MusicBrainz/iTunes válaszidőtől függően).
 
 **iTunes-év fallback minden playlistre fut** (F0-REPORT 2./6. tanulsága) — nem csak akkor, ha nincs Spotify embed forrás. Kettős-forrás kereszt-ellenőrzés: ha `|MB-év − iTunes-év| >= 3`, a korábbi évet vesszük és `year_uncertain=true`-t kap a kártya.
+
+**Hibakezelés változatlan:** `status='failed'` esetén a `decks.report.reason`/`errorCode` mezőben van a hiba oka (pl. `playlist_not_public`, `playlist_fetch_failed`, `deck_cards_insert_failed`).
 
 ---
 

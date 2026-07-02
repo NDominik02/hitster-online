@@ -7,23 +7,56 @@
 //     not only when there's no Spotify embed source)
 //   - global mb_year_cache table instead of a local JSON cache file
 //
-// The generation is synchronous within the function invocation (EdgeRuntime.waitUntil
-// is not used for the MVP — see notes below); the deck row is created with
-// status='generating' immediately and flipped to 'ready'/'failed' at the end, with
-// progress written incrementally into decks.report so the host can poll it.
+// TIMEOUT FIX (2026-07-02, post-launch bug): the original implementation ran
+// fully synchronously inside the HTTP request/response cycle. Free-tier Edge
+// Functions have a hard 150s WALL CLOCK limit that EdgeRuntime.waitUntil()
+// does NOT extend — it only keeps the worker alive after the response is
+// sent, within the SAME wall-clock window the request started in. At ~2.6s/
+// track (1.1s MusicBrainz throttle + 1.5s iTunes throttle, sequential), even
+// 60 tracks (D4 minimum) already exceeds 150s before the audio-upload phase
+// even starts. Reproduced 3/3 times on a 100-track playlist: HTTP 546 at
+// exactly ~150.1s, decks stuck at status='generating' forever (no real
+// background continuation existed).
+//
+// Fix, two parts:
+//   1. Per-track MusicBrainz + iTunes calls now run IN PARALLEL (Promise.all)
+//      instead of sequentially — this is safe because the two APIs are
+//      independent and each has its own separate rate limiter/throttle
+//      state, so the ~2.6s/track drops to ~max(1.1s, 1.5s) = ~1.5s/track.
+//   2. The real fix: the function now returns the HTTP response IMMEDIATELY
+//      after creating the `decks` row and validating the input (a few
+//      hundred ms), then does the actual work in a self-chaining background
+//      task via EdgeRuntime.waitUntil(). Each invocation only processes one
+//      time-boxed BATCH of tracks (bounded well under the 150s wall clock,
+//      leaving headroom for audio upload of that batch), and if there's
+//      more work left, it re-invokes itself over HTTP (fetch to its own
+//      function URL, service-role authenticated) to continue with the next
+//      batch — so arbitrarily large playlists complete via a chain of
+//      short-lived invocations instead of one long-lived one.
 
-import { adminClient, getCallerUid } from '../_shared/supabase.ts';
-import { corsHeaders, jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
+import { adminClient } from '../_shared/supabase.ts';
+import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
 import { normalize, primaryArtist, similarity, parsePlaylistId, sleep } from '../_shared/util.ts';
 
 const SPOTIFY_EMBED_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const MB_USER_AGENT = 'HitsterOnline/0.1 (nemethdominik02@gmail.com)';
 const MB_MIN_INTERVAL_MS = 1100; // stay under MusicBrainz's 1 req/s limit
-const ITUNES_INTERVAL_MS = 1500; // Deno function has a wall-clock budget; kept as tight as the F0 prototype allows
+const ITUNES_INTERVAL_MS = 1500; // kept as tight as the F0 prototype allows
 const ITUNES_MIN_MATCH_SCORE = 0.55;
 const MIN_USABLE_CARDS = 60; // D4
 const YEAR_DISAGREEMENT_THRESHOLD = 3; // F0-REPORT 4.: |MB - iTunes| >= 3 -> uncertain flag
+
+// Time-boxing for the self-chaining background worker. Free tier wall clock
+// is 150s; we budget well under that per invocation so there's headroom for
+// the audio-download+upload step (which is itself per-track I/O) and so a
+// slow MusicBrainz response near the boundary doesn't blow the 150s wall.
+const BATCH_TIME_BUDGET_MS = 90_000; // stop picking up new tracks after this much wall time in one invocation
+const SELF_INVOKE_HEADROOM_MS = 5_000; // leave this much slack before actually hitting BATCH_TIME_BUDGET_MS
+
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const FUNCTION_SELF_URL = `${SUPABASE_URL}/functions/v1/generate_deck`;
 
 // ---------------------------------------------------------------------------
 // Step 1: playlist -> track list via anonymous fetch of the Spotify embed page
@@ -124,6 +157,9 @@ function buildMbQuery(title: string, artist: string): string {
   return `recording:"${t}" AND artist:"${a}"`;
 }
 
+// MusicBrainz and iTunes each get their OWN independent throttle clock, so
+// a track's two lookups can run concurrently (Promise.all in processTrack)
+// instead of stacking sequentially — this is the main per-track speedup.
 let mbLastRequestAt = 0;
 async function mbThrottledFetch(url: string): Promise<Response> {
   const now = Date.now();
@@ -178,8 +214,7 @@ function pickEarliestYear(mbData: any, title: string, artist: string): { year: n
 async function resolveMbYear(
   title: string,
   artist: string,
-  cacheGet: (key: string) => YearResolution | undefined,
-  cacheSet: (key: string, val: YearResolution) => void
+  cacheGet: (key: string) => YearResolution | undefined
 ): Promise<YearResolution> {
   const cacheKey = normalize(title) + '|' + normalize(artist);
   const cached = cacheGet(cacheKey);
@@ -187,24 +222,17 @@ async function resolveMbYear(
 
   const query = buildMbQuery(title, artist);
   const url = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(query)}&fmt=json&limit=10`;
-  let resolution: YearResolution;
   try {
     const res = await mbThrottledFetch(url);
-    if (!res.ok) {
-      resolution = { year: null, yearSource: 'none' };
-    } else {
-      const data = await res.json();
-      const picked = pickEarliestYear(data, title, artist);
-      resolution = picked.year
-        ? { year: picked.year, yearSource: 'musicbrainz', mbMatchScore: picked.matchScore }
-        : { year: null, yearSource: 'none', mbMatchScore: picked.matchScore };
-    }
+    if (!res.ok) return { year: null, yearSource: 'none' };
+    const data = await res.json();
+    const picked = pickEarliestYear(data, title, artist);
+    return picked.year
+      ? { year: picked.year, yearSource: 'musicbrainz', mbMatchScore: picked.matchScore }
+      : { year: null, yearSource: 'none', mbMatchScore: picked.matchScore };
   } catch {
-    resolution = { year: null, yearSource: 'none' };
+    return { year: null, yearSource: 'none' };
   }
-
-  cacheSet(cacheKey, resolution);
-  return resolution;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,220 +287,275 @@ async function searchItunes(title: string, artist: string): Promise<ItunesMatch>
 }
 
 // ---------------------------------------------------------------------------
-// Main handler
+// Per-track processing: MB year + iTunes preview/year run IN PARALLEL.
 // ---------------------------------------------------------------------------
 
-Deno.serve(async (req: Request) => {
-  const preflight = handleOptions(req);
-  if (preflight) return preflight;
+interface ProcessedTrack {
+  raw: RawTrack;
+  finalYear: number | null;
+  finalYearSource: string;
+  yearUncertain: boolean;
+  itunesPreviewUrl: string | null;
+  excludeReason: 'no_preview' | 'no_year' | null;
+  newCacheEntry?: { norm_key: string; year: number | null; year_source: string; match_score: number | null };
+}
 
-  if (req.method !== 'POST') {
-    return errorResponse('method_not_allowed', 'Csak POST kérés engedélyezett.', 405);
+async function processTrack(track: RawTrack, mbCacheMap: Map<string, YearResolution>): Promise<ProcessedTrack> {
+  const cacheKey = normalize(track.title) + '|' + normalize(track.artist);
+
+  // KEY SPEEDUP: these two network calls are independent (different APIs,
+  // different throttles) and used to run sequentially — now parallel.
+  const [mbRes, itunesRes] = await Promise.all([
+    resolveMbYear(track.title, track.artist, (k) => mbCacheMap.get(k)),
+    searchItunes(track.title, track.artist),
+  ]);
+
+  let newCacheEntry: ProcessedTrack['newCacheEntry'];
+  if (!mbCacheMap.has(cacheKey)) {
+    mbCacheMap.set(cacheKey, mbRes);
+    newCacheEntry = {
+      norm_key: cacheKey,
+      year: mbRes.year,
+      year_source: mbRes.yearSource,
+      match_score: mbRes.mbMatchScore ?? null,
+    };
   }
 
-  const callerUid = await getCallerUid(req);
-  if (!callerUid) {
-    return errorResponse('unauthorized', 'Be kell jelentkezni a pakli generálásához.', 401);
-  }
+  let finalYear: number | null = mbRes.year;
+  let finalYearSource = mbRes.yearSource;
+  let yearUncertain = false;
 
-  let body: { playlistUrl?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return errorResponse('invalid_body', 'Érvénytelen kérés.', 400);
-  }
-
-  if (!body.playlistUrl) {
-    return errorResponse('invalid_url', 'Adj meg egy Spotify playlist URL-t.', 400);
-  }
-
-  let playlistId: string;
-  try {
-    playlistId = parsePlaylistId(body.playlistUrl);
-  } catch {
-    return errorResponse('invalid_url', 'Nem sikerült felismerni a Spotify playlist URL-t.', 400);
-  }
-
-  const supabase = adminClient();
-
-  // Create the deck row immediately with status='generating' so the host can
-  // poll decks.report for progress (3.1: "the host client polls this").
-  const { data: deckRow, error: insertError } = await supabase
-    .from('decks')
-    .insert({
-      name: playlistId,
-      source_playlist_id: playlistId,
-      source_playlist_url: body.playlistUrl,
-      owner_id: callerUid,
-      status: 'generating',
-      report: { processed: 0, total: 0, step: 'fetching_playlist' },
-    })
-    .select()
-    .single();
-
-  if (insertError || !deckRow) {
-    return errorResponse('db_error', 'Nem sikerült a pakli létrehozása.', 500);
-  }
-
-  const deckId = deckRow.id as string;
-
-  // Step 1: fetch playlist
-  const step1 = await fetchPlaylistViaEmbed(playlistId);
-  if (!step1.ok || !step1.tracks) {
-    const isPrivate = (step1.reason || '').includes('private');
-    await supabase
-      .from('decks')
-      .update({
-        status: 'failed',
-        report: { step: 'failed', reason: step1.reason },
-      })
-      .eq('id', deckId);
-    return errorResponse(
-      isPrivate ? 'playlist_not_public' : 'playlist_fetch_failed',
-      isPrivate
-        ? 'Csak nyilvános playlist használható. Tedd a playlistet nyilvánossá, majd próbáld újra.'
-        : 'Nem sikerült elérni a playlistet. Ellenőrizd a linket.',
-      422
-    );
-  }
-
-  const tracks = step1.tracks;
-  const total = tracks.length;
-
-  await supabase
-    .from('decks')
-    .update({
-      name: step1.playlistName ?? playlistId,
-      total_tracks: total,
-      report: { processed: 0, total, step: 'resolving_years' },
-    })
-    .eq('id', deckId);
-
-  // Load the global MB year cache for all the normalized keys we need.
-  const cacheKeys = tracks.map((t) => normalize(t.title) + '|' + normalize(t.artist));
-  const { data: cacheRows } = await supabase
-    .from('mb_year_cache')
-    .select('norm_key, year, year_source, match_score')
-    .in('norm_key', cacheKeys);
-
-  const mbCacheMap = new Map<string, YearResolution>();
-  for (const row of cacheRows ?? []) {
-    mbCacheMap.set(row.norm_key, {
-      year: row.year,
-      yearSource: (row.year_source as 'musicbrainz' | 'none') ?? 'none',
-      mbMatchScore: row.match_score ?? undefined,
-    });
-  }
-  const newCacheEntries: Array<{ norm_key: string; year: number | null; year_source: string; match_score: number | null }> = [];
-
-  interface ProcessedTrack {
-    raw: RawTrack;
-    mbYear: number | null;
-    mbSource: 'musicbrainz' | 'none';
-    itunesPreviewUrl: string | null;
-    itunesYear: number | null;
-    finalYear: number | null;
-    finalYearSource: string;
-    yearUncertain: boolean;
-    excludeReason: 'no_preview' | 'no_year' | null;
-  }
-
-  const processed: ProcessedTrack[] = [];
-
-  // Step 2 + 3 combined per track: MB year, then iTunes preview + year
-  // cross-check runs on EVERY track (F0-REPORT fix — not just as a fallback).
-  for (let i = 0; i < tracks.length; i++) {
-    const track = tracks[i];
-    const cacheKey = normalize(track.title) + '|' + normalize(track.artist);
-
-    const mbRes = await resolveMbYear(
-      track.title,
-      track.artist,
-      (k) => mbCacheMap.get(k),
-      (k, v) => {
-        mbCacheMap.set(k, v);
-        newCacheEntries.push({
-          norm_key: k,
-          year: v.year,
-          year_source: v.yearSource,
-          match_score: v.mbMatchScore ?? null,
-        });
-      }
-    );
-
-    const itunesRes = await searchItunes(track.title, track.artist);
-
-    // Cross-check (F0-REPORT 4.): if both sources have a year and they
-    // disagree by >= 3, prefer the earlier one and flag uncertain.
-    let finalYear: number | null = mbRes.year;
-    let finalYearSource = mbRes.yearSource;
-    let yearUncertain = false;
-
-    if (mbRes.year && itunesRes.releaseYear) {
-      if (Math.abs(mbRes.year - itunesRes.releaseYear) >= YEAR_DISAGREEMENT_THRESHOLD) {
-        finalYear = Math.min(mbRes.year, itunesRes.releaseYear);
-        finalYearSource = 'crosschecked';
-        yearUncertain = true;
-      }
-    } else if (!mbRes.year && itunesRes.releaseYear) {
-      // iTunes-year fallback — this is the fix for the 76.9% -> ~95%+ gap
-      // documented in F0-REPORT.md 2./6.: bind the iTunes year fallback to
-      // every playlist, not only when there's no Spotify embed source.
-      finalYear = itunesRes.releaseYear;
-      finalYearSource = 'itunes';
+  if (mbRes.year && itunesRes.releaseYear) {
+    if (Math.abs(mbRes.year - itunesRes.releaseYear) >= YEAR_DISAGREEMENT_THRESHOLD) {
+      finalYear = Math.min(mbRes.year, itunesRes.releaseYear);
+      finalYearSource = 'crosschecked';
+      yearUncertain = true;
     }
+  } else if (!mbRes.year && itunesRes.releaseYear) {
+    // iTunes-year fallback — the F0-REPORT 2./6. fix: bind this to every
+    // playlist, not only when there's no Spotify embed source.
+    finalYear = itunesRes.releaseYear;
+    finalYearSource = 'itunes';
+  }
 
-    const preview = track.spotifyPreviewUrl ?? itunesRes.previewUrl; // D12: Spotify embed primary, iTunes fallback
-    let excludeReason: 'no_preview' | 'no_year' | null = null;
-    if (!finalYear) excludeReason = 'no_year';
-    else if (!preview) excludeReason = 'no_preview';
+  const preview = track.spotifyPreviewUrl ?? itunesRes.previewUrl; // D12: Spotify embed primary, iTunes fallback
+  let excludeReason: 'no_preview' | 'no_year' | null = null;
+  if (!finalYear) excludeReason = 'no_year';
+  else if (!preview) excludeReason = 'no_preview';
 
-    processed.push({
-      raw: track,
-      mbYear: mbRes.year,
-      mbSource: mbRes.yearSource,
-      itunesPreviewUrl: itunesRes.previewUrl,
-      itunesYear: itunesRes.releaseYear,
-      finalYear,
-      finalYearSource,
-      yearUncertain,
-      excludeReason,
-    });
+  return {
+    raw: track,
+    finalYear,
+    finalYearSource,
+    yearUncertain,
+    itunesPreviewUrl: itunesRes.previewUrl,
+    excludeReason,
+    newCacheEntry,
+  };
+}
 
-    // Persist progress + cache incrementally so a mid-run failure doesn't lose work.
-    if (i % 5 === 0 || i === tracks.length - 1) {
+// ---------------------------------------------------------------------------
+// Background worker: processes ONE time-boxed batch, persists progress, and
+// self-chains (re-invokes itself over HTTP) if there's more to do. This is
+// what actually runs inside EdgeRuntime.waitUntil() — kept well under the
+// 150s wall clock per invocation, unlike the old fully-synchronous version.
+// ---------------------------------------------------------------------------
+
+async function runGenerationWork(deckId: string, playlistId: string, resumeCursor: number): Promise<void> {
+  const supabase = adminClient();
+  const startedAt = Date.now();
+
+  try {
+    const { data: deckRow } = await supabase.from('decks').select('report').eq('id', deckId).single();
+    let tracks: RawTrack[];
+    let playlistName: string;
+    let possiblyTruncatedAt100 = false;
+
+    // Playlist fetch only needs to happen once — cache it in decks.report so
+    // resumed invocations (self-chained batches) don't re-fetch it.
+    const existingReport = (deckRow?.report ?? {}) as any;
+    if (existingReport.tracksCache) {
+      tracks = existingReport.tracksCache;
+      playlistName = existingReport.playlistName ?? playlistId;
+      possiblyTruncatedAt100 = existingReport.possiblyTruncatedAt100 ?? false;
+    } else {
+      const step1 = await fetchPlaylistViaEmbed(playlistId);
+      if (!step1.ok || !step1.tracks) {
+        const isPrivate = (step1.reason || '').includes('private');
+        await supabase
+          .from('decks')
+          .update({
+            status: 'failed',
+            report: { step: 'failed', reason: step1.reason, errorCode: isPrivate ? 'playlist_not_public' : 'playlist_fetch_failed' },
+          })
+          .eq('id', deckId);
+        return;
+      }
+      tracks = step1.tracks;
+      playlistName = step1.playlistName ?? playlistId;
+      possiblyTruncatedAt100 = step1.possiblyTruncatedAt100 ?? false;
+
       await supabase
         .from('decks')
-        .update({ report: { processed: i + 1, total, step: 'resolving_years' } })
+        .update({
+          name: playlistName,
+          total_tracks: tracks.length,
+          report: {
+            processed: 0,
+            total: tracks.length,
+            step: 'resolving_years',
+            tracksCache: tracks,
+            playlistName,
+            possiblyTruncatedAt100,
+            processedTracks: [], // accumulates ProcessedTrack-lite results across batches
+          },
+        })
         .eq('id', deckId);
-      if (newCacheEntries.length > 0) {
-        await supabase.from('mb_year_cache').upsert(newCacheEntries, { onConflict: 'norm_key' });
-        newCacheEntries.length = 0;
+    }
+
+    const total = tracks.length;
+
+    // Reload the accumulated per-track results from previous batches (if any).
+    const { data: freshDeckRow } = await supabase.from('decks').select('report').eq('id', deckId).single();
+    const report = (freshDeckRow?.report ?? {}) as any;
+    const accumulated: ProcessedTrack[] = report.processedTracks ?? [];
+
+    // Load the global MB year cache for the remaining tracks.
+    const remainingTracks = tracks.slice(resumeCursor);
+    const cacheKeys = remainingTracks.map((t) => normalize(t.title) + '|' + normalize(t.artist));
+    const { data: cacheRows } = cacheKeys.length
+      ? await supabase.from('mb_year_cache').select('norm_key, year, year_source, match_score').in('norm_key', cacheKeys)
+      : { data: [] as any[] };
+
+    const mbCacheMap = new Map<string, YearResolution>();
+    for (const row of cacheRows ?? []) {
+      mbCacheMap.set(row.norm_key, {
+        year: row.year,
+        yearSource: (row.year_source as 'musicbrainz' | 'none') ?? 'none',
+        mbMatchScore: row.match_score ?? undefined,
+      });
+    }
+
+    let cursor = resumeCursor;
+    const newCacheEntries: Array<{ norm_key: string; year: number | null; year_source: string; match_score: number | null }> = [];
+
+    // Process tracks one at a time (MB+iTunes parallel within a track), but
+    // stop picking up new tracks once we're close to the time budget so this
+    // invocation returns/re-chains well before the 150s wall clock.
+    while (cursor < total) {
+      if (Date.now() - startedAt > BATCH_TIME_BUDGET_MS) break;
+
+      const track = tracks[cursor];
+      const processed = await processTrack(track, mbCacheMap);
+      accumulated.push(processed);
+      if (processed.newCacheEntry) newCacheEntries.push(processed.newCacheEntry);
+      cursor++;
+
+      if (cursor % 5 === 0 || cursor === total) {
+        await supabase
+          .from('decks')
+          .update({
+            report: {
+              ...report,
+              processed: cursor,
+              total,
+              step: 'resolving_years',
+              tracksCache: tracks,
+              playlistName,
+              possiblyTruncatedAt100,
+              processedTracks: accumulated,
+            },
+          })
+          .eq('id', deckId);
+        if (newCacheEntries.length > 0) {
+          await supabase.from('mb_year_cache').upsert(newCacheEntries, { onConflict: 'norm_key' });
+          newCacheEntries.length = 0;
+        }
       }
     }
+    if (newCacheEntries.length > 0) {
+      await supabase.from('mb_year_cache').upsert(newCacheEntries, { onConflict: 'norm_key' });
+    }
+
+    if (cursor < total) {
+      // Time budget exhausted with tracks still left — persist state and
+      // self-chain: fire off the next batch as a new HTTP invocation so it
+      // gets its own fresh 150s wall-clock window, rather than trying to
+      // keep going inside this one.
+      await supabase
+        .from('decks')
+        .update({
+          report: {
+            processed: cursor,
+            total,
+            step: 'resolving_years',
+            tracksCache: tracks,
+            playlistName,
+            possiblyTruncatedAt100,
+            processedTracks: accumulated,
+          },
+        })
+        .eq('id', deckId);
+
+      await invokeNextBatch(deckId, playlistId, cursor);
+      return;
+    }
+
+    // All tracks resolved (year + preview candidate) — move to audio upload.
+    await supabase
+      .from('decks')
+      .update({ report: { processed: total, total, step: 'uploading_audio', uploadCursor: 0 } })
+      .eq('id', deckId);
+
+    await runAudioUploadPhase(supabase, deckId, accumulated, total, startedAt);
+  } catch (err) {
+    await supabase
+      .from('decks')
+      .update({ status: 'failed', report: { step: 'failed', reason: String(err) } })
+      .eq('id', deckId);
   }
+}
 
-  if (newCacheEntries.length > 0) {
-    await supabase.from('mb_year_cache').upsert(newCacheEntries, { onConflict: 'norm_key' });
-  }
-
-  await supabase
-    .from('decks')
-    .update({ report: { processed: total, total, step: 'uploading_audio' } })
-    .eq('id', deckId);
-
-  // Step 4 (D12): upload the audio preview to Storage for every usable track.
+// Audio upload phase — also time-boxed and self-chaining for large decks,
+// since fetching+uploading ~360KB per track for 100 tracks is itself
+// non-trivial wall-clock time.
+async function runAudioUploadPhase(
+  supabase: ReturnType<typeof adminClient>,
+  deckId: string,
+  processed: ProcessedTrack[],
+  total: number,
+  startedAt: number
+): Promise<void> {
   const usableTracks = processed.filter((t) => !t.excludeReason);
   const excluded = processed
     .filter((t) => t.excludeReason)
     .map((t) => ({ title: t.raw.title, artist: t.raw.artist, reason: t.excludeReason }));
 
-  let uploaded = 0;
-  const deckCardRows: any[] = [];
+  const { data: deckRow } = await supabase.from('decks').select('report').eq('id', deckId).single();
+  const report = (deckRow?.report ?? {}) as any;
+  const uploadCursor: number = report.uploadCursor ?? 0;
 
-  for (const t of usableTracks) {
+  let uploaded = uploadCursor;
+  const deckCardRows: any[] = report.deckCardRows ?? [];
+
+  for (let i = uploadCursor; i < usableTracks.length; i++) {
+    if (Date.now() - startedAt > BATCH_TIME_BUDGET_MS) {
+      await supabase
+        .from('decks')
+        .update({
+          report: { ...report, step: 'uploading_audio', uploadCursor: i, deckCardRows, excluded, total, processed: total },
+        })
+        .eq('id', deckId);
+      await invokeNextBatch(deckId, '', -1, { phase: 'upload', deckId, resumeUploadCursor: i });
+      return;
+    }
+
+    const t = usableTracks[i];
     const sourceUrl = t.raw.spotifyPreviewUrl ?? t.itunesPreviewUrl;
-    if (!sourceUrl) continue; // shouldn't happen given excludeReason check above, but stay safe
+    if (!sourceUrl) {
+      excluded.push({ title: t.raw.title, artist: t.raw.artist, reason: 'no_preview' });
+      continue;
+    }
 
     const cardId = crypto.randomUUID();
     const audioSource = t.raw.spotifyPreviewUrl ? 'spotify_embed' : 'itunes';
@@ -495,51 +578,42 @@ Deno.serve(async (req: Request) => {
         year: t.finalYear,
         year_source: t.finalYearSource,
         year_uncertain: t.yearUncertain,
-        audio_url: path, // Storage PATH, not a public URL — resolved to a signed URL by draw_card (6.4)
+        audio_url: path,
         audio_source: audioSource,
         artwork_url: null,
         spotify_uri: t.raw.uri,
         duration_ms: t.raw.durationMs,
       });
       uploaded++;
-    } catch (e) {
-      // If the audio upload fails for a track, exclude it rather than fail the whole deck.
+    } catch {
       excluded.push({ title: t.raw.title, artist: t.raw.artist, reason: 'no_preview' });
     }
 
     if (uploaded % 5 === 0) {
       await supabase
         .from('decks')
-        .update({ report: { processed: uploaded, total: usableTracks.length, step: 'uploading_audio' } })
+        .update({
+          report: { ...report, step: 'uploading_audio', uploadCursor: i + 1, deckCardRows, excluded, total, processed: total },
+        })
         .eq('id', deckId);
     }
   }
 
+  // All uploads attempted — finalize the deck.
   if (deckCardRows.length > 0) {
     const { error: cardsInsertError } = await supabase.from('deck_cards').insert(deckCardRows);
     if (cardsInsertError) {
       await supabase
         .from('decks')
-        .update({ status: 'failed', report: { step: 'failed', reason: 'deck_cards_insert_failed' } })
+        .update({ status: 'failed', report: { step: 'failed', reason: 'deck_cards_insert_failed: ' + cardsInsertError.message } })
         .eq('id', deckId);
-      return errorResponse('db_error', 'Nem sikerült a kártyák mentése.', 500);
+      return;
     }
   }
 
   const usableCount = deckCardRows.length;
   const coveragePct = total > 0 ? Math.round((usableCount / total) * 1000) / 10 : 0;
   const uncertainYearCount = deckCardRows.filter((c) => c.year_uncertain).length;
-  const meetsMinimum = usableCount >= MIN_USABLE_CARDS;
-
-  const report = {
-    processed: total,
-    total,
-    step: 'done',
-    excluded,
-    uncertainYearCount,
-    possiblyTruncatedAt100: step1.possiblyTruncatedAt100 ?? false,
-    spotifyEmbedAvailable: tracks.some((t) => t.spotifyPreviewUrl),
-  };
 
   await supabase
     .from('decks')
@@ -547,18 +621,174 @@ Deno.serve(async (req: Request) => {
       status: 'ready',
       usable_count: usableCount,
       coverage_pct: coveragePct,
-      report,
+      report: {
+        processed: total,
+        total,
+        step: 'done',
+        excluded,
+        uncertainYearCount,
+        meetsMinimum: usableCount >= MIN_USABLE_CARDS,
+      },
     })
     .eq('id', deckId);
+}
 
+// Self-chains the background work by making a new HTTP call to this same
+// function with an internal "continue" action, authenticated with the
+// service-role key (never exposed to any client). This gives the next batch
+// its own fresh wall-clock window instead of trying to extend the current one.
+async function invokeNextBatch(
+  deckId: string,
+  playlistId: string,
+  resumeCursor: number,
+  overridePayload?: { phase: 'upload'; deckId: string; resumeUploadCursor: number }
+): Promise<void> {
+  const payload = overridePayload ?? { phase: 'resolve', deckId, playlistId, resumeCursor };
+  // IMPORTANT: this must be awaited, not fire-and-forget. runGenerationWork
+  // returns right after calling this, and that return value is what's
+  // passed to EdgeRuntime.waitUntil() — once that promise resolves, the
+  // worker is free to be torn down. An un-awaited fetch() here can get
+  // cancelled mid-flight before the self-chain HTTP request actually left
+  // the process, silently breaking the chain (observed in testing: batch 1
+  // finished at track ~61/100 and never continued). Awaiting the fetch
+  // (with a timeout, since we don't need the full response) ensures the
+  // request is actually sent before this invocation's background task ends.
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    try {
+      await fetch(FUNCTION_SELF_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+          apikey: SERVICE_ROLE_KEY,
+          'x-internal-continue': '1',
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  } catch {
+    // If the self-invoke fails to even fire, the deck will remain stuck in
+    // 'generating' with the last persisted report — acceptable degraded
+    // failure mode (no worse than the pre-fix behavior), and recoverable
+    // by resubmitting since progress is checkpointed in decks.report.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Main handler
+// ---------------------------------------------------------------------------
+
+Deno.serve(async (req: Request) => {
+  const preflight = handleOptions(req);
+  if (preflight) return preflight;
+
+  if (req.method !== 'POST') {
+    return errorResponse('method_not_allowed', 'Csak POST kérés engedélyezett.', 405);
+  }
+
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return errorResponse('invalid_body', 'Érvénytelen kérés.', 400);
+  }
+
+  // Internal continuation call (self-chained batch) — authenticated via the
+  // service-role key in the Authorization header, never reachable by a
+  // regular client because that key is never shipped to any client.
+  const isInternalContinue = req.headers.get('x-internal-continue') === '1';
+  if (isInternalContinue) {
+    const authHeader = req.headers.get('Authorization') ?? '';
+    if (authHeader !== `Bearer ${SERVICE_ROLE_KEY}`) {
+      return errorResponse('unauthorized', undefined, 401);
+    }
+
+    // Respond immediately, keep working via waitUntil — same pattern as the
+    // initial call, so each link in the chain is itself a fast HTTP call.
+    if (body.phase === 'upload') {
+      const supabase = adminClient();
+      const { data: deckRow } = await supabase.from('decks').select('report').eq('id', body.deckId).single();
+      const report = (deckRow?.report ?? {}) as any;
+      const processed: ProcessedTrack[] = report.processedTracks ?? [];
+      const total = report.total ?? processed.length;
+      // deckCardRows/uploadCursor are read fresh inside runAudioUploadPhase from decks.report.
+      // @ts-ignore Deno global
+      EdgeRuntime.waitUntil(runAudioUploadPhase(adminClient(), body.deckId, processed, total, Date.now()));
+      return jsonResponse({ ok: true, continuing: true });
+    }
+
+    // phase === 'resolve'
+    // @ts-ignore Deno global
+    EdgeRuntime.waitUntil(runGenerationWork(body.deckId, body.playlistId, body.resumeCursor));
+    return jsonResponse({ ok: true, continuing: true });
+  }
+
+  // ---- Normal client-facing entry point ----
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) {
+    return errorResponse('unauthorized', 'Be kell jelentkezni a pakli generálásához.', 401);
+  }
+  // Validate the caller's JWT (reuse the same check as before, inlined here
+  // since we need callerUid only for this branch).
+  const { createClient } = await import('jsr:@supabase/supabase-js@2');
+  const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
+  const jwt = authHeader.replace('Bearer ', '');
+  const identityClient = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data: userData, error: userError } = await identityClient.auth.getUser(jwt);
+  if (userError || !userData?.user) {
+    return errorResponse('unauthorized', 'Be kell jelentkezni a pakli generálásához.', 401);
+  }
+  const callerUid = userData.user.id;
+
+  if (!body.playlistUrl) {
+    return errorResponse('invalid_url', 'Adj meg egy Spotify playlist URL-t.', 400);
+  }
+
+  let playlistId: string;
+  try {
+    playlistId = parsePlaylistId(body.playlistUrl);
+  } catch {
+    return errorResponse('invalid_url', 'Nem sikerült felismerni a Spotify playlist URL-t.', 400);
+  }
+
+  const supabase = adminClient();
+
+  // Create the deck row immediately with status='generating'. The HTTP
+  // response returns right after this — the actual pipeline work happens in
+  // the background (EdgeRuntime.waitUntil), NOT before responding.
+  const { data: deckRow, error: insertError } = await supabase
+    .from('decks')
+    .insert({
+      name: playlistId,
+      source_playlist_id: playlistId,
+      source_playlist_url: body.playlistUrl,
+      owner_id: callerUid,
+      status: 'generating',
+      report: { processed: 0, total: 0, step: 'fetching_playlist' },
+    })
+    .select()
+    .single();
+
+  if (insertError || !deckRow) {
+    return errorResponse('db_error', 'Nem sikerült a pakli létrehozása.', 500);
+  }
+
+  const deckId = deckRow.id as string;
+
+  // Kick off the background work AFTER we've prepared the response, and do
+  // not await it — this is what makes the HTTP response return immediately.
+  // @ts-ignore Deno global — EdgeRuntime is provided by the Supabase Edge Runtime
+  EdgeRuntime.waitUntil(runGenerationWork(deckId, playlistId, 0));
+
+  // Respond immediately with the deckId; the client polls decks.report.
   return jsonResponse({
     deckId,
-    name: step1.playlistName ?? playlistId,
-    totalTracks: total,
-    usableCount,
-    coveragePct,
-    meetsMinimum,
-    excluded,
-    uncertainYearCount,
+    status: 'generating',
+    message: 'A pakli generálása elindult. Kövesd a decks.report mezőt a folyamat állapotáért.',
   });
 });
