@@ -1,19 +1,20 @@
 "use client";
 
 /**
- * Realtime csatorna hook — broadcast + presence + refetch minta (ARCHITECTURE.md 4. szakasz).
+ * Realtime csatorna hook — broadcast + presence + refetch minta (ARCHITECTURE.md 4. szakasz,
+ * docs/BACKEND-NOTES.md 5. szakasz).
  *
- * TODO(BACKEND-INTEGRÁCIÓ): jelenleg csak a csatorna-szerződést (event nevek, payload-alak)
- * és a subscribe/unsubscribe életciklust rögzíti működő Supabase Realtime nélkül (ha a kliens
- * nincs konfigurálva, no-op-ként fut). Amint a Backend Edge Functionök broadcast-olnak a
- * room:{roomId} csatornára (ARCHITECTURE 4.1 táblázat), itt kell az `onEvent` callback-eket
- * a UI állapot-refetch-hez kötni (pl. round_public / players / timeline_public újraolvasás).
+ * FONTOS (BACKEND-NOTES 5.): az Edge Functionök NEM broadcastolnak automatikusan — ez
+ * kliensoldali felelősség. Minden sikeres mutáció (place_card, draw_card, start_game, stb.)
+ * után a HÍVÓ kliensnek kell broadcastolnia a megfelelő eventet a room:{roomId} csatornára,
+ * hogy a többi kliens tudja, mikor kell újraolvasnia a round_public/players/rooms állapotot.
  *
  * FONTOS anti-leak szabály (ARCHITECTURE 4.1): a broadcast payload SOSEM tartalmaz kártya-
  * metaadatot vagy card_id-t — csak "mi történt" jelzést. A tényleges adatot mindig a
- * megfelelő RLS-védett SELECT-ből (round_public/timeline_public) kell újraolvasni.
+ * megfelelő RLS-védett SELECT-ből (round_public/get_timeline) kell újraolvasni.
  */
 import { useEffect, useRef } from "react";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { getSupabaseClient } from "../supabase/client";
 import type { DragBroadcastPayload } from "./types";
 
@@ -28,6 +29,9 @@ export type RoomChannelEvent =
 
 export interface UseRoomChannelOptions {
   roomId: string | null;
+  /** Ez az én (a jelen kliens) player/host azonosítóm — presence track()-hez. */
+  presenceKey?: string;
+  presenceMeta?: Record<string, unknown>;
   onEvent?: (event: RoomChannelEvent, payload: unknown) => void;
   onPresenceChange?: (state: Record<string, unknown>) => void;
   /** Csak a host figyeli (D8) — élő húzás tükrözés a :drag csatornán. */
@@ -36,21 +40,18 @@ export interface UseRoomChannelOptions {
 
 export function useRoomChannel({
   roomId,
+  presenceKey,
+  presenceMeta,
   onEvent,
   onPresenceChange,
   onDragUpdate,
 }: UseRoomChannelOptions) {
-  const dragChannelRef = useRef<ReturnType<
-    NonNullable<ReturnType<typeof getSupabaseClient>>["channel"]
-  > | null>(null);
+  const roomChannelRef = useRef<RealtimeChannel | null>(null);
+  const dragChannelRef = useRef<RealtimeChannel | null>(null);
 
   useEffect(() => {
+    if (!roomId) return;
     const client = getSupabaseClient();
-    if (!client || !roomId) {
-      // Nincs backend bekötve — no-op. A UI mock-adattal fut, a hívó felelőssége
-      // a fallback (lásd app/host/[roomCode] és app/play/[roomCode]).
-      return;
-    }
 
     const roomChannel = client
       .channel(`room:${roomId}`)
@@ -60,7 +61,11 @@ export function useRoomChannel({
       .on("presence", { event: "sync" }, () => {
         onPresenceChange?.(roomChannel.presenceState());
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED" && presenceKey) {
+          roomChannel.track({ key: presenceKey, ...presenceMeta });
+        }
+      });
 
     const dragChannel = client
       .channel(`room:${roomId}:drag`)
@@ -69,11 +74,14 @@ export function useRoomChannel({
       })
       .subscribe();
 
+    roomChannelRef.current = roomChannel;
     dragChannelRef.current = dragChannel;
 
     return () => {
       client.removeChannel(roomChannel);
       client.removeChannel(dragChannel);
+      roomChannelRef.current = null;
+      dragChannelRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
@@ -87,5 +95,17 @@ export function useRoomChannel({
     });
   }
 
-  return { sendDragUpdate };
+  /**
+   * Minden sikeres Edge Function hívás UTÁN ezt kell hívni (BACKEND-NOTES 5.) — a function
+   * maga nem broadcastol, a kliens felelőssége jelezni a többieknek, hogy refetch-eljenek.
+   */
+  function broadcastEvent(event: RoomChannelEvent, payload: unknown = {}) {
+    roomChannelRef.current?.send({
+      type: "broadcast",
+      event,
+      payload,
+    });
+  }
+
+  return { sendDragUpdate, broadcastEvent };
 }

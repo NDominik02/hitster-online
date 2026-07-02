@@ -21,7 +21,10 @@ import { AppButton } from "../system/AppButton";
 export interface TippingScreenProps {
   cards: TimelineCardPublic[];
   ownerColor: PlayerColorId;
-  timeLimitSec: number;
+  /** Fallback, ha nincs deadlineIso (pl. demo/mock mód). */
+  timeLimitSec?: number;
+  /** Szerver oldali abszolút deadline (round.placingDeadline) — ha van, ez az irányadó. */
+  deadlineIso?: string | null;
   onConfirm: (slotIndex: number) => void;
   onExpire: () => void;
 }
@@ -31,7 +34,14 @@ export interface TippingScreenProps {
  * + KÖTELEZŐ tap-to-place fallback (D11) UGYANAZON a képernyőn.
  * DESIGN P3 wireframe + 4.1 interakció-részletek.
  */
-export function TippingScreen({ cards, ownerColor, timeLimitSec, onConfirm, onExpire }: TippingScreenProps) {
+export function TippingScreen({
+  cards,
+  ownerColor,
+  timeLimitSec = 90,
+  deadlineIso,
+  onConfirm,
+  onExpire,
+}: TippingScreenProps) {
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const [expired, setExpired] = useState(false);
 
@@ -66,7 +76,12 @@ export function TippingScreen({ cards, ownerColor, timeLimitSec, onConfirm, onEx
         <span className="font-bold text-lg" style={{ color }}>
           🟢 A TE KÖRÖD
         </span>
-        <CountdownTimer seconds={timeLimitSec} onExpire={handleExpire} paused={expired} />
+        <CountdownTimer
+          seconds={timeLimitSec}
+          deadlineIso={deadlineIso}
+          onExpire={handleExpire}
+          paused={expired}
+        />
       </header>
 
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>

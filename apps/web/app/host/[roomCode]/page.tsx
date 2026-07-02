@@ -1,10 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { AppButton } from "@/components/system/AppButton";
-import { GenerationProgress } from "@/components/game/GenerationProgress";
-import { CoverageReport } from "@/components/game/CoverageReport";
 import { RoomCodeBadge } from "@/components/lobby/RoomCodeBadge";
 import { QRCodePanel } from "@/components/lobby/QRCodePanel";
 import { PlayerList } from "@/components/lobby/PlayerList";
@@ -16,66 +14,248 @@ import { RevealCard } from "@/components/game/RevealCard";
 import { OutcomeBanner } from "@/components/game/OutcomeBanner";
 import { PlayerBadge } from "@/components/lobby/PlayerBadge";
 import { TimelineCard } from "@/components/game/TimelineCard";
+import { ConnectionOverlay } from "@/components/system/ConnectionOverlay";
+import { ensureAnonymousSession } from "@/lib/supabase/client";
 import {
-  mockDeck,
-  mockPlayers,
-  mockRound,
-  mockRoundReveal,
-  mockTimelines,
-} from "@/lib/mock-data";
-import type { HostScreen } from "@/lib/game/state";
+  reconnect,
+  startGame,
+  drawCard,
+  resolveRound,
+  nextTurn,
+  fetchPlayers,
+  fetchRoundPublic,
+  getTimeline,
+} from "@/lib/supabase/functions";
+import { adaptRoundPublic } from "@/lib/supabase/adapters";
+import { useRoomChannel } from "@/lib/game/useRoomChannel";
+import type { Player, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
 
 /**
- * Host shell — az aktuális rooms.status + round.phase alapján rendereli H2..H6-ot
- * (ARCHITECTURE 5.1). JELENLEG mock adattal fut (lib/mock-data.ts) — a Backend agent
- * generate_deck/create_room/draw_card/resolve_round Edge Functionjeinek elkészülte
- * (docs/BACKEND-NOTES.md) után itt kell bekötni a valós lib/supabase/functions.ts hívásokat
- * és a lib/game/useRoomChannel.ts realtime feliratkozást.
+ * Host shell — a `rooms.status` + `round_public.phase`-ből derivált fázis alapján
+ * rendereli H3..H6-ot (ARCHITECTURE 5.1/5.3). A H1/H2 (playlist + generálás) a
+ * app/host/page.tsx-en zajlik előbb; ide már meglévő, kész szobával érkezünk.
  *
- * A demo célból egy screen-választó fejléc engedi kézzel bejárni H2→H6-ot.
+ * A host az EGYETLEN kliens, aki draw_card / resolve_round-ot hívhat (D7 anti-leak,
+ * BACKEND-NOTES 7.) — a player kliens ezeket sose hívja.
  */
 export default function HostRoomPage() {
   const params = useParams<{ roomCode: string }>();
   const roomCode = params.roomCode;
 
-  const [screen, setScreen] = useState<HostScreen>("H3");
+  const [roomId, setRoomId] = useState<string | null>(null);
+  const [roomStatus, setRoomStatus] = useState<"lobby" | "playing" | "paused" | "finished">("lobby");
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [round, setRound] = useState<RoundPublic | null>(null);
+  const [timelines, setTimelines] = useState<Record<string, TimelineCardPublic[]>>({});
+  const [winnerPlayerIds, setWinnerPlayerIds] = useState<string[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioLocked, setAudioLocked] = useState(false);
-  const [dragGhostIndex, setDragGhostIndex] = useState<number | null>(2);
+  const [dragGhostIndex, setDragGhostIndex] = useState<number | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const activePlayer = mockPlayers.find((p) => p.id === mockRound.activePlayerId)!;
-  const winner = mockPlayers[0];
+  const refreshTimelines = useCallback(async (rid: string) => {
+    const cards = await getTimeline(rid);
+    const grouped: Record<string, TimelineCardPublic[]> = {};
+    for (const c of cards) {
+      (grouped[c.playerId] ??= []).push(c);
+    }
+    setTimelines(grouped);
+  }, []);
 
-  const screens: HostScreen[] = ["H2", "H3", "H4", "H5", "H6"];
+  const refreshRound = useCallback(async (rid: string) => {
+    const row = await fetchRoundPublic(rid);
+    setRound(adaptRoundPublic(row));
+  }, []);
+
+  const refreshPlayers = useCallback(async (rid: string) => {
+    setPlayers(await fetchPlayers(rid));
+  }, []);
+
+  // Kezdeti betöltés: reconnect a szobakóddal, majd players + timeline.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await ensureAnonymousSession();
+        const res = await reconnect(roomCode);
+        if (cancelled) return;
+        setRoomId(res.roomId);
+        setRoomStatus(res.status as typeof roomStatus);
+        await refreshPlayers(res.roomId);
+        if (res.currentRoundId) await refreshRound(res.currentRoundId);
+        await refreshTimelines(res.roomId);
+      } catch (err) {
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : "Nem sikerült betölteni a szobát.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomCode]);
+
+  const { broadcastEvent } = useRoomChannel({
+    roomId,
+    presenceKey: "host",
+    presenceMeta: { role: "host" },
+    onEvent: async (event, payload) => {
+      if (!roomId) return;
+      if (event === "player_joined") {
+        await refreshPlayers(roomId);
+      } else if (event === "game_started" || event === "round_started") {
+        setRoomStatus("playing");
+        const rid = (payload as { roundId?: string })?.roundId;
+        if (rid) await refreshRound(rid);
+        else if (round) await refreshRound(round.id);
+        setDragGhostIndex(null);
+      } else if (event === "card_placed") {
+        if (round) await refreshRound(round.id);
+      } else if (event === "round_revealed") {
+        if (round) await refreshRound(round.id);
+        await refreshTimelines(roomId);
+      } else if (event === "turn_advanced") {
+        const rid = (payload as { roundId?: string })?.roundId;
+        if (rid) await refreshRound(rid);
+      } else if (event === "game_finished") {
+        setRoomStatus("finished");
+        const ids = (payload as { winnerPlayerIds?: string[] })?.winnerPlayerIds ?? [];
+        setWinnerPlayerIds(ids);
+        await refreshTimelines(roomId);
+      }
+    },
+    onDragUpdate: (payload) => {
+      if (round && payload.playerId === round.activePlayerId) {
+        setDragGhostIndex(payload.slotIndex);
+      }
+    },
+  });
+
+  async function handleStart() {
+    if (!roomId) return;
+    try {
+      const res = await startGame(roomId);
+      setRoomStatus("playing");
+      await refreshRound(res.roundId);
+      broadcastEvent("game_started", { roundId: res.roundId });
+      await beginRound(res.roundId);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Nem sikerült elindítani a játékot.");
+    }
+  }
+
+  async function beginRound(roundId: string) {
+    if (!roomId) return;
+    try {
+      const draw = await drawCard(roomId);
+      setAudioUrl(draw.audioUrl);
+      await refreshRound(draw.roundId);
+      broadcastEvent("round_started", { roundId: draw.roundId, activePlayerId: draw.activePlayerId });
+    } catch (err) {
+      // draw_card 409-et ad, ha már húzva van erre a körre — ilyenkor csak frissítjük az állapotot.
+      await refreshRound(roundId);
+      console.warn("[draw_card]", err);
+    }
+  }
+
+  async function handleResolve() {
+    if (!round) return;
+    try {
+      await resolveRound(round.id);
+      await refreshRound(round.id);
+      await refreshTimelines(roomId!);
+      broadcastEvent("round_revealed", { roundId: round.id });
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Nem sikerült kiértékelni a kört.");
+    }
+  }
+
+  async function handleNextTurn() {
+    if (!roomId) return;
+    try {
+      const res = await nextTurn(roomId);
+      if (res.next === "finished") {
+        setRoomStatus("finished");
+        setWinnerPlayerIds(res.winnerPlayerIds);
+        await refreshTimelines(roomId);
+        broadcastEvent("game_finished", { winnerPlayerIds: res.winnerPlayerIds });
+      } else {
+        broadcastEvent("turn_advanced", { roundId: res.roundId });
+        setAudioUrl(null);
+        setDragGhostIndex(null);
+        await beginRound(res.roundId);
+      }
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Nem sikerült léptetni a kört.");
+    }
+  }
+
+  // Deadline-lejárat figyelése: amikor letelik, a host hívja a resolve_round-ot (D6, A2).
+  useEffect(() => {
+    if (!round || round.phase === "reveal" || round.phase === "done" || !round.placingDeadline) return;
+    const deadline = new Date(round.placingDeadline).getTime();
+    const msLeft = Math.max(0, deadline - Date.now());
+    const t = setTimeout(() => handleResolve(), msLeft + 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round?.id, round?.placingDeadline, round?.phase]);
+
+  // Amikor a lerakás megtörtént (placement !== null) reveal előtt, azonnal kiértékelünk —
+  // nem kell megvárni a deadline-t (D6: "ha van épp kijelölt rés, az számít lerakásnak").
+  useEffect(() => {
+    if (round && round.placement !== null && (round.phase === "playing" || round.phase === "stealing")) {
+      const t = setTimeout(() => handleResolve(), 0);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round?.placement, round?.phase]);
+
+  // Audio elindítása amikor új audioUrl érkezik.
+  useEffect(() => {
+    if (audioUrl && audioRef.current) {
+      audioRef.current.src = audioUrl;
+      audioRef.current.play().catch(() => setAudioLocked(true));
+    }
+  }, [audioUrl]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <ConnectionOverlay mode="reconnecting" />
+      </div>
+    );
+  }
+
+  if (loadError && !roomId) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 text-center">
+        <p className="text-danger">{loadError}</p>
+      </div>
+    );
+  }
+
+  const activePlayer = players.find((p) => p.id === round?.activePlayerId) ?? null;
+  const winners = players.filter((p) => winnerPlayerIds.includes(p.id));
 
   return (
     <div className="flex flex-col flex-1 px-6 py-8">
       <div className="w-full max-w-5xl mx-auto space-y-8">
-        <DevScreenSwitcher current={screen} screens={screens} onChange={setScreen} roomCode={roomCode} />
+        <div className="flex justify-between text-xs text-text-muted border-b border-border pb-3">
+          <span className="font-code">Host · {roomCode}</span>
+          {loadError && <span className="text-danger">{loadError}</span>}
+        </div>
 
-        {screen === "H2" && (
-          <section className="space-y-6">
-            <h1 className="text-2xl font-bold">PAKLI ELŐKÉSZÍTÉSE</h1>
-            <GenerationProgress processed={73} total={100} currentStep="Évszámok lekérése (MusicBrainz)…" />
-            <div className="border-t border-border pt-6">
-              <CoverageReport
-                usable={mockDeck.report.usable}
-                total={mockDeck.report.total}
-                pct={mockDeck.report.coveragePct}
-                excluded={mockDeck.report.excluded}
-                meetsMinimum={mockDeck.report.meetsMinimum}
-              />
-            </div>
-            <AppButton size="lg" fullWidth disabled={!mockDeck.report.meetsMinimum} onClick={() => setScreen("H3")}>
-              SZOBA LÉTREHOZÁSA ▶
-            </AppButton>
-          </section>
-        )}
-
-        {screen === "H3" && (
+        {roomStatus === "lobby" && (
           <section className="space-y-8 text-center">
             <h1 className="text-2xl font-bold">CSATLAKOZZ A JÁTÉKHOZ!</h1>
             <div className="flex flex-col md:flex-row items-center justify-center gap-10">
-              <QRCodePanel joinUrl={`https://hitster.app/play/${roomCode}`} />
+              <QRCodePanel joinUrl={`${typeof window !== "undefined" ? window.location.origin : ""}/play/${roomCode}`} />
               <div>
                 <div className="text-text-muted mb-2">Szobakód:</div>
                 <RoomCodeBadge code={roomCode} />
@@ -84,13 +264,13 @@ export default function HostRoomPage() {
 
             <div className="text-left">
               <h2 className="text-text-muted text-sm uppercase tracking-wide mb-3">
-                Csatlakozott játékosok ({mockPlayers.length})
+                Csatlakozott játékosok ({players.length})
               </h2>
-              <PlayerList players={mockPlayers} layout="grid" />
+              <PlayerList players={players} layout="grid" />
             </div>
 
             <div>
-              <AppButton size="lg" disabled={mockPlayers.length < 2} onClick={() => setScreen("H4")}>
+              <AppButton size="lg" disabled={players.length < 2} onClick={handleStart}>
                 START ▶
               </AppButton>
               <p className="text-text-muted text-sm mt-2">Legalább 2 játékos kell az induláshoz.</p>
@@ -98,150 +278,112 @@ export default function HostRoomPage() {
           </section>
         )}
 
-        {screen === "H4" && (
+        {roomStatus === "playing" && round && !(round.phase === "reveal" && round.revealedCard) && (
           <section className="space-y-8">
             <div className="flex justify-between text-text-muted text-sm">
               <span>🔊 Most szól…</span>
-              <span>
-                Kör {mockRound.roundNo} · Pakli: 41 hátra
-              </span>
+              <span>Kör {round.roundNo}</span>
             </div>
 
             <div className="flex flex-col items-center gap-6">
               <MysteryCard spinning size="lg" />
-              <AudioProgressBar current={18} duration={30} playing />
+              <audio ref={audioRef} />
+              <AudioProgressBar current={0} duration={30} playing={Boolean(audioUrl) && !audioLocked} />
             </div>
 
-            <div className="bg-surface-2 rounded-[var(--radius-card)] px-6 py-4 text-center">
-              <PlayerBadge name={activePlayer.name} color={activePlayer.color} state="active" size="lg" />
-              <p className="text-text-muted mt-2">«húzza a kártyát…»</p>
-            </div>
+            {activePlayer && (
+              <div className="bg-surface-2 rounded-[var(--radius-card)] px-6 py-4 text-center">
+                <PlayerBadge name={activePlayer.name} color={activePlayer.color} state="active" size="lg" />
+                <p className="text-text-muted mt-2">«húzza a kártyát…»</p>
+              </div>
+            )}
 
             <div>
               <h2 className="text-text-muted text-sm uppercase tracking-wide mb-3">Játékosok idővonalai</h2>
               <div className="space-y-2">
-                {mockPlayers.map((p) => (
+                {players.map((p) => (
                   <PlayerTimelineRow
                     key={p.id}
                     player={p}
-                    cards={mockTimelines[p.id] ?? []}
-                    isActive={p.id === activePlayer.id}
-                    ghostSlotIndex={p.id === activePlayer.id ? dragGhostIndex : null}
+                    cards={timelines[p.id] ?? []}
+                    isActive={p.id === activePlayer?.id}
+                    ghostSlotIndex={p.id === activePlayer?.id ? dragGhostIndex : null}
                   />
                 ))}
               </div>
-              <div className="flex gap-2 mt-3">
-                <button
-                  className="text-xs text-text-muted underline"
-                  onClick={() => setDragGhostIndex((i) => (i === null ? 0 : (i + 1) % 6))}
-                >
-                  (demo: szellem-pozíció léptetése)
-                </button>
-                <button className="text-xs text-text-muted underline" onClick={() => setAudioLocked(true)}>
-                  (demo: autoplay-blokk szimulálása)
-                </button>
-              </div>
             </div>
 
-            <AppButton variant="secondary" onClick={() => setScreen("H5")}>
-              (demo: → Reveal)
-            </AppButton>
-
-            <AudioUnlockOverlay visible={audioLocked} onUnlock={() => setAudioLocked(false)} />
+            <AudioUnlockOverlay
+              visible={audioLocked}
+              onUnlock={() => {
+                audioRef.current?.play();
+                setAudioLocked(false);
+              }}
+            />
           </section>
         )}
 
-        {screen === "H5" && (
+        {roomStatus === "playing" && round && round.phase === "reveal" && round.revealedCard && (
           <section className="flex flex-col items-center gap-8 py-8">
             <RevealCard
-              artworkUrl={mockRoundReveal.revealedCard?.artworkUrl}
-              title={mockRoundReveal.revealedCard!.title}
-              artist={mockRoundReveal.revealedCard!.artist}
-              year={mockRoundReveal.revealedCard!.year}
+              artworkUrl={round.revealedCard.artworkUrl}
+              title={round.revealedCard.title}
+              artist={round.revealedCard.artist}
+              year={round.revealedCard.year}
               flipped
             />
-            <OutcomeBanner outcome="correct" playerName={activePlayer.name} />
+            <OutcomeBanner
+              outcome={round.outcome === "timeout" ? "timeout" : round.outcome === "correct" ? "correct" : "wrong"}
+              playerName={activePlayer?.name}
+            />
             <p className="text-text-muted text-sm" aria-live="polite">
               «következő kör 5 mp múlva…»
             </p>
-            <AppButton variant="secondary" onClick={() => setScreen("H4")}>
-              (demo: → következő kör)
-            </AppButton>
+            <AppButton onClick={handleNextTurn}>Következő kör ▶</AppButton>
           </section>
         )}
 
-        {screen === "H6" && (
+        {roomStatus === "finished" && (
           <section className="flex flex-col items-center gap-8 py-8 text-center">
-            <h1 className="text-3xl font-bold">🎉 GYŐZELEM! 🎉</h1>
-            <PlayerBadge name={winner.name} color={winner.color} size="lg" />
-            <div>
-              <h2 className="text-text-muted text-sm uppercase tracking-wide mb-3">
-                {winner.name} nyertes idővonala
-              </h2>
-              <div className="flex gap-2 flex-wrap justify-center">
-                {(mockTimelines[winner.id] ?? []).map((c) => (
-                  <TimelineCard key={c.id} year={c.year} state="revealed" size="sm" />
-                ))}
-              </div>
-            </div>
+            <h1 className="text-3xl font-bold">
+              {winners.length > 1 ? "🎉 HOLTVERSENY! 🎉" : "🎉 GYŐZELEM! 🎉"}
+            </h1>
+            {winners.map((w) => (
+              <PlayerBadge key={w.id} name={w.name} color={w.color} size="lg" />
+            ))}
 
             <div className="text-left w-full max-w-sm">
               <h2 className="text-text-muted text-sm uppercase tracking-wide mb-3">Végeredmény</h2>
               <ul className="space-y-2">
-                {mockPlayers
-                  .map((p) => ({ p, count: (mockTimelines[p.id] ?? []).length }))
+                {players
+                  .map((p) => ({ p, count: (timelines[p.id] ?? []).length }))
                   .sort((a, b) => b.count - a.count)
-                  .map(({ p, count }, i) => (
+                  .map(({ p, count }) => (
                     <li key={p.id} className="flex items-center justify-between">
                       <PlayerBadge name={p.name} color={p.color} size="sm" />
                       <span className="font-numeric">
-                        {count} kártya {i === 0 && "🥇"}
+                        {count} kártya {winnerPlayerIds.includes(p.id) && "🥇"}
                       </span>
                     </li>
                   ))}
               </ul>
             </div>
 
-            <div className="flex gap-4">
-              <AppButton size="lg" onClick={() => setScreen("H3")}>
-                ÚJRA ↻
-              </AppButton>
-              <AppButton size="lg" variant="secondary" onClick={() => setScreen("H2")}>
-                Új pakli
-              </AppButton>
-            </div>
+            {winners[0] && (
+              <div>
+                <h2 className="text-text-muted text-sm uppercase tracking-wide mb-3">
+                  {winners[0].name} idővonala
+                </h2>
+                <div className="flex gap-2 flex-wrap justify-center">
+                  {(timelines[winners[0].id] ?? []).map((c) => (
+                    <TimelineCard key={c.id} year={c.year} state="revealed" size="sm" />
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
         )}
       </div>
-    </div>
-  );
-}
-
-function DevScreenSwitcher({
-  current,
-  screens,
-  onChange,
-  roomCode,
-}: {
-  current: HostScreen;
-  screens: HostScreen[];
-  onChange: (s: HostScreen) => void;
-  roomCode: string;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted border-b border-border pb-3">
-      <span className="font-code">Host · {roomCode}</span>
-      <span className="opacity-50">|</span>
-      <span>demo nézetváltó:</span>
-      {screens.map((s) => (
-        <button
-          key={s}
-          onClick={() => onChange(s)}
-          className={`px-2 py-1 rounded ${current === s ? "bg-accent text-white" : "bg-surface-2"}`}
-        >
-          {s}
-        </button>
-      ))}
     </div>
   );
 }

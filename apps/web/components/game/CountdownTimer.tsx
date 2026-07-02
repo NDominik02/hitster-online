@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 
 export interface CountdownTimerProps {
-  seconds: number;
+  /** Relatív hátralévő idő másodpercben — a deadline Date.now() + seconds lesz (render-mentesen, effect-ben). */
+  seconds?: number;
+  /** Abszolút ISO deadline (pl. a szerver placingDeadline mezője) — ha meg van adva, ez élvez elsőbbséget. */
+  deadlineIso?: string | null;
   warningAt?: number; // alap 10 mp
   paused?: boolean;
   onExpire?: () => void;
@@ -13,17 +16,24 @@ export interface CountdownTimerProps {
 
 /**
  * Vizuális visszaszámláló (P3 + F2 steal) — DESIGN P3 wireframe, D6.
- * Deadline-alapú (Date.now() + seconds), nem drift-elő setInterval-lánc — ha a `seconds`
- * prop változik, a komponenst a hívó `key`-jével kell remountolni (pl. `key={roundId}`).
+ * Deadline-alapú, nem drift-elő setInterval-lánc — ha a `seconds`/`deadlineIso` prop változik,
+ * a komponenst a hívó `key`-jével kell remountolni (pl. `key={roundId}`).
  */
-export function CountdownTimer({ seconds, warningAt = 10, paused, onExpire, size = "md" }: CountdownTimerProps) {
+export function CountdownTimer({
+  seconds = 90,
+  deadlineIso,
+  warningAt = 10,
+  paused,
+  onExpire,
+  size = "md",
+}: CountdownTimerProps) {
   const deadlineRef = useRef<number | null>(null);
   const [remaining, setRemaining] = useState(seconds);
   const expiredRef = useRef(false);
 
   useEffect(() => {
     if (deadlineRef.current === null) {
-      deadlineRef.current = Date.now() + seconds * 1000;
+      deadlineRef.current = deadlineIso ? new Date(deadlineIso).getTime() : Date.now() + seconds * 1000;
     }
     if (paused) return;
 
