@@ -41,6 +41,9 @@ export default function Home() {
         <div className="w-full bg-surface border border-border rounded-[var(--radius-card)] p-6 flex flex-col items-center gap-4">
           <h2 className="text-lg font-semibold">Csatlakozás kóddal</h2>
           <RoomCodeInput value={joinCode} onChange={setJoinCode} />
+          <p className="text-text-muted text-sm -mt-2" aria-live="polite">
+            {joinCode.length === 4 ? "Kész — koppints a Belépek gombra." : "Írd be mind a 4 karaktert."}
+          </p>
           <AppButton
             size="lg"
             fullWidth

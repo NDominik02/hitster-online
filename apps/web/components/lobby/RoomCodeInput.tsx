@@ -19,7 +19,12 @@ export function RoomCodeInput({ value, onChange, disabled }: RoomCodeInputProps)
     next[index] = char || " ";
     const joined = next.join("").replace(/ +$/, "");
     onChange(joined.toUpperCase());
-    if (char && index < 3) refs.current[index + 1]?.focus();
+    // requestAnimationFrame véd az iOS Safari fókusz-race ellen: ha a .focus()-t
+    // szinkron hívjuk az input eseményen belül, mobil Safarin (autoCapitalize +
+    // prediktív sáv miatt) néha nem veszi fel a fókuszt a következő mezőn.
+    if (char && index < 3) {
+      requestAnimationFrame(() => refs.current[index + 1]?.focus());
+    }
   }
 
   function handleKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {

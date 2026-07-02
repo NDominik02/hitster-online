@@ -20,18 +20,23 @@ export const AppButton = forwardRef<HTMLButtonElement, AppButtonProps>(
         ref={ref}
         disabled={disabled}
         className={clsx(
-          "inline-flex items-center justify-center gap-2 font-bold transition-colors duration-150 ease-out rounded-[var(--radius-button)] min-h-11",
-          "disabled:opacity-40 disabled:cursor-not-allowed",
+          "inline-flex items-center justify-center gap-2 font-bold rounded-[var(--radius-button)] min-h-11",
+          "transition-[background-color,border-color,color,opacity,transform] duration-150 ease-out",
+          "disabled:opacity-40 disabled:cursor-not-allowed disabled:grayscale-[0.3]",
           {
-            // variant
-            "bg-accent text-white hover:bg-accent-hover active:brightness-95":
+            // variant — enabled
+            "bg-accent text-white hover:bg-accent-hover active:brightness-95 cursor-pointer shadow-[0_0_0_1px_rgba(124,92,255,0.4)]":
               variant === "primary" && !disabled,
-            "bg-surface-2 text-text border border-border hover:border-accent":
+            // secondary enabled: accent-colored border + subtle glow so it reads as clearly
+            // "ready" — a plain bg-surface-2 border was nearly identical to the disabled
+            // state (opacity was the only cue), which made the button look inert on mobile.
+            "bg-surface-2 text-text border-2 border-accent hover:bg-surface hover:border-accent-hover cursor-pointer shadow-[0_0_12px_rgba(124,92,255,0.25)]":
               variant === "secondary" && !disabled,
-            "bg-transparent text-text-muted hover:text-text hover:bg-surface":
+            "bg-transparent text-text-muted hover:text-text hover:bg-surface cursor-pointer":
               variant === "ghost" && !disabled,
-            "bg-danger text-white hover:brightness-95": variant === "danger" && !disabled,
-            "bg-surface-2 text-text-muted": disabled,
+            "bg-danger text-white hover:brightness-95 cursor-pointer": variant === "danger" && !disabled,
+            // variant — disabled: flat, borderless, no glow — unmistakably inert
+            "bg-surface-2 text-text-muted border-2 border-transparent shadow-none": disabled,
             // size
             "px-4 py-2 text-sm": size === "sm",
             "px-6 py-3 text-base": size === "md",

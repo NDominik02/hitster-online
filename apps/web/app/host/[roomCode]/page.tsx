@@ -56,6 +56,32 @@ export default function HostRoomPage() {
   const [dragGhostIndex, setDragGhostIndex] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // A QR-kódhoz a valódi, kliensről elérhető origin kell — window.location.origin
+  // félrevezető, ha a host localhost-on nyitja meg (a telefonon scannelve a
+  // telefon SAJÁT localhost-jára mutatna). Az /api/origin a request Host
+  // fejlécéből adja vissza, amin a böngésző ténylegesen csatlakozott (pl. a
+  // gép LAN IP-je), production mögött pedig a valós domaint.
+  const [joinOrigin, setJoinOrigin] = useState<string | null>(null);
+  const [originFetchFailed, setOriginFetchFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/origin")
+      .then((res) => res.json())
+      .then((data: { origin?: string }) => {
+        if (!cancelled && data.origin) setJoinOrigin(data.origin);
+      })
+      .catch(() => {
+        if (!cancelled) setOriginFetchFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const fallbackOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  const effectiveOrigin = joinOrigin ?? fallbackOrigin;
+  const isLocalOrigin = /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?$/i.test(effectiveOrigin);
+
   const refreshTimelines = useCallback(async (rid: string) => {
     const cards = await getTimeline(rid);
     const grouped: Record<string, TimelineCardPublic[]> = {};
@@ -255,12 +281,26 @@ export default function HostRoomPage() {
           <section className="space-y-8 text-center">
             <h1 className="text-2xl font-bold">CSATLAKOZZ A JÁTÉKHOZ!</h1>
             <div className="flex flex-col md:flex-row items-center justify-center gap-10">
-              <QRCodePanel joinUrl={`${typeof window !== "undefined" ? window.location.origin : ""}/play/${roomCode}`} />
+              <QRCodePanel joinUrl={`${effectiveOrigin}/play/${roomCode}`} />
               <div>
                 <div className="text-text-muted mb-2">Szobakód:</div>
                 <RoomCodeBadge code={roomCode} />
               </div>
             </div>
+
+            {isLocalOrigin && (
+              <div
+                className="max-w-lg mx-auto bg-warning/10 border border-warning text-warning text-sm rounded-[var(--radius-card)] px-4 py-3 text-left"
+                role="alert"
+              >
+                <strong>⚠ Figyelem:</strong> ezt az oldalt <span className="font-code">localhost</span>-on
+                nyitottad meg — a QR-kód emiatt a telefonodról nem lesz elérhető. Ha telefonról teszteled,
+                nyisd meg ezt az oldalt a géped hálózati IP-címén, ne localhost-on — pl.{" "}
+                <span className="font-code">http://192.168.0.123:3000/host</span>. (A géped LAN IP-jét a
+                `ipconfig` / `ifconfig` paranccsal nézheted meg.)
+                {originFetchFailed && " (A cím automatikus felismerése nem sikerült, ez a jelzés csak becslés.)"}
+              </div>
+            )}
 
             <div className="text-left">
               <h2 className="text-text-muted text-sm uppercase tracking-wide mb-3">
