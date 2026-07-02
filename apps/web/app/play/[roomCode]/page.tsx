@@ -136,9 +136,13 @@ export default function PlayRoomPage() {
           if (r) setActiveTimeline(await refreshTimelineFor(roomId, r.activePlayerId));
         }
       } else if (event === "card_placed") {
-        if (round) await refreshRound(round.id);
+        // Defensive: elsődlegesen a broadcast payload roundId-jét használjuk, ne a
+        // closure-ből olvasott `round` state-et (lásd useRoomChannel stale closure fix).
+        const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
+        if (rid) await refreshRound(rid);
       } else if (event === "round_revealed") {
-        if (round) await applyRevealedRound(round.id);
+        const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
+        if (rid) await applyRevealedRound(rid);
       } else if (event === "game_finished") {
         setRoomFinished(true);
         const ids = (payload as { winnerPlayerIds?: string[] })?.winnerPlayerIds ?? [];

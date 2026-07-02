@@ -142,9 +142,13 @@ export default function HostRoomPage() {
         else if (round) await refreshRound(round.id);
         setDragGhostIndex(null);
       } else if (event === "card_placed") {
-        if (round) await refreshRound(round.id);
+        // Defensive: elsődlegesen a broadcast payload roundId-jét használjuk, ne a
+        // closure-ből olvasott `round` state-et (lásd useRoomChannel stale closure fix).
+        const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
+        if (rid) await refreshRound(rid);
       } else if (event === "round_revealed") {
-        if (round) await refreshRound(round.id);
+        const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
+        if (rid) await refreshRound(rid);
         await refreshTimelines(roomId);
       } else if (event === "turn_advanced") {
         const rid = (payload as { roundId?: string })?.roundId;
@@ -272,8 +276,20 @@ export default function HostRoomPage() {
   }, [round?.placement, round?.phase]);
 
   // Audio elindítása amikor új audioUrl érkezik.
+  //
+  // AUDIO-HOTFIX (2026-07-02): az `audioLocked` korábban csak az AudioUnlockOverlay onUnlock
+  // kattintására állt vissza false-ra. Ha egy korábbi körben a play() elutasult (pl. a host tab
+  // háttérben volt — autoplay policy), az `audioLocked=true` MINDEN KÖVETKEZŐ körre átöröklődött,
+  // még akkor is, ha az adott új play() hívás ténylegesen sikerült — emiatt az AudioProgressBar
+  // hamisan "not playing"-et mutatott, és ha a play() a háttérben lévő tabon megint elutasult,
+  // semmi nem jelezte, hogy ez egy ÚJ zene, ami megint feloldásra vár (az overlay technikailag
+  // már látszott, de a felhasználó könnyen azt hihette, hogy a korábbi state maradt meg).
+  // Megoldás: minden új audioUrl-nél explicit resetelünk, majd a play() eredménye alapján
+  // állítjuk be újra — így az audioLocked mindig az AKTUÁLIS play() kísérlet valódi állapotát
+  // tükrözi, nem egy korábbi körből maradt, esetleg már irreleváns flaget.
   useEffect(() => {
     if (audioUrl && audioRef.current) {
+      setAudioLocked(false);
       audioRef.current.src = audioUrl;
       audioRef.current.play().catch(() => setAudioLocked(true));
     }
@@ -385,8 +401,14 @@ export default function HostRoomPage() {
             <AudioUnlockOverlay
               visible={audioLocked}
               onUnlock={() => {
-                audioRef.current?.play();
-                setAudioLocked(false);
+                // Csak akkor zárjuk be az overlay-t, ha a play() ténylegesen sikerült — ha megint
+                // elutasul (pl. a böngésző még mindig nem tekinti ezt elég erős user-gesture-nek),
+                // az overlay-nek fent kell maradnia, különben a felhasználó csendben elveszíti az
+                // esélyt újra feloldani, és a zene véglegesen néma marad a kör hátralévő részére.
+                audioRef.current
+                  ?.play()
+                  .then(() => setAudioLocked(false))
+                  .catch(() => setAudioLocked(true));
               }}
             />
           </section>

@@ -59,6 +59,25 @@ export function useRoomChannel({
   const dragChannelRef = useRef<RealtimeChannel | null>(null);
   const isSubscribedRef = useRef(false);
 
+  // STALE CLOSURE FIX (2026-07-02): a csatorna-feliratkozás useEffect-je [roomId] dependency-vel
+  // fut, tehát a `.on("broadcast", ...)` callback-ek CSAK EGYSZER látják a hívó oldal által
+  // átadott onEvent/onPresenceChange/onDragUpdate/onSubscribed függvényeket — ha ezek a hívó
+  // komponensben inline arrow function-ök, amik a komponens state-jére hivatkoznak (pl. `round`),
+  // akkor az a state referencia örökre a feliratkozáskori (gyakran null/kezdeti) értékre fagy.
+  // Megoldás: minden callback-et egy ref-ben tartunk, és minden render után frissítjük — így a
+  // channel handler mindig a LEGFRISSEBB callback-et hívja, a `[roomId]`-only effect pedig
+  // valóban csak a csatorna élettartamát kezeli, nem a callback-identitást.
+  const onEventRef = useRef(onEvent);
+  const onPresenceChangeRef = useRef(onPresenceChange);
+  const onDragUpdateRef = useRef(onDragUpdate);
+  const onSubscribedRef = useRef(onSubscribed);
+  useEffect(() => {
+    onEventRef.current = onEvent;
+    onPresenceChangeRef.current = onPresenceChange;
+    onDragUpdateRef.current = onDragUpdate;
+    onSubscribedRef.current = onSubscribed;
+  });
+
   useEffect(() => {
     if (!roomId) return;
     const client = getSupabaseClient();
@@ -67,23 +86,23 @@ export function useRoomChannel({
     const roomChannel = client
       .channel(`room:${roomId}`)
       .on("broadcast", { event: "*" }, ({ event, payload }) => {
-        onEvent?.(event as RoomChannelEvent, payload);
+        onEventRef.current?.(event as RoomChannelEvent, payload);
       })
       .on("presence", { event: "sync" }, () => {
-        onPresenceChange?.(roomChannel.presenceState());
+        onPresenceChangeRef.current?.(roomChannel.presenceState());
       })
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
           isSubscribedRef.current = true;
           if (presenceKey) roomChannel.track({ key: presenceKey, ...presenceMeta });
-          onSubscribed?.();
+          onSubscribedRef.current?.();
         }
       });
 
     const dragChannel = client
       .channel(`room:${roomId}:drag`)
       .on("broadcast", { event: "drag" }, ({ payload }) => {
-        onDragUpdate?.(payload as DragBroadcastPayload);
+        onDragUpdateRef.current?.(payload as DragBroadcastPayload);
       })
       .subscribe();
 
