@@ -226,6 +226,36 @@ export default function HostRoomPage() {
     }
   }
 
+  // Szerver-állapot lekérdezése és összevetése a helyi UI-állapottal — ha a szerver már
+  // előrébb jár (pl. a pg_cron safety net már lezárta a kört, BACKEND-NOTES 9.), csak
+  // frissítjük a helyi state-et, MINT HA a round_revealed broadcast megjött volna. Ez a
+  // host sosem hívja emiatt feleslegesen a resolve_round-ot — az optimista zár miatt
+  // ártalmatlan lenne, de a cél itt kifejezetten a DETEKTÁLÁS, nem az újra-lezárás.
+  const checkServerRoundState = useCallback(
+    async (roundId: string) => {
+      try {
+        const row = await fetchRoundPublic(roundId);
+        const serverRound = adaptRoundPublic(row);
+        if (!serverRound) return;
+        if (
+          (serverRound.phase === "reveal" || serverRound.phase === "done") &&
+          round?.phase !== "reveal" &&
+          round?.phase !== "done"
+        ) {
+          // A szerver (host-hívás VAGY a pg_cron auto_resolve_expired_rounds safety net,
+          // BACKEND-NOTES 9.) már lezárta a kört, de a mi UI-unk még a régi fázisnál áll —
+          // pl. a broadcast lemaradt, mert a tab háttérben volt. Frissítsük a state-et,
+          // mintha a round_revealed broadcast megérkezett volna (NE hívjuk a resolve_round-ot).
+          await refreshRound(roundId);
+          if (roomId) await refreshTimelines(roomId);
+        }
+      } catch (err) {
+        console.warn("[host round-state check]", err);
+      }
+    },
+    [round?.phase, roomId, refreshRound, refreshTimelines]
+  );
+
   // Deadline-lejárat figyelése: amikor letelik, a host hívja a resolve_round-ot (D6, A2).
   //
   // MEGBÍZHATÓSÁGI JAVÍTÁS (2026-07-02 hotfix): háttérbe kerülő tab-okban a böngésző
@@ -242,8 +272,18 @@ export default function HostRoomPage() {
   // setTimeout-ot. Ez tisztán UX-jellegű robusztusság — az A2 döntést nem töri: a
   // resolve_round Edge Function maga is ellenőrzi szerveroldalon, hogy a deadline tényleg
   // lejárt-e, tehát a kliensoldali hívás időzítése nem biztonsági kérdés.
+  //
+  // PG_CRON SAFETY NET FALLBACK (2026-07-02, BACKEND-NOTES 9.4): a fenti visibilitychange
+  // logika a HELYI (kliensoldali) deadline-hoz méri az időt, és feltételezi, hogy a hostnak
+  // magának kell lezárnia a kört. Azóta viszont a pg_cron `auto_resolve_expired_rounds` is
+  // lezárhatja a kört a host tudta nélkül (pl. amíg a tab háttérben volt, ÉS a
+  // `round_revealed` broadcast is lemaradt — Realtime nem garantál üzenet-perzisztenciát
+  // háttérben lévő tabra). Emiatt a visibilitychange handler most a helyi resolve-próba
+  // ELŐTT megkérdezi a szervert (checkServerRoundState) — ha a szerver már reveal/done
+  // fázisban van, csak frissítünk, NEM hívjuk feleslegesen a resolve_round-ot.
   useEffect(() => {
     if (!round || round.phase === "reveal" || round.phase === "done" || !round.placingDeadline) return;
+    const roundId = round.id;
     const deadline = new Date(round.placingDeadline).getTime();
     const msLeft = Math.max(0, deadline - Date.now());
     const t = setTimeout(() => handleResolve(), msLeft + 500);
@@ -251,8 +291,10 @@ export default function HostRoomPage() {
     function handleVisibilityChange() {
       if (document.visibilityState !== "visible") return;
       if (Date.now() >= deadline) {
-        // A tab háttérben volt, amíg a deadline lejárt — a setTimeout esetleg még nem
-        // futott le (vagy throttle-ölve van). Ne várjunk rá, azonnal próbáljuk kiértékelni.
+        // A tab háttérben volt, amíg a deadline lejárt. Előbb ellenőrizzük a szerver
+        // tényleges állapotát (lehet, hogy a pg_cron már lezárta) — csak ha még mindig
+        // nyitva van, próbáljuk a hostot magát lezáratni.
+        checkServerRoundState(roundId);
         handleResolve();
       }
     }
@@ -264,6 +306,34 @@ export default function HostRoomPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [round?.id, round?.placingDeadline, round?.phase]);
+
+  // FALLBACK POLLING (BACKEND-NOTES 9.4): a player-oldali round_public fallback pollinggal
+  // analóg host-oldali tartalék — a pg_cron `auto_resolve_expired_rounds` job (20 mp-enként)
+  // a host böngészőjétől FÜGGETLENÜL is lezárhatja a lejárt kört, és utána `round_revealed`
+  // broadcast eventet küld. Ha a host tabja épp akkor kerül előtérbe/háttérbe, amikor ez a
+  // broadcast-ablak lezárul (Realtime nem garantál perzisztenciát háttérben lévő tabra), a
+  // host UI a broadcast nélkül végleg beragadhatna a régi fázisnál. Alacsony frekvenciájú
+  // (10 mp) polling a round_public-ra ugyanígy felfedezi az automata lezárást, mint a
+  // player oldalon a placingDeadline+GRACE_MS-alapú tartalék — csak itt nincs szükség
+  // GRACE_MS-re, mert ez nem indít semmilyen mutációt, csak összeveti az állapotot.
+  const roundIdForHostPolling = round?.id;
+  const roundPhaseForHostPolling = round?.phase;
+  useEffect(() => {
+    if (!roomId || !roundIdForHostPolling) return;
+    if (roundPhaseForHostPolling === "reveal" || roundPhaseForHostPolling === "done") return;
+
+    const POLL_INTERVAL_MS = 10000;
+    let cancelled = false;
+    const intervalId = setInterval(() => {
+      if (!cancelled) checkServerRoundState(roundIdForHostPolling);
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, roundIdForHostPolling, roundPhaseForHostPolling]);
 
   // Amikor a lerakás megtörtént (placement !== null) reveal előtt, azonnal kiértékelünk —
   // nem kell megvárni a deadline-t (D6: "ha van épp kijelölt rés, az számít lerakásnak").
