@@ -1,0 +1,909 @@
+{
+  "ok": true,
+  "playlistId": "3cmVUEjMK7RkTe6ONRTQeJ",
+  "playlistName": "🚗🎤",
+  "trackCount": 100,
+  "possiblyTruncatedAt100": true,
+  "tracks": [
+    {
+      "index": 0,
+      "uri": "spotify:track:7gF9RfiO8nBhFhBkLuiUrb",
+      "title": "Breaking Free",
+      "artist": "Troy, Gabriella, Disney",
+      "durationMs": 207200,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/8f6db491dec8155e22c1f6e7e5ee1da9ed320432",
+      "isPlayable": true
+    },
+    {
+      "index": 1,
+      "uri": "spotify:track:3u4MDwdiF5d5Q7cTyfwZyE",
+      "title": "Boldogság gyere haza",
+      "artist": "Zsuzsa Cserháti",
+      "durationMs": 249266,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/61a89135298319a6b4f975ae4b79fd968a78beef",
+      "isPlayable": true
+    },
+    {
+      "index": 2,
+      "uri": "spotify:track:5WSdYmoQFGweFPiqOtQSiE",
+      "title": "Hogyan tudnék élni nélküled",
+      "artist": "Ember Márk, Törőcsik Franciska",
+      "durationMs": 268403,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/c32ba55e592b2b4eece528782fcba0674bda3b8d",
+      "isPlayable": true
+    },
+    {
+      "index": 3,
+      "uri": "spotify:track:4CED0q8Wri7QCM0em4xCNb",
+      "title": "Ott Leszek Melletted",
+      "artist": "L.L. Junior",
+      "durationMs": 218000,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/e8a433f3ca0cfcc7db398262669f00e3e88572dc",
+      "isPlayable": true
+    },
+    {
+      "index": 4,
+      "uri": "spotify:track:33xrhC6KmGnt4pemTc2yiv",
+      "title": "Ajándék",
+      "artist": "Paulina",
+      "durationMs": 206125,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/7606b57f11d9d849ac4f9b1ab6ef00352aa65be8",
+      "isPlayable": true
+    },
+    {
+      "index": 5,
+      "uri": "spotify:track:1lPTKmztH1QufrTfYwFDWg",
+      "title": "Honey, Honey - From 'Mamma Mia!' Original Motion Picture Soundtrack",
+      "artist": "Amanda Seyfried, Ashley Lilley, Rachel McDowall",
+      "durationMs": 187360,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/b20b2362e3e8e080c9d934d9d4ca70554448ec28",
+      "isPlayable": true
+    },
+    {
+      "index": 6,
+      "uri": "spotify:track:4NXtppMLBccNYmyVgXEAGe",
+      "title": "A Füredi Anna-Bálon",
+      "artist": "Dupla KáVé",
+      "durationMs": 232533,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/d372aa3f9a0e43ea1781bdb58475a33cdc4cdcb9",
+      "isPlayable": true
+    },
+    {
+      "index": 7,
+      "uri": "spotify:track:0GjEhVFGZW8afUYGChu3Rr",
+      "title": "Dancing Queen",
+      "artist": "ABBA",
+      "durationMs": 230400,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/1116076e3d1538852d6605ada1fd7130c8fc75a5",
+      "isPlayable": true
+    },
+    {
+      "index": 8,
+      "uri": "spotify:track:2TxCwUlqaOH3TIyJqGgR91",
+      "title": "Mamma Mia",
+      "artist": "ABBA",
+      "durationMs": 213266,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/b578f8867804a1545b49ef6aea52bd0b8ec766d4",
+      "isPlayable": true
+    },
+    {
+      "index": 9,
+      "uri": "spotify:track:4Fk5P7R1G7vJrnWPx74CHl",
+      "title": "Eső",
+      "artist": "Margaret Island",
+      "durationMs": 210173,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/b7beaf99433decde8374222f65f4afb2fff286b6",
+      "isPlayable": true
+    },
+    {
+      "index": 10,
+      "uri": "spotify:track:2DrwJ7lsnB14yW25N96nHj",
+      "title": "Üres szívek",
+      "artist": "Nemazalány, Sofi",
+      "durationMs": 210793,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/2a92bf0a1b0920783abb07e32ad46480d69a06a9",
+      "isPlayable": true
+    },
+    {
+      "index": 11,
+      "uri": "spotify:track:0ZDGEsVFw15VigGfF4Ytl0",
+      "title": "Rabszolgalány",
+      "artist": "L.L. Junior",
+      "durationMs": 246026,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/9553d762b59cd87a56dc6ce7798740291002bc73",
+      "isPlayable": true
+    },
+    {
+      "index": 12,
+      "uri": "spotify:track:7yq4Qj7cqayVTp3FF9CWbm",
+      "title": "Riptide",
+      "artist": "Vance Joy",
+      "durationMs": 204280,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/74698d907d114f4ba0b2c129bbf260724be80b64",
+      "isPlayable": true
+    },
+    {
+      "index": 13,
+      "uri": "spotify:track:6HeCk6yewXH7WO4D93eub9",
+      "title": "Ruthless (Nice Guys Always Finish Last)",
+      "artist": "MarMar Oso",
+      "durationMs": 233023,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/737eb4f62a321c51ced356db55a70faa9213f49d",
+      "isPlayable": true
+    },
+    {
+      "index": 14,
+      "uri": "spotify:track:2jhLP1RPZ3OsnwNDL9a8LD",
+      "title": "Mona Lisa",
+      "artist": "Rúzsa Magdolna",
+      "durationMs": 183913,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/fd6033ce84a27c0459371751f9848700cae4341d",
+      "isPlayable": true
+    },
+    {
+      "index": 15,
+      "uri": "spotify:track:3LUbmwE4OdgZnX4Vw7OrAW",
+      "title": "Szerelem",
+      "artist": "Rúzsa Magdolna",
+      "durationMs": 243773,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/9f0badef9044661ad2f0164c748a47e6a1f71b0b",
+      "isPlayable": true
+    },
+    {
+      "index": 16,
+      "uri": "spotify:track:7nvn0S1jsnWHe0kBVIJaNx",
+      "title": "Tejút",
+      "artist": "Rúzsa Magdolna",
+      "durationMs": 183869,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/8248866866bcba296c7ddbcce8812e38c9820437",
+      "isPlayable": true
+    },
+    {
+      "index": 17,
+      "uri": "spotify:track:2UFU6Gux4Fs5s2524aWWvq",
+      "title": "Egyszer",
+      "artist": "Rúzsa Magdolna",
+      "durationMs": 231053,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/4c09073aaf0e7aeaf277c3076b28dd72b9977d56",
+      "isPlayable": true
+    },
+    {
+      "index": 18,
+      "uri": "spotify:track:77X43n0mXo6QSsoMav38Ms",
+      "title": "Április",
+      "artist": "Rúzsa Magdolna",
+      "durationMs": 203500,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/e275a84a783f95de1013eec2e293df86c53897ed",
+      "isPlayable": true
+    },
+    {
+      "index": 19,
+      "uri": "spotify:track:7zSqJS5YBEzpeLxqR6WNnm",
+      "title": "Vadonatúj érzés",
+      "artist": "Radics Gigi",
+      "durationMs": 213786,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/631a86e0fee58a2b4442fe53552a76a11a6ccd5e",
+      "isPlayable": true
+    },
+    {
+      "index": 20,
+      "uri": "spotify:track:761moPbsLfLWivuxG4tja2",
+      "title": "Kicsi, Gyere Velem Rózsát Szedni",
+      "artist": "Cserháti Zsuzsa",
+      "durationMs": 196000,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/f9ec1c39b3fde0301ede290187a2bee119b21c64",
+      "isPlayable": true
+    },
+    {
+      "index": 21,
+      "uri": "spotify:track:01IMhZasRhqDo2G6ArJxiI",
+      "title": "A Legnagyobb Hős",
+      "artist": "Honeybeast",
+      "durationMs": 215930,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/4771c981804a7e0979296c9018fc55a161a69580",
+      "isPlayable": true
+    },
+    {
+      "index": 22,
+      "uri": "spotify:track:1WbXUSBlPzL134DpuEZiob",
+      "title": "Jégszív",
+      "artist": "Ember Márk",
+      "durationMs": 182400,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/102df01f451c2d96e179d1fe23127a8e632373ae",
+      "isPlayable": true
+    },
+    {
+      "index": 23,
+      "uri": "spotify:track:2HpcIGU6tQSGEESp9KLkBH",
+      "title": "Darabokra törted a szívem",
+      "artist": "Ember Márk, Törőcsik Franciska, Marics Peti, Márkus Luca, Kirády Marcell, Kovács Harmat",
+      "durationMs": 175225,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/9a7f001126fee4eedb2bdbd9a3b64f2f73dbf00d",
+      "isPlayable": true
+    },
+    {
+      "index": 24,
+      "uri": "spotify:track:1jPdnRL0fhJvtcB0Alqri4",
+      "title": "Ugy szeretnem meghalalni",
+      "artist": "Kati Kovács",
+      "durationMs": 201053,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/d0641f66575398f559021961cd7f41239b9a0edf",
+      "isPlayable": true
+    },
+    {
+      "index": 25,
+      "uri": "spotify:track:3Dr3JRViaKf4N3GjXBNq8Z",
+      "title": "Csak egy tánc volt",
+      "artist": "Pál Szécsi",
+      "durationMs": 135493,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/6f20be1e09cb345116de711cff14bda24103e349",
+      "isPlayable": true
+    },
+    {
+      "index": 26,
+      "uri": "spotify:track:2saTZtcNGbuFbt4OhY914t",
+      "title": "Volna-e kedved?",
+      "artist": "Magna Cum Laude",
+      "durationMs": 216811,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/d8e38f0b54511729b1d4f7ea7bd52dcdfdb2f789",
+      "isPlayable": true
+    },
+    {
+      "index": 27,
+      "uri": "spotify:track:7IbWp5UVI2vWqT70dJtcz3",
+      "title": "A szeretet él (feat. Gáspár Laci)",
+      "artist": "Plastikhead, Gaspar Laci",
+      "durationMs": 184687,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/ee7680810066fd5c65c78728b8143631a9a73e85",
+      "isPlayable": true
+    },
+    {
+      "index": 28,
+      "uri": "spotify:track:7egu8hFWozSJHqlTwVZc2v",
+      "title": "Szerelemvonat",
+      "artist": "Ember Márk, Törőcsik Franciska, Subecz Tamás, Baumühlner Alexandra, Böszörményi Csilla, Végh Péter, Fekete Györgyi",
+      "durationMs": 212329,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/60b0cf3a80416ddf66280425ae03c36de8fe941b",
+      "isPlayable": true
+    },
+    {
+      "index": 29,
+      "uri": "spotify:track:3RSKCHHcyyPNngoAsttOmb",
+      "title": "Vidéki sanzon",
+      "artist": "Magna Cum Laude",
+      "durationMs": 219919,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/dc547de83471dad667139a6102a803de7fffdbf5",
+      "isPlayable": true
+    },
+    {
+      "index": 30,
+      "uri": "spotify:track:2wOfDoTh9AQxQBNMm0QGuo",
+      "title": "Nehézlábérzés",
+      "artist": "Krúbi",
+      "durationMs": 291440,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/2c3fbdb93fdd6b0075fe76d99d19737b293245fa",
+      "isPlayable": true
+    },
+    {
+      "index": 31,
+      "uri": "spotify:track:3057MEb3fzALtIJ9aBiBqp",
+      "title": "Mi Vagyunk A Grund! - Fogadalmi Dal",
+      "artist": "Vígszínház Original Cast",
+      "durationMs": 223978,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/57124fba8795fbbb1bc01e77021daca138f290e1",
+      "isPlayable": true
+    },
+    {
+      "index": 32,
+      "uri": "spotify:track:4jqG43ZWJJ45jrj1MinDMe",
+      "title": "Kerek Egész",
+      "artist": "Bereczki Zoltán",
+      "durationMs": 173720,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/442aac5408bda6a5da8a4c33f2a49c304e4d8079",
+      "isPlayable": true
+    },
+    {
+      "index": 33,
+      "uri": "spotify:track:4PtdqRoQfWvhMLPdA3mGot",
+      "title": "Veled Minden",
+      "artist": "Margaret Island",
+      "durationMs": 170420,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/b14cc91e3117c9d9f27e1dde955dc4bef4f00659",
+      "isPlayable": true
+    },
+    {
+      "index": 34,
+      "uri": "spotify:track:67iAlVNDDdddxqSD2EZhFs",
+      "title": "I'm Gonna Be (500 Miles)",
+      "artist": "The Proclaimers",
+      "durationMs": 219466,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/42b4d0af211d3a2ad254c010254a1957297f3f24",
+      "isPlayable": true
+    },
+    {
+      "index": 35,
+      "uri": "spotify:track:15JINEqzVMv3SvJTAXAKED",
+      "title": "Love The Way You Lie",
+      "artist": "Eminem, Rihanna",
+      "durationMs": 263373,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/3824afd426e7ebbba4e107f811f7506ea3416db0",
+      "isPlayable": true
+    },
+    {
+      "index": 36,
+      "uri": "spotify:track:1qrpoAMXodY6895hGKoUpA",
+      "title": "You Belong With Me (Taylor’s Version)",
+      "artist": "Taylor Swift",
+      "durationMs": 231124,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/93a61f13e0f9551a6d60a6f540871d14bc4d78ed",
+      "isPlayable": true
+    },
+    {
+      "index": 37,
+      "uri": "spotify:track:1u8c2t2Cy7UBoG4ArRcF5g",
+      "title": "Blank Space",
+      "artist": "Taylor Swift",
+      "durationMs": 231826,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/a4930adb3f973bf4b162940844b8ccc46277dc16",
+      "isPlayable": true
+    },
+    {
+      "index": 38,
+      "uri": "spotify:track:7nocu3jcfbZd4N3ot81JfH",
+      "title": "Tiszta Szívvel",
+      "artist": "Horváth Tamás",
+      "durationMs": 196963,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/db94449736b1f480635b3d7c8f4ba835b5c39393",
+      "isPlayable": true
+    },
+    {
+      "index": 39,
+      "uri": "spotify:track:6QFCMUUq1T2Vf5sFUXcuQ7",
+      "title": "Beauty And A Beat",
+      "artist": "Justin Bieber, Nicki Minaj",
+      "durationMs": 227986,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/7ee90f1ac5d956116da382002302bb6a6b0c0c3c",
+      "isPlayable": true
+    },
+    {
+      "index": 40,
+      "uri": "spotify:track:3oL3XRtkP1WVbMxf7dtTdu",
+      "title": "The One That Got Away",
+      "artist": "Katy Perry",
+      "durationMs": 227333,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/5a1bf93027db1e2bd8bc7cd71fc465ba4c5126dc",
+      "isPlayable": true
+    },
+    {
+      "index": 41,
+      "uri": "spotify:track:2qPUnoasNe4Ep43emVXEig",
+      "title": "Billionaire (feat. Bruno Mars)",
+      "artist": "Travie McCoy, Bruno Mars",
+      "durationMs": 211160,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/02f41843308e75503161cfce28114902b9e072fa",
+      "isPlayable": true
+    },
+    {
+      "index": 42,
+      "uri": "spotify:track:2A5YAFeEwGi7KlGMYRf5dX",
+      "title": "Nothing on You",
+      "artist": "B.o.B, Bruno Mars",
+      "durationMs": 107702,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/34d92e8aa5786233d5a0abb1b1d9b8325d7e9fd6",
+      "isPlayable": true
+    },
+    {
+      "index": 43,
+      "uri": "spotify:track:0iGckQFyv6svOfAbAY9aWJ",
+      "title": "Hot N Cold",
+      "artist": "Katy Perry",
+      "durationMs": 220226,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/d351664a0032b1a966fda7beb8bcfd9eed299430",
+      "isPlayable": true
+    },
+    {
+      "index": 44,
+      "uri": "spotify:track:4vVTI94F9uJ8lHNDWKv0i2",
+      "title": "Eenie Meenie",
+      "artist": "Sean Kingston, Justin Bieber",
+      "durationMs": 201946,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/921707d892e34a3b91b80b8396e4b30e11137179",
+      "isPlayable": true
+    },
+    {
+      "index": 45,
+      "uri": "spotify:track:54PbBpquVfhfrwRwvjSXbI",
+      "title": "We Don't Talk Anymore (feat. Selena Gomez)",
+      "artist": "Charlie Puth, Selena Gomez",
+      "durationMs": 217706,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/0af9ac246a60236b73e34854631a6c3de5cca602",
+      "isPlayable": true
+    },
+    {
+      "index": 46,
+      "uri": "spotify:track:6epn3r7S14KUqlReYr77hA",
+      "title": "Baby",
+      "artist": "Justin Bieber, Ludacris",
+      "durationMs": 214240,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/6f57db4d7d782298f0d2de9097a45f4671cb2fd6",
+      "isPlayable": true
+    },
+    {
+      "index": 47,
+      "uri": "spotify:track:67D9O4Oau629qirRXtTWCS",
+      "title": "Beautiful Girls",
+      "artist": "Sean Kingston",
+      "durationMs": 241933,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/164dbe8acbf0ed877d3609f56390ebf3ac45779c",
+      "isPlayable": true
+    },
+    {
+      "index": 48,
+      "uri": "spotify:track:3lXbHd0EoryoQh3vpevNEP",
+      "title": "Firework",
+      "artist": "Katy Perry",
+      "durationMs": 227893,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/f5452ebf843f4c126eacc038fbfdc9502bf0a9b5",
+      "isPlayable": true
+    },
+    {
+      "index": 49,
+      "uri": "spotify:track:20I6sIOMTCkB6w7ryavxtO",
+      "title": "Call Me Maybe",
+      "artist": "Carly Rae Jepsen",
+      "durationMs": 193400,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/c4a7b5e8b012344e607dc50991a32b4a00326739",
+      "isPlayable": true
+    },
+    {
+      "index": 50,
+      "uri": "spotify:track:1nZzRJbFvCEct3uzu04ZoL",
+      "title": "Part Of Me",
+      "artist": "Katy Perry",
+      "durationMs": 216160,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/7a454631475bbbeaa6b2b414b6c924fafeaf6fcd",
+      "isPlayable": true
+    },
+    {
+      "index": 51,
+      "uri": "spotify:track:1GhbQDYGEOjyFwfT8lojcx",
+      "title": "California Gurls",
+      "artist": "Katy Perry, Snoop Dogg",
+      "durationMs": 234653,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/68a9e935c2d5b857dc4da49d5be2789f3d392e03",
+      "isPlayable": true
+    },
+    {
+      "index": 52,
+      "uri": "spotify:track:14iN3o8ptQ8cFVZTEmyQRV",
+      "title": "I Kissed A Girl",
+      "artist": "Katy Perry",
+      "durationMs": 179640,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/56bdae448715b177ad46f9ac3e1e74627f359c83",
+      "isPlayable": true
+    },
+    {
+      "index": 53,
+      "uri": "spotify:track:572dTukHYbBgObqb5OJKcI",
+      "title": "Táncol Velem A Világ",
+      "artist": "Horváth Tamás, RAUL",
+      "durationMs": 231262,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/1798ef940c5722ab0fce0e95f95ff8e35289b3c3",
+      "isPlayable": true
+    },
+    {
+      "index": 54,
+      "uri": "spotify:track:5Oj4a5hrSH9iM1wiJU4gcU",
+      "title": "Szőkével álmodtam",
+      "artist": "Varga Viktor",
+      "durationMs": 240813,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/bf5fb0903321c377109fe347f01e254cfc3fb6e6",
+      "isPlayable": true
+    },
+    {
+      "index": 55,
+      "uri": "spotify:track:2OEzZM21aP4lLbYHVG1GSD",
+      "title": "Titkos üzenet",
+      "artist": "TNT",
+      "durationMs": 216786,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/1d89a6be0e9e9b816cfc0b93406a0cf0abcb8547",
+      "isPlayable": true
+    },
+    {
+      "index": 56,
+      "uri": "spotify:track:7xOUR4tRfNXMBcSgesqROh",
+      "title": "Valami Van A Levegőben",
+      "artist": "Halott Pénz",
+      "durationMs": 211442,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/33fd5c06acdb7675b3da5d6692ee70c425751e1d",
+      "isPlayable": true
+    },
+    {
+      "index": 57,
+      "uri": "spotify:track:10yHTYCb61VHMSskQ8f9XQ",
+      "title": "Nyári Dallam",
+      "artist": "Kelemen Kabátban",
+      "durationMs": 181475,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/88c9a2799969224b176aa01157cf94fac34ba1ed",
+      "isPlayable": true
+    },
+    {
+      "index": 58,
+      "uri": "spotify:track:16xpqlwevdJ7JCcnRpw79w",
+      "title": "Tiszánál",
+      "artist": "Horváth Tamás",
+      "durationMs": 191059,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/aff34d934b0e653287a112d9a9bbd2c8ef18647b",
+      "isPlayable": true
+    },
+    {
+      "index": 59,
+      "uri": "spotify:track:4pM0ZrNCyFwXrQ8nPfb6v1",
+      "title": "Messziről jöttem",
+      "artist": "Manuel",
+      "durationMs": 168125,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/bb6cd1c60d2ace8a0a26ed35c433baee03e40eef",
+      "isPlayable": true
+    },
+    {
+      "index": 60,
+      "uri": "spotify:track:26pzKh2XqHvLMUuWIKxrWI",
+      "title": "Tegnap Láttalak",
+      "artist": "Children Of Distance",
+      "durationMs": 237646,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/b59af114e2481f3bfa1608e3aa5fff1c748b1af5",
+      "isPlayable": true
+    },
+    {
+      "index": 61,
+      "uri": "spotify:track:7sPxuLo7AQs4kj5mwISVtX",
+      "title": "Hello Lányok",
+      "artist": "Halott Pénz, Diaz, Mentha",
+      "durationMs": 235154,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/0e17a7af2e78c4b7869b9ef321f252670589c058",
+      "isPlayable": true
+    },
+    {
+      "index": 62,
+      "uri": "spotify:track:0urTgP4nVlcZuiMVAUepCQ",
+      "title": "Mind1",
+      "artist": "Azahriah, DESH",
+      "durationMs": 191538,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/b760f738aa81a0c665f8b859d68d70fee3083735",
+      "isPlayable": true
+    },
+    {
+      "index": 63,
+      "uri": "spotify:track:5uWUKvPNekWal505BdKgfD",
+      "title": "Talán",
+      "artist": "Manuel, T. Danny",
+      "durationMs": 190567,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/70da9deaaf4b0d68f1e275fa33ee3acf341a7765",
+      "isPlayable": true
+    },
+    {
+      "index": 64,
+      "uri": "spotify:track:3hmsw6g9TyMmYN43Rd49uM",
+      "title": "Ez a lány",
+      "artist": "G.w.M, L.L. Junior",
+      "durationMs": 196000,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/d0fdb9bc9ea31caf893d9054da473d9e46766da4",
+      "isPlayable": true
+    },
+    {
+      "index": 65,
+      "uri": "spotify:track:6pWt3Ju1rzyIunUu31Ibum",
+      "title": "Beléd Estem",
+      "artist": "Horváth Tamás, RAUL, Misshmusic",
+      "durationMs": 232080,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/a65d04778431b786cef0dfa95f51a8f91fb52e83",
+      "isPlayable": true
+    },
+    {
+      "index": 66,
+      "uri": "spotify:track:7knuVKl5CtGWnSAAWWWUL6",
+      "title": "Meggyfa",
+      "artist": "Horváth Tamás",
+      "durationMs": 179043,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/777440047c8750c61218b5a29c550b15a7483705",
+      "isPlayable": true
+    },
+    {
+      "index": 67,
+      "uri": "spotify:track:43XsnT2iaUxlfE90ZEE7ip",
+      "title": "Emlékszem, Sopronban (a VOLT Fesztivál himnusza)",
+      "artist": "Wellhello, Halott Pénz",
+      "durationMs": 210483,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/ec47b571933de0de0419085d0626fb77cbea2395",
+      "isPlayable": true
+    },
+    {
+      "index": 68,
+      "uri": "spotify:track:5qmqZ2Fh9dHhDT82afD08n",
+      "title": "Hol van az a lány",
+      "artist": "DR BRS, Fekete Vonat, Halott Pénz, Monkeyneck",
+      "durationMs": 219600,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/db1d68727a1300a3b946c5f7375c163c619a1907",
+      "isPlayable": true
+    },
+    {
+      "index": 69,
+      "uri": "spotify:track:7MYHbKllkLFFdM4LfGhkMW",
+      "title": "Megmondtam",
+      "artist": "T. Danny",
+      "durationMs": 196285,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/f28f93fe54cccefdec99ae9c05c3da704fd7d8bd",
+      "isPlayable": true
+    },
+    {
+      "index": 70,
+      "uri": "spotify:track:5yP7ZMMAbaZQMfBirBBCen",
+      "title": "Rajosan",
+      "artist": "Mario",
+      "durationMs": 195744,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/1038d2806db89c8471b7f1a736ab2c28f6e4d848",
+      "isPlayable": true
+    },
+    {
+      "index": 71,
+      "uri": "spotify:track:5ff9yazUACfIgRMrGSY3MJ",
+      "title": "Nem Olyan Lány",
+      "artist": "Wellhello",
+      "durationMs": 212053,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/4122c2ddb10edff35263ac1320f40fe505e2a45e",
+      "isPlayable": true
+    },
+    {
+      "index": 72,
+      "uri": "spotify:track:4cvyQrCyoXN8U3cgYoqQTS",
+      "title": "Egyszer Szeret Egyszer Nem",
+      "artist": "Misshmusic, Horváth Tamás, Raul",
+      "durationMs": 227343,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/f6871129ef2059e2bb88e5fa9a25e3274818307a",
+      "isPlayable": true
+    },
+    {
+      "index": 73,
+      "uri": "spotify:track:3h8WlPsJdqDY22odCakd4G",
+      "title": "Egyedül Megyek Tovább",
+      "artist": "Horváth Tamás",
+      "durationMs": 205500,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/612e5772c7a4a8dbba178e985fe898b89a5459ef",
+      "isPlayable": true
+    },
+    {
+      "index": 74,
+      "uri": "spotify:track:4qhZLZ0tYIOoBjEE0tM97J",
+      "title": "Lesz, ahogy lesz",
+      "artist": "Rúzsa Magdolna",
+      "durationMs": 166767,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/35eb64e3b26174f483e7c77777f673c9192f45c7",
+      "isPlayable": true
+    },
+    {
+      "index": 75,
+      "uri": "spotify:track:5TEdES088FOedTOfXVqAsz",
+      "title": "Érj hozzám",
+      "artist": "Rúzsa Magdolna",
+      "durationMs": 198979,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/7740d81dbb5a1e28c8efbad0208cc81e972326c9",
+      "isPlayable": true
+    },
+    {
+      "index": 76,
+      "uri": "spotify:track:2P175244A88zIb4H3tBaDz",
+      "title": "Lehet zöld az ég...",
+      "artist": "Varga Viktor",
+      "durationMs": 242506,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/9b85f927f42560cf8dc37925b677e845d0c30dfa",
+      "isPlayable": true
+    },
+    {
+      "index": 77,
+      "uri": "spotify:track:2lfBmezcN4mMMWpSmtTIyO",
+      "title": "Maradjatok Gyerekek",
+      "artist": "Kelemen Kabátban, Eckü",
+      "durationMs": 208965,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/76413263ae30a09b0cc90614b0d76724b499cea9",
+      "isPlayable": true
+    },
+    {
+      "index": 78,
+      "uri": "spotify:track:5pYNDOTIoZZ5ab77vb8EO3",
+      "title": "Rét",
+      "artist": "Azahriah, DESH",
+      "durationMs": 179234,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/49ed76e69d1ea7bad6b505d592c5b33cbc40f6f3",
+      "isPlayable": true
+    },
+    {
+      "index": 79,
+      "uri": "spotify:track:6OJvW6PvHyxTdScc2b9OqS",
+      "title": "Emlékszem Még Júliusra",
+      "artist": "Horváth Tamás",
+      "durationMs": 185234,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/1bbed4892b3422f6928a5319d5ea6129da9ceded",
+      "isPlayable": true
+    },
+    {
+      "index": 80,
+      "uri": "spotify:track:6qOMogcyDS6EBDvrdiGaST",
+      "title": "Vihar",
+      "artist": "Rico, Miss Mood",
+      "durationMs": 192000,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/004920ea10a4d90d705fb1f4c3a9dbfc1ea36683",
+      "isPlayable": true
+    },
+    {
+      "index": 81,
+      "uri": "spotify:track:3idDLx67Lkao587VCpyMNz",
+      "title": "A sexepilem",
+      "artist": "Bon-Bon",
+      "durationMs": 187493,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/28733583b30a94d1795d55e9f39e6e8c7cef939f",
+      "isPlayable": true
+    },
+    {
+      "index": 82,
+      "uri": "spotify:track:6IiXeDeu7D6n1iDHkMR3mJ",
+      "title": "Világítótorony",
+      "artist": "Oliver Berkes",
+      "durationMs": 257276,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/d585be4262fcd92dea0bf0ede7ad3550179ac9b5",
+      "isPlayable": true
+    },
+    {
+      "index": 83,
+      "uri": "spotify:track:0kgfiBTnaGJZ5HEbJ5NbC5",
+      "title": "Keserû Méz",
+      "artist": "United",
+      "durationMs": 253080,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/b87c2c170239516c4ea44fa4619439ed1f41e809",
+      "isPlayable": true
+    },
+    {
+      "index": 84,
+      "uri": "spotify:track:1CvSysE7ItK4wliPiNkgC6",
+      "title": "Szerelemdoktor",
+      "artist": "UFO",
+      "durationMs": 238733,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/a0a6d9ace3805e930aa6dff25bfefaf12a7822f0",
+      "isPlayable": true
+    },
+    {
+      "index": 85,
+      "uri": "spotify:track:3KrcL8fYnb6bFQoEPzv81V",
+      "title": "POCSOLYÁBA LÉPTEM",
+      "artist": "Takats Tamas Dirty Blues Band",
+      "durationMs": 327800,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/394a8aeb2c3a45a80980c4e720e4bd3d320f92c2",
+      "isPlayable": true
+    },
+    {
+      "index": 86,
+      "uri": "spotify:track:3NHHHeKcv0Up6IQ0cS8JJ4",
+      "title": "Mesélek a bornak",
+      "artist": "4s Street",
+      "durationMs": 217000,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/a8db5a5d6d4735b53e8964f7eac424c17f03cfef",
+      "isPlayable": true
+    },
+    {
+      "index": 87,
+      "uri": "spotify:track:5v1qS9RS2g42zeXHevEdYn",
+      "title": "PANNONIA",
+      "artist": "DESH, Young Fly, Azahriah",
+      "durationMs": 147120,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/8b149fb76e90cdfdc243c1aec716b56fc555caa2",
+      "isPlayable": true
+    },
+    {
+      "index": 88,
+      "uri": "spotify:track:3u582Ft7ws5CvUxCsBHxwT",
+      "title": "MOKKA",
+      "artist": "DESH, Young Fly",
+      "durationMs": 163375,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/c29e0e6ac75147a9cf35a0016121fa4aa703ae4d",
+      "isPlayable": true
+    },
+    {
+      "index": 89,
+      "uri": "spotify:track:6A0eBB253wCOW3KL8upQci",
+      "title": "Utoljára sírtam érted - Akusztik",
+      "artist": "T. Danny",
+      "durationMs": 176000,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/32ed1cc53341e9ae8d31213910824159b5006b0a",
+      "isPlayable": true
+    },
+    {
+      "index": 90,
+      "uri": "spotify:track:0mk5VMmwmbGkPA4eg6qktR",
+      "title": "Nekem ez jár (feat. Pápai Joci)",
+      "artist": "Majka, Curtis, Blr, Pápai Joci",
+      "durationMs": 231058,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/4193d74eb4f3b03b9d18c65d1783c8112cc989f7",
+      "isPlayable": true
+    },
+    {
+      "index": 91,
+      "uri": "spotify:track:2qYpqp0S4WHHl8nz7NNgN4",
+      "title": "Ha az életben",
+      "artist": "Kispál és a Borz",
+      "durationMs": 176013,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/d4993dfb7b3bccb923fac7c219809067837276d7",
+      "isPlayable": true
+    },
+    {
+      "index": 92,
+      "uri": "spotify:track:3kzReJLhcuSHDB0TVwq1o9",
+      "title": "apuveddmeg",
+      "artist": "Wellhello",
+      "durationMs": 196500,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/4793fda8209d38f868b47924029c410c0542bf6c",
+      "isPlayable": true
+    },
+    {
+      "index": 93,
+      "uri": "spotify:track:0bivRIFWuEE8KMSKpswS8c",
+      "title": "Barátom",
+      "artist": "Wellhello",
+      "durationMs": 196358,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/e83c152783deb0b71ad020b32e627e5bfb32b2e9",
+      "isPlayable": true
+    },
+    {
+      "index": 94,
+      "uri": "spotify:track:1Hmqe1oW9VVr5TKCoA5Hyl",
+      "title": "Mennyország Tourist",
+      "artist": "Tankcsapda",
+      "durationMs": 230933,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/73d3a5fb7ed936b8ccd7a2729a3465ccfa6503f9",
+      "isPlayable": true
+    },
+    {
+      "index": 95,
+      "uri": "spotify:track:2ECeeSi1ImwowkGOdAVI6w",
+      "title": "Úristen",
+      "artist": "VALMAR, Szikora Róbert",
+      "durationMs": 194629,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/7397c451a8440f2d33af9b9aa288042cd8327648",
+      "isPlayable": true
+    },
+    {
+      "index": 96,
+      "uri": "spotify:track:4u7EnebtmKWzUH433cf5Qv",
+      "title": "Bohemian Rhapsody - Remastered 2011",
+      "artist": "Queen",
+      "durationMs": 354320,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/d56de4777551c3eb7430ecf289809b1653147bf8",
+      "isPlayable": true
+    },
+    {
+      "index": 97,
+      "uri": "spotify:track:7ne4VBA60CxGM75vw0EYad",
+      "title": "That’s So True",
+      "artist": "Gracie Abrams",
+      "durationMs": 166300,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/aed073ed2859447c5b275cd7bace28302330b629",
+      "isPlayable": true
+    },
+    {
+      "index": 98,
+      "uri": "spotify:track:1NrNVDLK4ncVN6ydBF7UOV",
+      "title": "Szereted-E Még?",
+      "artist": "Szécsi Pál",
+      "durationMs": 193893,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/c2464fb051ab9ff01009aa99a8d1cbae8cfeb861",
+      "isPlayable": true
+    },
+    {
+      "index": 99,
+      "uri": "spotify:track:386RUes7n1uM1yfzgeUuwp",
+      "title": "The Lazy Song",
+      "artist": "Bruno Mars",
+      "durationMs": 189109,
+      "spotifyPreviewUrl": "https://p.scdn.co/mp3-preview/9f8f349deb135ea833fbdd6803c21ef8103b1a29",
+      "isPlayable": true
+    }
+  ]
+}

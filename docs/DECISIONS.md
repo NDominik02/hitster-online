@@ -34,3 +34,9 @@ Ugyanaz a végigpörgetős H6, csak rövidebb idővonalon — nincs külön vari
 
 ## D11 — Tap-to-place fallback (DESIGN D-Q4)
 Bekerül **F1-be** — accessibility-minimum és sok androidos böngészőben a drag&drop touch-eseményei megbízhatatlanok, ez nem halasztható F2-re.
+
+## D12 — Elsődleges audio-forrás (F0-REPORT kérdés)
+A **Spotify embed preview** (`p.scdn.co` linkek) lesz az elsődleges audioforrás az iTunes helyett — 100%-os lefedettséget adott mindkét tesztelt playlisten, nincs fuzzy-matching bizonytalanság. Az Architect tervezze be: a linkeket a pakli-generáláskor **Supabase Storage-ba töltjük** (stabilitás — nem tudni, meddig élnek az eredeti linkek — és anti-leak, mert a Storage URL-ből nem derül ki cím/előadó). Az iTunes marad **tartalék forrás**, ha egy adott számhoz nincs Spotify embed-találat. Ez módosítja a PLAN.md 4. szakaszát (zene-pipeline) — az Architect az ARCHITECTURE.md-ben rögzítse a véglegeset, a PLAN.md-t nem kell utólag átírni, a DECISIONS.md az irányadó.
+
+## D13 — 3. playlist pótlása
+A tulaj a Chrome extension csatlakoztatását választotta a 3. (privát) playlisthez, de a kapcsolat még nem él a session alatt. Az F0 a másik 2 playlist alapján lezárva (Playlist 2 önmagában is játszható paklinak elég); a 3. playlistet utólag pótoljuk, amint a Chrome-kapcsolat létrejön — ez nem blokkolja az Architect/F1 indulását.

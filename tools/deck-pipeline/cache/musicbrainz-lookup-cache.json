@@ -1,0 +1,926 @@
+{
+  "idegen|manuel": {
+    "mbStatus": "matched",
+    "year": 2023,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Idegen",
+    "mbMatchedArtist": "Manuel",
+    "mbRecordingId": "b335b73a-23a0-4ea1-acf8-6fbf87528ca7"
+  },
+  "hazudtal|kkevin t danny ginoka": {
+    "mbStatus": "matched",
+    "year": 2020,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 0.75,
+    "mbMatchedTitle": "Hazudtál",
+    "mbMatchedArtist": "KKevin Ginoka T. Danny",
+    "mbRecordingId": "bda4bbab-8abc-45fa-8737-152b1f72a324"
+  },
+  "miafasz|azahriah desh": {
+    "mbStatus": "matched",
+    "year": 2022,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Miafasz",
+    "mbMatchedArtist": "Azahriah DESH",
+    "mbRecordingId": "b44c9580-bd34-439f-9f77-5867ac0fd00c"
+  },
+  "van nalunk minden|misshmusic": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "tiszanal|horvath tamas": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "kellett a penz|kkevin t danny": {
+    "mbStatus": "matched",
+    "year": 2021,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Kellett a pénz",
+    "mbMatchedArtist": "KKevin T. Danny",
+    "mbRecordingId": "2668d899-c8f4-4214-911e-fc7a86352cfb"
+  },
+  "nem eri meg|kkevin t danny": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "lehet zold az eg|varga viktor": {
+    "mbStatus": "matched",
+    "year": 2011,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Lehet zöld az ég...",
+    "mbMatchedArtist": "Varga Viktor",
+    "mbRecordingId": "16286e7c-c15f-4721-8f0a-128e65de743a"
+  },
+  "oszinte vallomas|horvath tamas raul deniz": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "vege|horvath tamas raul children of distance": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "atvertel|abrahaam": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "zombi|manuel": {
+    "mbStatus": "matched",
+    "year": 2023,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Zombi",
+    "mbMatchedArtist": "Manuel",
+    "mbRecordingId": "15c24f82-f0c5-4e1e-9eb3-25c10a5b3bcf"
+  },
+  "meselek a bornak|4s street": {
+    "mbStatus": "matched",
+    "year": 2021,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Mesélek a bornak",
+    "mbMatchedArtist": "4S Street",
+    "mbRecordingId": "cde48bed-91e2-4cd9-b113-b1caf6670515"
+  },
+  "tegnap lattalak|children of distance": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "tancol velem a vilag|horvath tamas raul": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "utoljara sirtam erted akusztik|t danny": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "emlekszem meg juliusra|horvath tamas": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "hamis kapcsolat|abrahaam": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "ne hagyd abba|horvath tamas": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "picsa|beerseewalk": {
+    "mbStatus": "matched",
+    "year": 2010,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Picsa",
+    "mbMatchedArtist": "Beerseewalk",
+    "mbRecordingId": "e2400fcf-d0d5-4320-882b-e62f0f1498c3"
+  },
+  "csak te letezel|majka es curtis": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "lyukas cipo|burai g w m essemm missh": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "balenciaga|manuel": {
+    "mbStatus": "matched",
+    "year": 2022,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Balenciaga",
+    "mbMatchedArtist": "Manuel",
+    "mbRecordingId": "090855bf-86a0-49e4-8c87-8a185d9eae73"
+  },
+  "breaking free|troy gabriella disney": {
+    "mbStatus": "matched",
+    "year": 2006,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Breaking Free",
+    "mbMatchedArtist": "Troy Gabriella Disney",
+    "mbRecordingId": "184f5dfe-7b03-49fe-9b6a-e13a603bc26c"
+  },
+  "boldogsag gyere haza|zsuzsa cserhati": {
+    "mbStatus": "matched",
+    "year": 2024,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Boldogság gyere haza",
+    "mbMatchedArtist": "Zsuzsa Cserháti",
+    "mbRecordingId": "6ce2de6a-b6e8-470c-bf3f-4c7a1e2e81d8"
+  },
+  "hogyan tudnek elni nelkuled|ember mark torocsik franciska": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "ott leszek melletted|l l junior": {
+    "mbStatus": "matched",
+    "year": 2004,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Ott Leszek Melletted",
+    "mbMatchedArtist": "L.L. Junior",
+    "mbRecordingId": "d39a74b5-ff26-458d-9a41-2e65079cec03"
+  },
+  "ajandek|paulina": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "honey honey|amanda seyfried ashley lilley rachel mcdowall": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "a furedi anna balon|dupla kave": {
+    "mbStatus": "matched",
+    "year": 2011,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "A füredi anna-bálon",
+    "mbMatchedArtist": "Dupla KáVé",
+    "mbRecordingId": "4b40f9f1-351d-4e03-a392-0843de2b9306"
+  },
+  "dancing queen|abba": {
+    "mbStatus": "matched",
+    "year": 1998,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Dancing Queen",
+    "mbMatchedArtist": "ABBA",
+    "mbRecordingId": "1e8948ce-6e61-421d-adaa-115de616f45b"
+  },
+  "mamma mia|abba": {
+    "mbStatus": "matched",
+    "year": 2018,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Mamma Mia",
+    "mbMatchedArtist": "ABBA",
+    "mbRecordingId": "6643dfe0-3dc3-44d5-8fe4-7ef7f996e9e1"
+  },
+  "eso|margaret island": {
+    "mbStatus": "matched",
+    "year": 2015,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Eső",
+    "mbMatchedArtist": "Margaret Island",
+    "mbRecordingId": "a033c95d-d3f3-4718-9d8b-77573b7374b0"
+  },
+  "ures szivek|nemazalany sofi": {
+    "mbStatus": "matched",
+    "year": 2021,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Üres szívek",
+    "mbMatchedArtist": "Nemazalány Sofi",
+    "mbRecordingId": "8426d7f3-e287-436e-8c3e-d077f72c27e5"
+  },
+  "rabszolgalany|l l junior": {
+    "mbStatus": "matched",
+    "year": 2004,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Rabszolgalány",
+    "mbMatchedArtist": "L.L. Junior",
+    "mbRecordingId": "8e5623c9-4415-4f2c-bdff-d62c4306adc2"
+  },
+  "riptide|vance joy": {
+    "mbStatus": "matched",
+    "year": 2014,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Riptide",
+    "mbMatchedArtist": "Vance Joy",
+    "mbRecordingId": "3cb2c757-069d-428c-86e4-8c275ffc1afa"
+  },
+  "ruthless|marmar oso": {
+    "mbStatus": "matched",
+    "year": 2018,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Ruthless (Nice Guys Always Finish Last)",
+    "mbMatchedArtist": "MarMar Oso",
+    "mbRecordingId": "8b70b319-105a-4a9f-931b-8ed9b8477b65"
+  },
+  "mona lisa|ruzsa magdolna": {
+    "mbStatus": "matched",
+    "year": 2018,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Mona Lisa",
+    "mbMatchedArtist": "Rúzsa Magdolna",
+    "mbRecordingId": "d10b0f6d-4f09-46d5-8fff-7be28a3f6969"
+  },
+  "szerelem|ruzsa magdolna": {
+    "mbStatus": "matched",
+    "year": 2014,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Szerelem",
+    "mbMatchedArtist": "Rúzsa Magdolna",
+    "mbRecordingId": "a90aedd2-d4bb-43e1-8d1c-aebb60d3eeed"
+  },
+  "tejut|ruzsa magdolna": {
+    "mbStatus": "matched",
+    "year": 2016,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Tejút",
+    "mbMatchedArtist": "Rúzsa Magdolna",
+    "mbRecordingId": "ebf12cfd-bc91-4f0c-be7c-dda9a74e4e27"
+  },
+  "egyszer|ruzsa magdolna": {
+    "mbStatus": "matched",
+    "year": 2014,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Egyszer",
+    "mbMatchedArtist": "Rúzsa Magdolna",
+    "mbRecordingId": "1a8c2551-a324-4faa-b036-70395eb113d6"
+  },
+  "aprilis|ruzsa magdolna": {
+    "mbStatus": "matched",
+    "year": 2016,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Április",
+    "mbMatchedArtist": "Rúzsa Magdolna",
+    "mbRecordingId": "17f42fb9-77c1-409a-a898-774b96d9bcbe"
+  },
+  "vadonatuj erzes|radics gigi": {
+    "mbStatus": "matched",
+    "year": 2012,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Vadonatúj érzés",
+    "mbMatchedArtist": "Radics Gigi",
+    "mbRecordingId": "a2bfdc4c-3238-42a6-822b-4579a41c3a03"
+  },
+  "kicsi gyere velem rozsat szedni|cserhati zsuzsa": {
+    "mbStatus": "matched",
+    "year": 1997,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Kicsi, gyere velem rózsát szedni",
+    "mbMatchedArtist": "Cserháti Zsuzsa",
+    "mbRecordingId": "a10850e0-6702-4cf5-908e-7aaa898d00bd"
+  },
+  "a legnagyobb hos|honeybeast": {
+    "mbStatus": "matched",
+    "year": 2014,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "A legnagyobb hős",
+    "mbMatchedArtist": "Honeybeast",
+    "mbRecordingId": "ee60121b-7ad9-482b-a66e-d442a1130018"
+  },
+  "jegsziv|ember mark": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "darabokra torted a szivem|ember mark torocsik franciska marics peti markus luca kirady marcell kovacs harmat": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "ugy szeretnem meghalalni|kati kovacs": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "csak egy tanc volt|pal szecsi": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "volna e kedved|magna cum laude": {
+    "mbStatus": "matched",
+    "year": 2020,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Volna-e kedved?",
+    "mbMatchedArtist": "Magna Cum Laude",
+    "mbRecordingId": "72edbff9-1957-411b-9f00-be6831936166"
+  },
+  "a szeretet el|plastikhead gaspar laci": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "szerelemvonat|ember mark torocsik franciska subecz tamas baumuhlner alexandra boszormenyi csilla vegh peter fekete gyorgyi": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "videki sanzon|magna cum laude": {
+    "mbStatus": "matched",
+    "year": 2006,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Vidéki sanzon",
+    "mbMatchedArtist": "Magna Cum Laude",
+    "mbRecordingId": "ae1edf39-271b-4dab-9604-002f35bb327b"
+  },
+  "nehezlaberzes|krubi": {
+    "mbStatus": "matched",
+    "year": 2018,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Nehézlábérzés",
+    "mbMatchedArtist": "Krúbi",
+    "mbRecordingId": "d7cc8677-16b4-4aec-b925-35c4dae15df7"
+  },
+  "mi vagyunk a grund fogadalmi dal|vigszinhaz original cast": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "kerek egesz|bereczki zoltan": {
+    "mbStatus": "matched",
+    "year": 2010,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Kerek egész",
+    "mbMatchedArtist": "Bereczki Zoltán",
+    "mbRecordingId": "660632db-e62e-4d42-9249-2a4457ee701d"
+  },
+  "veled minden|margaret island": {
+    "mbStatus": "matched",
+    "year": 2016,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Veled Minden",
+    "mbMatchedArtist": "Margaret Island",
+    "mbRecordingId": "61531ac5-aed4-407f-ab22-3f75c5726a3b"
+  },
+  "i m gonna be|the proclaimers": {
+    "mbStatus": "matched",
+    "year": 2013,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "I’m Gonna Be (500 Miles)",
+    "mbMatchedArtist": "The Proclaimers",
+    "mbRecordingId": "0ac1446a-6785-411e-a595-c37cd3c277a5"
+  },
+  "love the way you lie|eminem rihanna": {
+    "mbStatus": "matched",
+    "year": 2010,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Love the Way You Lie",
+    "mbMatchedArtist": "Eminem Rihanna",
+    "mbRecordingId": "af72725e-2a73-4cdb-83ad-8e8e419cc497"
+  },
+  "you belong with me|taylor swift": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "blank space|taylor swift": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "tiszta szivvel|horvath tamas": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "beauty and a beat|justin bieber nicki minaj": {
+    "mbStatus": "matched",
+    "year": 2013,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Beauty and a Beat",
+    "mbMatchedArtist": "Justin Bieber Nicki Minaj",
+    "mbRecordingId": "e9906c7d-7920-4781-83bf-a5c36c0159e2"
+  },
+  "the one that got away|katy perry": {
+    "mbStatus": "matched",
+    "year": 2012,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "The One That Got Away",
+    "mbMatchedArtist": "Katy Perry",
+    "mbRecordingId": "cc888ac0-554f-4207-aaff-537e2381301f"
+  },
+  "billionaire|travie mccoy bruno mars": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "nothing on you|b o b bruno mars": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0.37868338557993725
+  },
+  "hot n cold|katy perry": {
+    "mbStatus": "matched",
+    "year": 2011,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Hot n Cold",
+    "mbMatchedArtist": "Katy Perry",
+    "mbRecordingId": "e19c3aea-c3e4-4434-bda7-5c13ffc0a2f9"
+  },
+  "eenie meenie|sean kingston justin bieber": {
+    "mbStatus": "matched",
+    "year": 2010,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Eenie Meenie",
+    "mbMatchedArtist": "Sean Kingston Justin Bieber",
+    "mbRecordingId": "87c5dfa2-b157-411f-98f0-1d1046351f03"
+  },
+  "we don t talk anymore|charlie puth selena gomez": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "baby|justin bieber ludacris": {
+    "mbStatus": "matched",
+    "year": 2010,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 0.84,
+    "mbMatchedTitle": "Baby",
+    "mbMatchedArtist": "Justin Bieber",
+    "mbRecordingId": "70c75409-4224-4bab-836a-eb5f3a9c31d3"
+  },
+  "beautiful girls|sean kingston": {
+    "mbStatus": "matched",
+    "year": 2010,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Beautiful Girls",
+    "mbMatchedArtist": "Sean Kingston",
+    "mbRecordingId": "94da5ae0-3d00-4fc0-b6d7-64b722ba98a3"
+  },
+  "firework|katy perry": {
+    "mbStatus": "matched",
+    "year": 2019,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Firework",
+    "mbMatchedArtist": "Katy Perry",
+    "mbRecordingId": "4b14c4c8-06e7-4393-b890-5c8ffff57902"
+  },
+  "call me maybe|carly rae jepsen": {
+    "mbStatus": "matched",
+    "year": 2022,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Call Me Maybe",
+    "mbMatchedArtist": "Carly Rae Jepsen",
+    "mbRecordingId": "b621565a-0183-4b0a-864c-fb268ea8fed2"
+  },
+  "part of me|katy perry": {
+    "mbStatus": "matched",
+    "year": 2015,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Part of Me",
+    "mbMatchedArtist": "Katy Perry",
+    "mbRecordingId": "fbafd7af-d3f5-4e97-9882-544d4e2f1c18"
+  },
+  "california gurls|katy perry snoop dogg": {
+    "mbStatus": "matched",
+    "year": 2025,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 0.79,
+    "mbMatchedTitle": "California Gurls",
+    "mbMatchedArtist": "Katy Perry",
+    "mbRecordingId": "74a65c28-21dc-4d6d-8305-a674f06928c1"
+  },
+  "i kissed a girl|katy perry": {
+    "mbStatus": "matched",
+    "year": 2022,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "I Kissed a Girl",
+    "mbMatchedArtist": "Katy Perry",
+    "mbRecordingId": "fd75447a-ec47-41c6-b6cd-416a1172d700"
+  },
+  "szokevel almodtam|varga viktor": {
+    "mbStatus": "matched",
+    "year": 2011,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Szőkével álmodtam",
+    "mbMatchedArtist": "Varga Viktor",
+    "mbRecordingId": "47c11d24-8f2e-49c5-98ba-8086caef71ad"
+  },
+  "titkos uzenet|tnt": {
+    "mbStatus": "matched",
+    "year": 1997,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Titkos üzenet",
+    "mbMatchedArtist": "TNT",
+    "mbRecordingId": "44cf2464-87c6-47fc-853a-afb45eeaed89"
+  },
+  "valami van a levegoben|halott penz": {
+    "mbStatus": "matched",
+    "year": 2016,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Valami van a levegőben",
+    "mbMatchedArtist": "Halott Pénz",
+    "mbRecordingId": "3a3e5965-16aa-406b-8a74-7e5440fbd66a"
+  },
+  "nyari dallam|kelemen kabatban": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "messzirol jottem|manuel": {
+    "mbStatus": "matched",
+    "year": 2019,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Messziről jöttem",
+    "mbMatchedArtist": "Manuel",
+    "mbRecordingId": "3a008d0b-ad15-49e0-bae1-e9ff4c787289"
+  },
+  "hello lanyok|halott penz diaz mentha": {
+    "mbStatus": "matched",
+    "year": 2013,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Hello lányok",
+    "mbMatchedArtist": "Halott Pénz Diaz Mentha",
+    "mbRecordingId": "acb25c43-ad07-470a-8c73-52768094ffac"
+  },
+  "mind1|azahriah desh": {
+    "mbStatus": "matched",
+    "year": 2022,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Mind1",
+    "mbMatchedArtist": "Azahriah DESH",
+    "mbRecordingId": "0c875615-4bd8-46a9-a7a5-c85a2dbb3b3d"
+  },
+  "talan|manuel t danny": {
+    "mbStatus": "matched",
+    "year": 2020,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Talán",
+    "mbMatchedArtist": "Manuel T. Danny",
+    "mbRecordingId": "6aaa56f9-5ea4-43da-8bdd-869e685f4b92"
+  },
+  "ez a lany|g w m l l junior": {
+    "mbStatus": "matched",
+    "year": 2021,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Ez a lány",
+    "mbMatchedArtist": "G.W.M. L.L. Junior",
+    "mbRecordingId": "711d8bb1-8ac8-4caa-b6c4-ddd1537a1543"
+  },
+  "beled estem|horvath tamas raul misshmusic": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "meggyfa|horvath tamas": {
+    "mbStatus": "matched",
+    "year": 2018,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Meggyfa",
+    "mbMatchedArtist": "Horváth Tamás",
+    "mbRecordingId": "f2a23b0b-2a5d-4e89-9060-db25d2963b07"
+  },
+  "emlekszem sopronban|wellhello halott penz": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "hol van az a lany|dr brs fekete vonat halott penz monkeyneck": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "megmondtam|t danny": {
+    "mbStatus": "matched",
+    "year": 2020,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Megmondtam",
+    "mbMatchedArtist": "T. Danny",
+    "mbRecordingId": "391fa760-674e-4774-98c7-586a810462ec"
+  },
+  "rajosan|mario": {
+    "mbStatus": "matched",
+    "year": 2017,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Rajosan",
+    "mbMatchedArtist": "Mario",
+    "mbRecordingId": "04287942-75be-4e65-8708-3ccbbabc7a1c"
+  },
+  "nem olyan lany|wellhello": {
+    "mbStatus": "matched",
+    "year": 2018,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Nem olyan lány",
+    "mbMatchedArtist": "Wellhello",
+    "mbRecordingId": "f2bd6303-ba73-4231-b5e5-1fbb7c620089"
+  },
+  "egyszer szeret egyszer nem|misshmusic horvath tamas raul": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "egyedul megyek tovabb|horvath tamas": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "lesz ahogy lesz|ruzsa magdolna": {
+    "mbStatus": "matched",
+    "year": 2018,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Lesz, ahogy lesz",
+    "mbMatchedArtist": "Rúzsa Magdolna",
+    "mbRecordingId": "fddb4ff5-76e4-48b0-b957-de89c137b6e6"
+  },
+  "erj hozzam|ruzsa magdolna": {
+    "mbStatus": "matched",
+    "year": 2016,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Érj hozzám",
+    "mbMatchedArtist": "Rúzsa Magdolna",
+    "mbRecordingId": "17900294-eb16-4970-984f-17f00461c192"
+  },
+  "maradjatok gyerekek|kelemen kabatban ecku": {
+    "mbStatus": "matched",
+    "year": 2014,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Maradjatok gyerekek",
+    "mbMatchedArtist": "Kelemen Kabátban Eckü",
+    "mbRecordingId": "ec30bb30-275d-496a-9df4-e4a76ea82a41"
+  },
+  "ret|azahriah desh": {
+    "mbStatus": "matched",
+    "year": 2020,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "RÉT",
+    "mbMatchedArtist": "Azahriah DESH",
+    "mbRecordingId": "1b72f35f-1483-424c-ba2c-c876e7c102a9"
+  },
+  "vihar|rico miss mood": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "a sexepilem|bon bon": {
+    "mbStatus": "matched",
+    "year": 2000,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "A sexepilem",
+    "mbMatchedArtist": "Bon Bon",
+    "mbRecordingId": "1ad4ab60-3f90-4ad1-8b9a-a5ee3de950db"
+  },
+  "vilagitotorony|oliver berkes": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "keseru mez|united": {
+    "mbStatus": "matched",
+    "year": 2010,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Keserű Méz (Keserű Méz)",
+    "mbMatchedArtist": "United",
+    "mbRecordingId": "e047c5fd-41d4-4ae1-816b-6641ac00803f"
+  },
+  "szerelemdoktor|ufo": {
+    "mbStatus": "matched",
+    "year": 2014,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Szerelemdoktor",
+    "mbMatchedArtist": "UFO",
+    "mbRecordingId": "d1a2272d-5cc7-4c5a-959d-b9fabbe0bf0f"
+  },
+  "pocsolyaba leptem|takats tamas dirty blues band": {
+    "mbStatus": "matched",
+    "year": 2021,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Pocsolyába léptem",
+    "mbMatchedArtist": "Takáts Tamás Dirty Blues Band",
+    "mbRecordingId": "cf84c7b2-30a0-44ff-a15e-3acbbd06684b"
+  },
+  "pannonia|desh young fly azahriah": {
+    "mbStatus": "matched",
+    "year": 2024,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "PANNONIA",
+    "mbMatchedArtist": "DESH Young Fly Azahriah",
+    "mbRecordingId": "9ccf01dc-af52-4d99-b4ec-5b899b487e0b"
+  },
+  "mokka|desh young fly": {
+    "mbStatus": "matched",
+    "year": 2024,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "MOKKA",
+    "mbMatchedArtist": "DESH Young Fly",
+    "mbRecordingId": "8ccc4457-d763-47b9-8de3-3e1991d05285"
+  },
+  "nekem ez jar|majka curtis blr papai joci": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "ha az eletben|kispal es a borz": {
+    "mbStatus": "matched",
+    "year": 2016,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Ha az életben...",
+    "mbMatchedArtist": "Kispál és a Borz",
+    "mbRecordingId": "d8a6aedb-377f-4aeb-932e-3779aaa8cdf2"
+  },
+  "apuveddmeg|wellhello": {
+    "mbStatus": "matched",
+    "year": 2014,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Apuveddmeg",
+    "mbMatchedArtist": "Wellhello",
+    "mbRecordingId": "37d94c9d-281a-4959-b472-30306bedb8f9"
+  },
+  "baratom|wellhello": {
+    "mbStatus": "matched",
+    "year": 2019,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Barátom",
+    "mbMatchedArtist": "Wellhello",
+    "mbRecordingId": "91f1c0a9-f9c2-45d0-81df-f6e656a9787d"
+  },
+  "mennyorszag tourist|tankcsapda": {
+    "mbStatus": "matched",
+    "year": 2004,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Mennyország tourist",
+    "mbMatchedArtist": "Tankcsapda",
+    "mbRecordingId": "ff21defe-d394-42ce-8d84-6a8bd7dcb19d"
+  },
+  "uristen|valmar szikora robert": {
+    "mbStatus": "matched",
+    "year": 2022,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Úristen",
+    "mbMatchedArtist": "VALMAR Szikora Róbert",
+    "mbRecordingId": "2a6bf08f-d789-49b6-880c-9f4f9f77ff33"
+  },
+  "bohemian rhapsody|queen": {
+    "mbStatus": "no-match",
+    "year": null,
+    "yearSource": "none",
+    "mbMatchScore": 0
+  },
+  "that s so true|gracie abrams": {
+    "mbStatus": "matched",
+    "year": 2025,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "That’s So True",
+    "mbMatchedArtist": "Gracie Abrams",
+    "mbRecordingId": "2149d333-ca61-4411-b815-f1faa79d134b"
+  },
+  "szereted e meg|szecsi pal": {
+    "mbStatus": "matched",
+    "year": 2004,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "Szereted-e még?",
+    "mbMatchedArtist": "Szécsi Pál",
+    "mbRecordingId": "a3372171-9657-4a4f-887c-b59482778e6c"
+  },
+  "the lazy song|bruno mars": {
+    "mbStatus": "matched",
+    "year": 2011,
+    "yearSource": "musicbrainz",
+    "mbMatchScore": 1,
+    "mbMatchedTitle": "The Lazy Song",
+    "mbMatchedArtist": "Bruno Mars",
+    "mbRecordingId": "da745ee9-559d-406e-b9a0-172e295d311b"
+  }
+}
