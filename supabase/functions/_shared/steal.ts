@@ -26,10 +26,22 @@ export interface NameGuess {
 }
 
 // One element of rounds.steals jsonb array (ARCHITECTURE.md 11.1.2).
+//
+// REDESIGN (2026-07-03, tulaj request): `position` is now an index on the
+// ACTIVE PLAYER's timeline (the same one they placed the card into), NOT
+// the stealer's own timeline. Everyone — the active player and every
+// stealer — is contesting the exact same gap-set on the exact same board;
+// whichever single gap actually brackets the revealed year wins, no matter
+// who picked it. This matches how the physical game's challenge mechanic
+// works: you're disputing THEIR specific placement, not building an
+// independent theory on your own timeline. When a stealer wins, the card
+// still ends up on THEIR OWN timeline afterward, at whatever position
+// actually corresponds to the revealed year there (computed separately,
+// not reused from this index — see _shared/round.ts findInsertionIndex).
 export interface StealEntry {
   playerId: string; // players.id of the stealer (NOT auth_uid)
   seatOrder: number; // snapshot at steal-registration time (F2-D5 turn-order tie-break)
-  position: number; // the gap the stealer marked on THEIR OWN timeline (AC22.4)
+  position: number; // gap index on the ACTIVE PLAYER's timeline (register_steal rejects position === round.placement)
   tokenSpent: true; // always true at registration (AC20.4 — 1 token already deducted)
   correct: boolean | null; // filled in by resolveRound
   won: boolean | null; // filled in by resolveRound — true ONLY for the player who gets the card
@@ -66,27 +78,27 @@ export interface EvaluateStealsResult {
   entries: StealEntry[]; // same array, with correct/won filled in
 }
 
-// ARCHITECTURE.md 11.4.1 step 6. Only meaningful when the active player's
-// own placement was WRONG (AC22.6/22.7) — callers must check
-// placementCorrect themselves and only invoke this in the wrong-placement
-// branch; when the placement was correct every steal is simply a loss and
-// no evaluation of "where would this land" is needed.
+// ARCHITECTURE.md 11.4.1 step 6, redesigned 2026-07-03. Only meaningful
+// when the active player's own placement was WRONG (AC22.6/22.7) — callers
+// must check placementCorrect themselves and only invoke this in the
+// wrong-placement branch; when the placement was correct, every steal is
+// simply a loss (nobody else could ALSO be right about the exact same
+// timeline's gaps once the active player already nailed it).
 //
-// `timelineYearsByPlayerId`: for each stealer, the pre-insertion timeline
-// years for THAT stealer (their own timeline, not the active player's —
-// AC22.4 marks a gap on the stealer's own timeline).
+// `activeTimelineYears`: the ACTIVE PLAYER's pre-insertion timeline years —
+// the SAME array for every stealer, since everyone is contesting gaps on
+// that one board now, not building independent per-stealer theories.
 // `activeSeatOrder`: seat_order of the round's active player, used to find
 // the "next after the active player" winner among multiple correct
 // stealers (F2-D5).
 export function evaluateSteals(
   steals: StealEntry[],
   card: CardForEvaluation,
-  timelineYearsByPlayerId: Map<string, number[]>,
+  activeTimelineYears: number[],
   activeSeatOrder: number
 ): EvaluateStealsResult {
   const evaluated = steals.map((entry) => {
-    const years = timelineYearsByPlayerId.get(entry.playerId) ?? [];
-    const correct = evaluatePlacement(entry.position, card.year, years);
+    const correct = evaluatePlacement(entry.position, card.year, activeTimelineYears);
     return { ...entry, correct, won: false as boolean | null };
   });
 

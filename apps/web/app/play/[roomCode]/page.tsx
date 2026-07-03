@@ -510,12 +510,14 @@ export default function PlayRoomPage() {
             )}
           </div>
 
-          <div>
-            <h2 className="text-text-muted text-sm uppercase tracking-wide mb-2">
-              {activePlayer.name} idővonala
-            </h2>
-            <Timeline cards={activeTimeline} />
-          </div>
+          {!stealing && (
+            <div>
+              <h2 className="text-text-muted text-sm uppercase tracking-wide mb-2">
+                {activePlayer.name} idővonala
+              </h2>
+              <Timeline cards={activeTimeline} />
+            </div>
+          )}
 
           {stealing ? (
             <>
@@ -527,8 +529,15 @@ export default function PlayRoomPage() {
                   {stealError}
                 </p>
               )}
+              {/* A tulaj kérésére (2026-07-03): a lopó a SORON LÉVŐ idővonalán jelöl — élőben
+                  látja, ő hova tette (round.placement, "📍 ide tette", nem választható), és
+                  egy MÁSIK rést jelölhet meg — nem a saját idővonalán, teljesen külön elmélet
+                  helyett a konkrét döntést vitatja. */}
               <StealButton
-                cards={myTimeline}
+                cards={activeTimeline}
+                activePlayerName={activePlayer.name}
+                activePlayerColorValue={playerColorValue(activePlayer.color)}
+                markedSlotIndex={round.placement}
                 ownerColorValue={playerColorValue(me.color)}
                 tokens={me.tokens ?? 0}
                 alreadyStole={stealSubmittedForRound === round.id}

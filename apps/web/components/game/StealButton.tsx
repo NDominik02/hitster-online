@@ -6,8 +6,17 @@ import { Timeline } from "./Timeline";
 import { AppButton } from "../system/AppButton";
 
 export interface StealButtonProps {
-  /** A stealer SAJÁT idővonala — ide jelöl rést (ARCHITECTURE 11.6.1, AC22.4). */
+  /**
+   * A SORON LÉVŐ játékos idővonala (nem a lopóé!) — a tulaj kérésére (2026-07-03): mindenki
+   * ugyanazért a helyért versenyez a soron lévő idővonalán, nem mindenki a sajátján épít külön
+   * elméletet. A soron lévő már letett választása (`markedSlotIndex`) élőben látszik és nem
+   * választható újra.
+   */
   cards: TimelineCardPublic[];
+  activePlayerName: string;
+  activePlayerColorValue: string;
+  /** A soron lévő játékos választott rése (`round.placement`) — nem választható. */
+  markedSlotIndex: number | null;
   ownerColorValue: string;
   tokens: number;
   /** Már leadta-e a steal-jét ebben a körben (AC22.5 — egy steal/játékos/kör). */
@@ -20,13 +29,16 @@ export interface StealButtonProps {
 /**
  * Steal-gomb + pozíciójelölő a P4 steal-képernyőn (DESIGN 5.4 ⟨F2⟩, ARCHITECTURE 11.6.1/11.8).
  *
- * A nem-aktív játékosok a saját idővonalukon jelölnek rést a REJTETT kártyához (anti-leak,
- * AC22.10 — a kártya kiléte itt sosem derül ki), majd 1 tokenért "elteszik" a jelölést. A
- * jelölés kliens-lokális, amíg a `register_steal`-t le nem adják — nem broadcastoljuk
- * (ARCHITECTURE 11.8: a steal-pozíció sosem hagyja el a klienst a hívásig).
+ * A nem-aktív játékosok a SORON LÉVŐ idővonalán jelölnek egy MÁSIK rést, mint ahova ő tette —
+ * ha a kiderülő kártya oda illik, ők nyerik el (majd a saját idővonalukra kerül a helyes
+ * pozícióba). A jelölés kliens-lokális, amíg a `register_steal`-t le nem adják — nem
+ * broadcastoljuk (ARCHITECTURE 11.8: a steal-pozíció sosem hagyja el a klienst a hívásig).
  */
 export function StealButton({
   cards,
+  activePlayerName,
+  activePlayerColorValue,
+  markedSlotIndex,
   ownerColorValue,
   tokens,
   alreadyStole,
@@ -47,19 +59,25 @@ export function StealButton({
 
   return (
     <div className="rounded-[var(--radius-card)] border border-accent bg-surface-2 px-4 py-3 space-y-3">
-      <p className="font-bold text-center">🕵️ Szerinted rossz helyre rakta? Lopd el!</p>
+      <p className="font-bold text-center">
+        🕵️ {activePlayerName} 📍-vel jelölt helye szerinted rossz? Lopd el!
+      </p>
 
       {tokens < 1 && (
         <p className="text-xs text-warning text-center">Nincs elég tokened a lopáshoz (1 🪙 kell).</p>
       )}
 
       <div>
-        <div className="text-center text-xs text-text-muted mb-1">Jelöld meg, hova tennéd</div>
+        <div className="text-center text-xs text-text-muted mb-1">
+          {activePlayerName} idővonala — jelöld meg, szerinted hova illik igazán
+        </div>
         <Timeline
           cards={cards}
           slots={canSteal}
           activeSlotIndex={selectedSlot}
           ownerColor={ownerColorValue}
+          markedSlotIndex={markedSlotIndex}
+          markedColor={activePlayerColorValue}
           onTapSelectSlot={canSteal ? setSelectedSlot : undefined}
         />
       </div>

@@ -86,3 +86,14 @@ A `prefers-reduced-motion` **csak a mozgást/animációt** tiltja le, a hangeffe
 
 ## F2-D10 — "Max 1× kihagyható" pontos szemantikája (F2-Q10)
 Újraértelmezve, egyértelműbben: a presence-alapú gyorsított kihagyás **egymást követő, jelenleg lecsatlakozott játékosokra korlátlanul** alkalmazható — a rendszer sorban továbblép, amíg egy online játékost nem talál (nem áll meg mesterségesen az első lecsatlakozottnál). Ha mindenki lecsatlakozott, a parti szünetel. Ez robusztusabb, mint egy kemény "csak 1" korlát, ami feleslegesen végigváratná a partit egy második, egymást követő offline játékoson.
+
+## F2-D11 — Steal-mechanika újratervezése: a SORON LÉVŐ idővonalán, élőben látható jelöléssel (2026-07-03, tulaj kérésére)
+A tulaj jelezte, hogy az eredeti F2 steal-implementáció eltért a fizikai Hitster szabályaitól: minden stealer a **saját** idővonalán jelölt egy pozíciót, vakon, anélkül hogy látta volna, hova tette a soron lévő játékos a kártyát. Ez azt eredményezte, hogy egy stealer elméletileg ugyanoda "tippelhetett", ahova a soron lévő már helyesen letette, és emiatt feleslegesen bukott token.
+
+Új szabály: `round.placement` (a soron lévő játékos választott rése) **élőben látszik** minden kliensen (a `round_public` view már eleve feltétel nélkül exponálta ezt a mezőt, migráció nem kellett hozzá). Minden stealer a **SORON LÉVŐ idővonalán** jelöl egy MÁSIK rést, mint amit ő már választott — a `register_steal` explicit elutasítja (`same_position` hiba), ha valaki ugyanoda próbál lopni. Ha egy stealer nyer, a kártya a SAJÁT idővonalára kerül, a helyes pozícióba beszámolva (nem a megjelölt index kerül át, azt újraszámoljuk a stealer saját idővonalán — lásd `findInsertionIndex` a `_shared/round.ts`-ben).
+
+Indok: ez pontosan a fizikai játék "kihívás" mechanikáját tükrözi — a stealerek a soron lévő KONKRÉT állítását vitatják, nem egy saját, független elméletet építenek. Élőben látni a jelölt rést izgalmasabb és értelmesebb döntéseket tesz lehetővé (látod, hol "hibázott" állítólag a soron lévő, és eldöntheted, hiszel-e neki).
+
+Érintett fájlok: `_shared/steal.ts` (`StealEntry.position` szemantikaváltás + `evaluateSteals` egyszerűsítés egy közös idővonal-tömbre), `_shared/round.ts` (`findInsertionIndex` új helper a nyertes saját idővonalára való beillesztéshez), `register_steal/index.ts` (`same_position` guard), valamint a frontend `TimelineSlot`/`Timeline`/`StealButton` komponensek és a `play/[roomCode]` oldal (a soron lévő idővonalát mutatják lopáskor, a választott rés élő jelölésével).
+
+Élesben tesztelve curl-lel: (1) lopás ugyanoda mint a soron lévő choice → `same_position` 400; (2) lopás más, helyes résre, amikor a soron lévő is helyesen tett → a lopás automatikusan veszít (nincs "dupla nyertes"); (3) lopás más, helyes résre, amikor a soron lévő HIBÁSAN tett → a stealer nyer, és a kártya a SAJÁT idővonalán, a helyes évszám szerinti pozícióba kerül (nem a megjelölt index szerint).

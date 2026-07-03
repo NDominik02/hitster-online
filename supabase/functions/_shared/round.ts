@@ -334,15 +334,10 @@ export async function resolveRound(
     if (placementCorrect) {
       evaluatedSteals = steals.map((s) => ({ ...s, correct: false, won: false }));
     } else {
-      // Each stealer marked a gap on THEIR OWN timeline (AC22.4), so we need
-      // per-stealer timeline years, not the active player's.
-      const timelineYearsByPlayerId = new Map<string, number[]>();
-      for (const entry of steals) {
-        if (!timelineYearsByPlayerId.has(entry.playerId)) {
-          const t = await fetchTimelineYears(supabase, entry.playerId);
-          timelineYearsByPlayerId.set(entry.playerId, t.years);
-        }
-      }
+      // REDESIGN (2026-07-03): every steal position is an index on the
+      // ACTIVE PLAYER's timeline (`active.years`, already fetched above for
+      // the active player's own placement check) — not per-stealer own
+      // timelines anymore. Everyone contests the same board.
       const { data: activePlayerRow } = await supabase
         .from('players')
         .select('seat_order')
@@ -350,7 +345,7 @@ export async function resolveRound(
         .single();
       const activeSeatOrder = activePlayerRow?.seat_order ?? 0;
 
-      const result = evaluateSteals(steals, card, timelineYearsByPlayerId, activeSeatOrder);
+      const result = evaluateSteals(steals, card, active.years, activeSeatOrder);
       stealWinnerId = result.winnerPlayerId;
       evaluatedSteals = result.entries;
     }
@@ -414,10 +409,15 @@ export async function resolveRound(
     // S12: active player's own correct placement.
     await insertIntoTimeline(supabase, round.active_player_id, card.id, round.placement, active.rows);
   } else if (outcome === 'wrong' && stealWinnerId) {
-    // AC22.7: card goes to the winning stealer's own marked position instead.
-    const winnerEntry = evaluatedSteals.find((s) => s.playerId === stealWinnerId)!;
+    // AC22.7, REDESIGN 2026-07-03: the winning stealer's `position` was an
+    // index on the ACTIVE PLAYER's timeline (what they were contesting),
+    // NOT a valid index on the winner's own board — their timeline has a
+    // different set of cards/years, so that index would be meaningless (or
+    // outright wrong) there. Compute the winner's OWN correct insertion
+    // index fresh, from the card's actual revealed year.
     const winnerTimeline = await fetchTimelineYears(supabase, stealWinnerId);
-    await insertIntoTimeline(supabase, stealWinnerId, card.id, winnerEntry.position, winnerTimeline.rows);
+    const winnerPosition = findInsertionIndex(card.year, winnerTimeline.years);
+    await insertIntoTimeline(supabase, stealWinnerId, card.id, winnerPosition, winnerTimeline.rows);
   }
   // else: wrong/timeout with no steal winner — card is simply discarded (F1
   // behavior preserved). 10c (steal token forfeiture) needs no action here —
@@ -441,6 +441,20 @@ export function evaluatePlacement(pos: number, year: number, timelineYears: numb
   if (left !== null && year < left) return false;
   if (right !== null && year > right) return false;
   return true;
+}
+
+// REDESIGN 2026-07-03: finds the single correct insertion index for `year`
+// on a (sorted, ascending) timeline — used when a steal-winner's card must
+// be placed on THEIR OWN board, where the position they contested (an index
+// on the ACTIVE PLAYER's board) has no direct meaning. Picks the leftmost
+// valid gap (before the first strictly-greater year), matching the same
+// tie-smoothing spirit as evaluatePlacement (equal years are never a
+// mismatch on either side).
+export function findInsertionIndex(year: number, sortedTimelineYears: number[]): number {
+  for (let i = 0; i < sortedTimelineYears.length; i++) {
+    if (sortedTimelineYears[i] > year) return i;
+  }
+  return sortedTimelineYears.length;
 }
 
 // Turn order: next seat_order after the given player's, wrapping around.

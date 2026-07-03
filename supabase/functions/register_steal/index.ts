@@ -5,10 +5,18 @@
 // Caller: any non-active player in the room (AC22.2 — you cannot steal from
 // yourself), during the 15s steal window (AC22.1/AC22.3/AC22.4).
 //
-// Anti-leak (AC22.10): the stealer only ever sends a POSITION on their own
-// timeline — never anything about the hidden card. This function never
-// reads deck_cards and never returns any correctness info; "were you right"
-// is only ever knowable at reveal time (resolveRound).
+// REDESIGN (2026-07-03, tulaj request): `position` is now an index on the
+// ACTIVE PLAYER's timeline (the same board they placed the card into,
+// visible live via round_public.placement) — NOT the stealer's own
+// timeline. Picking the exact same slot the active player already chose is
+// rejected outright: it can never be a meaningful steal (if that slot is
+// right, the active player already gets the card; if it's wrong, guessing
+// the identical wrong slot is equally wrong).
+//
+// Anti-leak (AC22.10): the stealer only ever sends a POSITION on the active
+// player's timeline — never anything about the hidden card itself. This
+// function never reads deck_cards and never returns any correctness info;
+// "were you right" is only ever knowable at reveal time (resolveRound).
 
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
@@ -38,7 +46,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: round, error: roundError } = await supabase
     .from('rounds')
-    .select('id, room_id, active_player_id, phase, steal_deadline, steals')
+    .select('id, room_id, active_player_id, phase, placement, steal_deadline, steals')
     .eq('id', body.roundId)
     .single();
 
@@ -57,6 +65,16 @@ Deno.serve(async (req: Request) => {
   if (!callerPlayer) return errorResponse('not_a_player', 'Csak a szoba játékosai lophatnak.', 403);
   if (callerPlayer.id === round.active_player_id) {
     return errorResponse('cannot_steal_self', 'A saját köröd nem lophatod meg.', 403);
+  }
+
+  // REDESIGN 2026-07-03: nem választhatod ugyanazt a rést, ahova a soron lévő már letette —
+  // ha az helyes, úgyis ő kapja a kártyát, ha rossz, ugyanoda tippelni ugyanúgy rossz lenne.
+  if (round.placement !== null && body.position === round.placement) {
+    return errorResponse(
+      'same_position',
+      'Ugyanoda nem lophatsz, ahova már letette — válassz másik helyet.',
+      400
+    );
   }
 
   // AC22.1: only during 'stealing' phase, before steal_deadline.
