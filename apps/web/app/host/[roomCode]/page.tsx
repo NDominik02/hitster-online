@@ -23,6 +23,7 @@ import {
   drawCard,
   resolveRound,
   disputeRound,
+  overrideGuess,
   nextTurn,
   fetchPlayers,
   fetchRoundPublic,
@@ -66,6 +67,11 @@ export default function HostRoomPage() {
   // gombnyomáskor (a resolve_round válaszát nem kell megvárni), és amíg a dispute fut/lezajlott,
   // a "Következő kör" auto-tovább logikát is felfüggesztjük ennél a körnél.
   const [disputeState, setDisputeState] = useState<"idle" | "disputing" | "disputed">("idle");
+
+  // A tulaj kérésére: a bemondás automatikus talált/nem-talált eredménye a vitagomb mellett,
+  // külön is felülbírálható (a csapat közösen dönthet úgy, hogy a beírt cím/előadó elfogadható,
+  // vagy éppen visszavonandó) — a kör egészét (évszám/lerakás) ez nem érinti.
+  const [guessOverrideSaving, setGuessOverrideSaving] = useState(false);
 
   // F2 (S25, AC25.5) — "Anna kimaradt, mert lecsatlakozott" toast a turn_auto_skipped eventből.
   const [autoSkipNames, setAutoSkipNames] = useState<string[] | null>(null);
@@ -262,6 +268,26 @@ export default function HostRoomPage() {
       // Hiba esetén visszaállunk "idle"-re, hogy a gomb újra próbálható legyen — a countdown
       // viszont NEM indul újra automatikusan (a felhasználó már jelezte a szándékát).
       setDisputeState("idle");
+    }
+  }
+
+  /**
+   * A tulaj kérésére: a bemondás elismerésének manuális felülbírálása, a vitagomb mellett, attól
+   * függetlenül. Ugyanabban az ablakban hívható (reveal fázis, next_turn előtt). A szerver a
+   * token-egyenleget is módosítja a váltásnak megfelelően (idempotens, ha már a kért állapotban
+   * van — nincs dupla token-jóváírás/-levonás, ha véletlenül kétszer kattintanak ugyanarra).
+   */
+  async function handleOverrideGuess(correct: boolean) {
+    if (!round) return;
+    setGuessOverrideSaving(true);
+    try {
+      await overrideGuess(round.id, correct);
+      await refreshRound(round.id);
+      await refreshPlayers(roomId!);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Nem sikerült módosítani a bemondás eredményét.");
+    } finally {
+      setGuessOverrideSaving(false);
     }
   }
 
@@ -669,10 +695,29 @@ export default function HostRoomPage() {
               return (
                 <div className="text-center space-y-1 text-sm">
                   {guess && (
-                    <p className={guess.correct ? "text-success" : "text-text-muted"}>
-                      🎤 {players.find((p) => p.id === guess.byPlayerId)?.name ?? "Valaki"} bemondása{" "}
-                      {guess.correct ? "talált (+1 🪙)" : "nem talált"}
-                    </p>
+                    <div className="flex flex-col items-center gap-1">
+                      <p className={guess.correct ? "text-success" : "text-text-muted"}>
+                        🎤 {players.find((p) => p.id === guess.byPlayerId)?.name ?? "Valaki"} bemondása{" "}
+                        {guess.correct ? "talált (+1 🪙)" : "nem talált"}
+                      </p>
+                      {/* A tulaj kérésére: a bemondás elismerése a vitagombtól függetlenül is
+                          felülbírálható, ha közösen úgy döntötök, hogy a beírtat elfogadjátok
+                          (vagy visszavonjátok) — ugyanabban az ablakban él, mint a vitagomb. */}
+                      {disputeState !== "disputed" && (
+                        <button
+                          type="button"
+                          className="text-xs text-text-muted underline hover:text-text disabled:opacity-50"
+                          disabled={guessOverrideSaving}
+                          onClick={() => handleOverrideGuess(!guess.correct)}
+                        >
+                          {guessOverrideSaving
+                            ? "Mentés…"
+                            : guess.correct
+                              ? "Mégsem talált (−1 🪙)"
+                              : "Elfogadjuk, mégis talált (+1 🪙)"}
+                        </button>
+                      )}
+                    </div>
                   )}
                   {steals.map((s) => (
                     <p key={s.playerId} className={s.won ? "text-success" : "text-text-muted"}>

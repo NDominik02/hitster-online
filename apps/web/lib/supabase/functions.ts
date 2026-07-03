@@ -194,6 +194,20 @@ export async function disputeRound(
   return invoke("dispute_round", { roundId });
 }
 
+/**
+ * override_guess — HOST-ONLY, csak `phase='reveal'` alatt hívható (ugyanaz az ablak, mint a
+ * vitagomb). A tulaj kérésére: a bemondás (S21) automatikus fuzzy-matching eredménye (helyes/
+ * helytelen) manuálisan felülbírálható, ha a társaság közösen úgy dönt, hogy a beírt cím/előadó
+ * elfogadható (vagy visszavonandó). A szerver a token-egyenleget is ennek megfelelően módosítja
+ * (+1 ha helytelenből helyesre vált, -1 fordítva); ha már a kért állapotban van, nincs token-hatás.
+ */
+export async function overrideGuess(
+  roundId: string,
+  correct: boolean
+): Promise<{ ok: true; correct: boolean; tokensChanged: boolean; tokensLeft?: number }> {
+  return invoke("override_guess", { roundId, correct });
+}
+
 /** resolve_round (ARCHITECTURE 3.8) — HOST-ONLY, player hívásra 403 (BACKEND-NOTES 7.) */
 export async function resolveRound(roundId: string) {
   return invoke<{ phase: string; outcome: string; revealedCard: unknown }>("resolve_round", {
