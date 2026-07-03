@@ -737,3 +737,501 @@ Ahol tudtam, magam döntöttem és dokumentáltam (a korábbi agentek mintájár
 ---
 
 *Következő lépés a csapat-munkamódszer szerint: a Backend Engineer a Fázis A–B-ből (9. szakasz) indul (Supabase projekt jóváhagyás után), a Frontend Engineer a Fázis C-ből. Eltérés esetén ezt a doksit frissíteni kell (CLAUDE.md szabály).*
+
+---
+---
+
+# 11. F2 — A teljes játék (technikai terv)
+
+*Készítette: System Architect agent · 2026-07-03 · Ez a szakasz KIEGÉSZÍTI a fenti F1-tervet, nem módosítja. Forrás: PRD.md 5b (S20–S25, AC20.1–AC25.7), DECISIONS.md „F2 döntések" (F2-D1–F2-D10), DESIGN.md (TokenCounter/StealButton/GuessInput), BACKEND-NOTES.md (élő rendszer), és a meglévő implementáció (`place_card`, `resolve_round`, `_shared/round.ts`, `_shared/util.ts`).*
+
+> **Vezérelv (változatlan):** a szerver az igazság forrása; minden token-/steal-/guess-/dispute-mutáció kizárólag Edge Function-ben, service-role klienssel, `round_id + phase` optimista zárral. **Anti-leak (D7):** a fel nem fedett kártya adata SOHA nem hagyja el a szervert reveal előtt — ez F2-ben kiterjed a **bemondás-egyezésre és a steal-kiértékelésre** is: mindkettőt a szerver dönti el, a kliens a nyers beírt sztringet / a rejtett kártyához relatív pozíciót küldi, sosem lát megfejtést a reveal előtt.
+
+> **Mit NEM írok újra:** a séma F2-mezői már léteznek (`players.tokens`, `players.missed_turns`, `rounds.steals`, `rounds.name_guess`, `rounds.steal_deadline`, `card_outcome.disputed`) — ezeket **aktiválom és pontosítom**, nem tervezek újat a nulláról. A `resolveRound()` közös helper (`_shared/round.ts`) marad az egyetlen kiértékelő út (host + pg_cron); F2-ben ezt **bővítem** steal-kiértékeléssel és token-jóváírással, nem duplikálom.
+
+---
+
+## 11.1 Végleges séma-pontosítás (F2-mezők aktiválása)
+
+A meglévő táblákra **egyetlen új migráció** (`007_f2_tokens_steals`) kell, ami főként **constrainteket és default-pontosításokat** ad — a mezők típusai már megvannak. Új tábla nincs; új enum-érték nincs (a `card_outcome.disputed` már létezik).
+
+### 11.1.1 `players.tokens` — token-egyenleg
+
+```sql
+-- A mező már INT NOT NULL DEFAULT 2. F2-ben hozzáadjuk a nem-negatív garanciát
+-- (AC20.7: nincs negatív egyenleg — a fedezet-ellenőrzés szerveroldali, de a
+-- constraint a végső háló egy hibás Edge-út ellen is):
+alter table players add constraint players_tokens_nonneg check (tokens >= 0);
+```
+- **Kezdőérték (AC20.1):** `start_game` a `players.tokens = 2`-t explicit beállítja a Start pillanatában (a default már 2, de a `start_game` írja be determinisztikusan, hogy a lobbyban esetleg elköltött/módosult érték ne szivárogjon be — F2-ben a lobbyban token nem mozdul).
+- **A host-eszköz nem játékos (D5):** a hostnak nincs `players` sora (kivéve ha külön belép játékosként), tehát nincs tokenje — semmit nem kell külön kezelni.
+
+### 11.1.2 `rounds.steals` — steal-lista (jsonb array)
+
+A mező `jsonb NOT NULL DEFAULT '[]'`. **Végleges elem-struktúra** (ezt írja a `register_steal`, ezt olvassa a `resolveRound`):
+
+```jsonc
+// rounds.steals : StealEntry[]
+{
+  "playerId":   "uuid",     // a stealer players.id-je (NEM auth_uid — belső)
+  "seatOrder":  3,          // a stealer seat_order-je a kiértékelés-időbeli körsorrendhez (F2-D5)
+  "position":   2,          // a stealer saját idővonalán megjelölt rés (AC22.4, kötelező)
+  "tokenSpent": true,       // mindig true a leadás pillanatában (AC20.4 — 1 token levonva)
+  "correct":    null,       // resolve_round tölti ki: true/false (a pozíció helyes volt-e)
+  "won":        null,       // resolve_round tölti ki: true CSAK annak, aki megkapja a kártyát (F2-D5)
+  "createdAt":  "2026-07-03T18:00:05.123Z"
+}
+```
+
+**Séma-döntés — miért `players.id` + `seatOrder` snapshot a jsonb-ben:** a steal-kiértékelés körsorrend-alapú (F2-D5: „körsorrendben az aktív után következő" sikeres stealer nyer). A `seatOrder`-t a leadás pillanatában snapshoteljük az elembe, hogy a `resolveRound` egy join nélkül, determinisztikusan rendezhessen — és hogy egy közben belépő/kilépő játékos ne torzítsa a sorrendet. A `correct`/`won` mezők a leadáskor `null`-ok; a reveal-tranzakcióban töltődnek ki (anti-leak: a `correct` a reveal előtt nem is számítható ki kliensen).
+
+> **Constraint jsonb-re:** Postgres nem kényszeríti a jsonb belső alakját; a struktúrát a **TypeScript típus** (`_shared/steal.ts`, lásd 11.2) és a `register_steal` szerveroldali validáció garantálja. Külön SQL-constraint nem indokolt (over-engineering egy hobbiprojektben).
+
+### 11.1.3 `rounds.name_guess` — bemondás (jsonb)
+
+A mező `jsonb` (nullable — a legtöbb körben nincs bemondás). **Végleges struktúra:**
+
+```jsonc
+// rounds.name_guess : NameGuess | null
+{
+  "artistGuess": "tom jones",   // NYERS, a játékos által beírt sztring (NEM normalizált — a szerver normalizál)
+  "titleGuess":  "delilah",     // nyers beírt sztring
+  "correct":     null,          // resolve_round tölti ki: true, ha artist ÉS title is >= 0.85 (F2-D1/D2)
+  "createdAt":   "2026-07-03T18:00:01.000Z"
+}
+```
+
+- **Anti-leak (AC21.6):** a `name_guess` a `rounds` táblában él, amit a player-facing `round_public` **nézet NEM ad ki** (a nézet csak `id, room_id, round_no, active_player_id, phase, placement, outcome, placing_deadline, steal_deadline, revealed_card`-ot projektál — a `name_guess`, `steals`, `card_id` belső mezők, sosem mennek player felé). A `correct` mező tehát fizikailag nem szivárog a reveal előtt.
+- **`correct` időzítése (AC21.7):** a `+1 token` jóváírása és a `correct=true` beírása **a reveal-tranzakcióban** történik (`resolveRound`), nem a bemondás pillanatában — különben a `players.tokens` növekedése (amit a `players` RLS kienged) elárulná a reveal előtt, hogy a bemondás talált. **Ez kritikus:** a token-jóváírás nem történhet meg `place_card`-ban.
+
+### 11.1.4 Dispute — a `card_outcome.disputed` enum illesztése
+
+A `disputed` enum-érték már létezik (`create type card_outcome as enum ('correct','wrong','timeout','disputed')`). **Nem kell új mező.** A vitagomb (S24) így illeszkedik:
+
+- A `dispute_round` a kör `rounds.outcome = 'disputed'`-re állítja, és `rounds.phase`-t **`done`**-ra lépteti (a kör lezárul, de érvénytelenítve).
+- **Megkülönböztetés a normál `done`-tól:** a `phase='done' AND outcome='disputed'` kombináció jelzi az érvénytelenített kört. A `next_turn` és a UI ebből tudja, hogy „a kártya kikerült, senki nem kapott semmit, minden token visszaírva".
+- **Új mező NEM kell.** A `revealed_card` már ki van töltve (a dispute a reveal fázisban történik, tehát a kártya már felfedett) — ezt meghagyjuk, hogy a UI meg tudja mutatni, melyik kártya volt vitatott. Egy plusz jelölő a `settings`-be vagy külön oszlopba felesleges: a `(phase, outcome)` pár elég.
+
+**Séma-döntés:** a „kártya kikerül a pakliból, nem húzható újra" (AC24.3) állapotát a `deck_cursor` már léptetett értéke automatikusan garantálja (a húzott kártya `deck_cursor`-ral már túlléptetett — a `draw_card` sosem húzza kétszer ugyanazt). Tehát nincs szükség „elhasznált kártyák" külön táblára; a dispute egyszerűen nem rakja vissza a kártyát. **Ez egyben azt is jelenti:** a diszputált kártya a partiból végleg kiesik (a pakli 1-gyel rövidül) — ez megfelel az AC24.3-nak.
+
+### 11.1.5 `rounds.steal_deadline` — a 15 mp-es ablak
+
+A mező `timestamptz` (nullable). F2-ben **aktív:** a `place_card` tölti ki (`now() + 15s`, lásd 11.3). A `round_public` nézet **már kiadja** (a fenti projekció tartalmazza a `steal_deadline`-t), tehát a kliensek a steal-ablak visszaszámlálóját ebből számolják — nem kell nézet-módosítás.
+
+### 11.1.6 A `round_public` nézet — VÁLTOZATLAN marad
+
+**Fontos anti-leak megerősítés:** a `round_public` nézet a jelenlegi projekciójával **F2-ben is helyes** — a `name_guess`, `steals`, `card_id` nincs benne, tehát bővítés nélkül biztonságos. **NE adjunk hozzá `steals`/`name_guess` mezőt a nézethez a reveal előtt.** A reveal utáni steal-/bemondás-eredményeket (ki lopott, ki nyert, ki mondott be sikeresen — AC21.8, AC22.11) a `revealed_card` jsonb-be **kibővítve** adjuk ki (11.5), nem a belső mezők kiszivárogtatásával.
+
+---
+
+## 11.2 Új `_shared/` modulok (a `resolveRound` bővítése előtt)
+
+A meglévő `_shared/`-hoz (`round.ts`, `util.ts`, `supabase.ts`, `cors.ts`) **két új modul** és a `round.ts` bővítése:
+
+- **`_shared/steal.ts`** — a `StealEntry` / `NameGuess` TypeScript típusok, és két tiszta (side-effect-mentes, szerveroldali) függvény:
+  - `evaluateGuess(guess: NameGuess, card: { title; artist }): boolean` — a bemondás kiértékelése. **Kizárólag szerveroldali** (anti-leak). A meglévő `similarity()` és `primaryArtist()` helpert használja (`_shared/util.ts` — NE írd újra):
+    ```ts
+    // F2-D1 (mindkettő kell) + F2-D2 (0.85 küszöb, primaryArtist = első listázott)
+    const THRESHOLD = 0.85;
+    const artistOk = similarity(guess.artistGuess, primaryArtist(card.artist)) >= THRESHOLD
+                  || similarity(guess.artistGuess, card.artist) >= THRESHOLD; // a teljes és a fő előadó közül a jobb
+    const titleOk  = similarity(guess.titleGuess, card.title) >= THRESHOLD;
+    return artistOk && titleOk; // F2-D1: részjutalom NINCS
+    ```
+    A `similarity()` már normalizál (NFD ékezet-törlés, zárójel/feat. levágás, whitespace) — pontosan az AC21.4 elvárása. A `primaryArtist()` az első listázott előadót adja (F2-D2), így az AC21.5 több-előadós esete fedve.
+  - `evaluateSteals(steals, card, timelineByPlayer, activeSeatOrder): { winnerPlayerId, entries }` — a steal-kiértékelés tiszta magja (lásd 11.4 algoritmus). A helyesség-szabály **ugyanaz az `evaluatePlacement()`**, amit a lerakás használ (`round.ts`) — újrahasznosítjuk (S13 azonos-évszám élsimítással), nem duplikáljuk.
+- **`round.ts` bővítése:** a `resolveRound()` kap egy erweiterte útvonalat, ami a fenti két tiszta függvényt hívja, és a token-tranzakciókat + a `steals`/`name_guess.correct` mezők beírását ugyanabba a reveal-UPDATE köré csoportosítja (11.4). A `drawCard`, `getNextPlayerId`, `evaluatePlacement` változatlan.
+
+---
+
+## 11.3 A fázis-gép módosítása: a `stealing` fázis TÉNYLEGES 15 mp-e
+
+Ez az F2.1 legmélyebb változása, és **érinti a jelenlegi F1 „azonnali kiértékelés" logikáját** — a Backend és Frontend agentnek is tudnia kell.
+
+### 11.3.1 F1 jelenlegi viselkedés (referencia)
+
+- `place_card` beállítja `phase='stealing'`-et, DE `steal_deadline`-t **nem** ír, és a host kliens **azonnal** `resolve_round`-ot hív (F1: `stealEnabled=false`, a stealing fázis 0 mp pass-through). A `resolveRound` a `stealing` fázist elfogadja belépési fázisként.
+
+### 11.3.2 F2 új viselkedés
+
+**`place_card` (bővítve):**
+1. Beírja `placement`-et, `phase='stealing'`-et **ÉS** `steal_deadline = now() + 15s`-et (AC22.1) — egy UPDATE-ben, a meglévő optimista zárral (`.in('phase', ['playing','placing'])`).
+2. **NEM hív azonnal resolve-ot.** A `stealing` fázis most valósan tart 15 mp-ig, amíg steal-ek érkezhetnek.
+3. Ha a körben volt `name_guess` (F2-D1: a bemondás a lerakással EGYÜTT érkezik — lásd 11.3.3), azt a `place_card` már a `rounds.name_guess`-be írta (nyers sztringként, `correct=null`).
+
+**A resolve kiváltása (két út, ugyanaz mint F1-ben a deadline-nál):**
+- **Host-út:** a host kliens a `steal_deadline` lejártakor (vagy amikor minden jogosult játékos döntött — lásd lent) hívja a `resolve_round`-ot. A `resolveRound` **ellenőrzi**, hogy a `steal_deadline` tényleg lejárt-e (analóg a `placing_deadline`-ellenőrzéssel, D6/A2) — a host nem tud korán resolve-olni és így lopásokat „levágni".
+- **pg_cron biztonsági háló:** az `auto_resolve_expired_rounds` a `stealing` fázist **már figyeli** (a `.in('phase', ['playing','placing','stealing'])` szűrő megvan), DE **csak a `placing_deadline`-t nézi**. **Módosítani kell:** a cron a `steal_deadline < now()`-ra is triggereljen `stealing` fázisban. Lásd 11.7 (implementációs jegyzék).
+
+**Korai resolve (minden jogosult döntött — AC22.1):** ha az összes nem-aktív, ≥1 tokennel rendelkező játékos leadta a steal-jét (vagy explicit „kihagyom"-ot küldött), a 15 mp-et nem kell kivárni. **Egyszerűsített F2.1-megoldás:** a `register_steal` a leadás után visszaadja, hányan jogosultak még dönteni; ha 0, a **host kliens** azonnal resolve-ot hív (a szerver a `steal_deadline`-ellenőrzésnél ilyenkor a „mindenki döntött" feltételt is elfogadja — a `resolveRound` megkapja, hány jogosult van vs. hány steal + explicit-skip érkezett). *(Megjegyzés: az „explicit kihagyom" jelzést egy pehelysúlyú `skip_steal` jelzés adhatja, VAGY egyszerűbben: F2.1-ben mindig kivárjuk a 15 mp-et, és a „korai resolve" F2.2-es finomítás. **Architect-döntés: F2.1-ben a 15 mp fix kivárása**, a korai lezárás opcionális későbbi optimalizálás — kevesebb él, kevesebb versenyhelyzet. Lásd F2-A2 lentebb.)*
+
+### 11.3.3 `place_card` bővítése a `name_guess` paraméterrel (F2-D1)
+
+A bemondás a lerakással **együtt** érkezik (a bemondás a lerakás ELŐTT megengedett, de a szerver felé egy hívásban jön a lerakáskor — a kliens a lerakás pillanatáig gyűjti a `GuessInput` mezőket, és a LERAKOM a kettőt együtt küldi). Így a bemondás atomikusan a körhöz kötött, és nincs külön „bemondás" fázis.
+
+**`place_card` új bemenet:**
+```jsonc
+{
+  "roundId": "uuid",
+  "position": 3,
+  "nameGuess": {              // OPCIONÁLIS (AC21.2) — ha a "Bemondom!" kapcsoló ki volt
+    "artistGuess": "tom jones",
+    "titleGuess":  "delilah"
+  }
+}
+```
+**`place_card` kimenet (F2):**
+```jsonc
+{ "phase": "stealing", "stealDeadline": "2026-07-03T18:00:20.000Z" }
+```
+- **Validáció:** ha `nameGuess` jelen van, a `place_card` a `rounds.name_guess`-be írja `{ artistGuess, titleGuess, correct: null, createdAt }`-t **ugyanabban az UPDATE-ben**, mint a `placement`/`phase`/`steal_deadline`. A `correct`-ot NEM számítja ki itt (anti-leak — a `place_card` nem is olvassa a `deck_cards`-ot). A guess sztringeket a szerver **nem** validálja tartalmilag a lerakáskor (üres mezők → a bemondás nem talál a reveal-ben, ez rendben van).
+- **Jogosultság változatlan:** csak az `active_player_id`. A bemondás a soron lévőé (AC21.1).
+
+---
+
+## 11.4 `resolve_round` bővítése — steal-kiértékelés + token-jóváírás (F2.1 mag)
+
+A `resolveRound()` helper (`_shared/round.ts`) bővül. **A meglévő anti-leak invariáns marad:** `phase='reveal'` + `outcome` + `revealed_card` egy UPDATE-ben, `.in('phase', [...])` optimista zárral. A token-mozgásokat és a `steals`/`name_guess.correct` írását **ugyanezen reveal-tranzakció logikai egységébe** csoportosítjuk (Supabase Edge-ben nincs többutas SQL-tranzakció a supabase-js-en át egyszerűen, ezért a **sorrend** garantálja a helyességet: előbb a reveal-UPDATE optimista zárral „lefoglalja" a kört; ha az 0 sort ad, senki nem folytatja — a token-műveletek csak a sikeres lefoglalás UTÁN futnak, így nincs dupla-jóváírás. Lásd „Atomicitás" lent).
+
+### 11.4.1 A bővített algoritmus (a meglévő lépések + F2)
+
+```
+resolveRound(roundId):
+  1. betölti a round-ot (card_id, placement, phase, placing_deadline, steal_deadline,
+     active_player_id, steals, name_guess)   [MEGLÉVŐ + steals/name_guess mezők]
+  2. fázis-ellenőrzés: phase in ('playing','placing','stealing')   [MEGLÉVŐ]
+  3. deadline-ellenőrzés:
+       - ha placement === null: a placing_deadline-nak le kell járnia (D6)   [MEGLÉVŐ]
+       - ÚJ: ha phase==='stealing' és steal_deadline még nem járt le és
+         requireDeadlinePassed → 'steal_window_open' hiba (a host nem zárhat korán)
+  4. betölti a card-ot (deck_cards, service-role)   [MEGLÉVŐ]
+  5. kiértékeli az AKTÍV játékos lerakását (evaluatePlacement) → placementCorrect   [MEGLÉVŐ]
+  6. ÚJ — steal-kiértékelés (evaluateSteals, csak ha steals nem üres):
+       minden StealEntry-re: correct = evaluatePlacement(entry.position, card.year,
+                                        az ADOTT stealer idővonalának évei)
+       - ha placementCorrect === true → MINDEN steal sikertelen (AC22.6):
+             minden entry.won=false; a levont tokenek véglegesülnek (F2-D5: nincs visszatérítés)
+       - ha placementCorrect === false → a kártya elszáll az aktívtól (AC22.7):
+             a helyesen jelölő stealerek közül a körsorrendben (seatOrder) az aktív után
+             következő nyer (F2-D5). winner = az a correct entry, akinek seatOrder-e az
+             aktív seatOrder-hez képest a legkisebb pozitív körkörös távolság.
+             winner.won=true; MINDEN más steal (helyes vagy helytelen) elveszti a tokent
+             (F2-D5: „a token egy tét, nem biztosítás" — nincs visszatérítés).
+  7. ÚJ — bemondás-kiértékelés (evaluateGuess, csak ha name_guess van):
+       guessCorrect = evaluateGuess(name_guess, card)   [szerveroldali, anti-leak]
+  8. outcome meghatározása:
+       - placement===null → 'timeout'   [MEGLÉVŐ, D6]
+       - egyébként placementCorrect ? 'correct' : 'wrong'   [MEGLÉVŐ]
+  9. REVEAL-UPDATE (egy UPDATE, optimista zár):   [MEGLÉVŐ minta, BŐVÍTETT payload]
+       set phase='reveal', outcome=<...>,
+           revealed_card = { title, artist, year, artworkUrl,
+                             // ÚJ publikus reveal-adat (11.5):
+                             guess: { correct: guessCorrect, byPlayerId: active_player_id } | null,
+                             steals: [{ playerId, correct, won }] },   // csak a publikus mezők!
+           name_guess = { ...name_guess, correct: guessCorrect },
+           steals = <entries a correct/won kitöltve>
+       where id=roundId and phase in ('playing','placing','stealing')
+       → ha 0 sor: conflict=true, RETURN (valaki már resolve-olt — nincs token-mozgás)
+ 10. A LEFOGLALÁS UTÁN (csak ha a 9. sikeres volt) — token- és timeline-mutációk:
+       a) bemondás-jutalom (AC20.3/AC21.7): ha guessCorrect → active player tokens += 1
+       b) kártya-beépítés:
+            - placementCorrect → az aktív idővonalába a placement résbe (MEGLÉVŐ)
+            - !placementCorrect és van steal-winner → a winner idővonalába a saját
+              entry.position résébe (AC22.7)
+            - !placementCorrect és nincs winner → a kártya kiesik (MEGLÉVŐ wrong-ág)
+       c) a steal-tokenek: a levonás MÁR megtörtént a register_steal-ben (AC20.4);
+          itt token-visszatérítés NINCS (F2-D5) — semmit nem kell visszaírni.
+```
+
+**Kulcs pont a token-levonás időzítéséről:** a steal 1 tokenjét a **`register_steal` vonja le a leadás pillanatában** (AC20.4), NEM a `resolve_round`. Így a `resolveRound`-nak steal-veszteségnél nincs token-teendője (F2-D5: nincs visszatérítés). Csak a **bemondás-jutalmat** (+1) írja a `resolveRound` a reveal-ben (AC21.7). Ez minimalizálja a token-mutációkat a kritikus reveal-tranzakcióban.
+
+### 11.4.2 Atomicitás és versenyhelyzet (AC20.8)
+
+- **A reveal-UPDATE optimista zárja a kapu:** aki elsőként flippeli `stealing → reveal`-re a kört, az az egyetlen, aki a token-/timeline-mutációkat futtatja. A vesztes (host vs. cron verseny) `conflict=true`-t kap és **azonnal kilép, mielőtt bármilyen token-műveletet futtatna** — ezért nincs dupla +1 token, nincs dupla kártya-beépítés.
+- **A `register_steal` külön token-levonása** szintén optimista zárral védett a `stealing` fázisra (11.4-ben lent): két gyors steal ugyanattól a játékostól nem vonhat le 2 tokent, mert az AC22.5 (egy steal/játékos/kör) a `steals` tömbben ellenőrzött, és a levonás a fázis-zárral atomikus.
+- **`players.tokens` növelése/csökkentése:** a supabase-js-ben `update({ tokens: current + delta })` **olvasás-utáni-írás** versenyezhet. **Megoldás:** a token-mutációkhoz egy `security definer` Postgres RPC-t használunk atomikus `update players set tokens = tokens + $delta where id=$id and tokens + $delta >= 0 returning tokens` mintával (a `where tokens + $delta >= 0` a fedezet-ellenőrzés az adatbázisban — AC20.7, nem olvasás-alapú). Ez az egyetlen új DB-objektum, amit a token-atomicitás megkövetel:
+  ```sql
+  create or replace function adjust_tokens(p_player_id uuid, p_delta int)
+  returns int language sql security definer set search_path = public as $$
+    update players set tokens = tokens + p_delta
+    where id = p_player_id and tokens + p_delta >= 0
+    returning tokens;
+  $$;
+  -- 0 sor visszatérés = fedezethiány (a hívó Edge Function ebből tudja: 'insufficient_tokens')
+  ```
+  A `register_steal` a `-1`-et, a `resolveRound` a bemondás-`+1`-et, a `dispute_round`/`use_token` a megfelelő deltát ezen az RPC-n át végzi — **soha nem olvasás-utáni-írással.**
+
+---
+
+## 11.5 Reveal-adat kibővítése (anti-leak-biztos steal/guess eredmény)
+
+A steal- és bemondás-eredményt (AC21.8, AC22.11) a kliens **CSAK a reveal fázisban** láthatja. Ezt a **`revealed_card` jsonb kibővítésével** oldjuk meg (nem a belső `steals`/`name_guess` mezők nézetbe emelésével), mert a `revealed_card`-ot a `round_public` nézet **már csak `phase in ('reveal','done')` esetén adja ki** — így az anti-leak automatikusan garantált:
+
+```jsonc
+// rounds.revealed_card (reveal-kor a resolveRound írja) — a round_public ezt adja ki reveal után:
+{
+  "title": "Delilah", "artist": "Tom Jones", "year": 1968, "artworkUrl": "https://…",
+  "guess": { "correct": true, "byPlayerId": "uuid-active" },          // null, ha nem volt bemondás
+  "steals": [                                                          // [] , ha nem volt steal
+    { "playerId": "uuid-a", "correct": true,  "won": true  },
+    { "playerId": "uuid-b", "correct": false, "won": false }
+  ]
+}
+```
+- **A `playerId` itt `players.id`** (a kliens a `players` SELECT-ből úgyis ismeri a neveket/színeket, tehát megjeleníthető „ki lopott, ki nyert"). **Nincs `position` a publikus reveal-adatban** — a stealer által jelölt rés belső infó, nem szükséges a UI-hoz, és nem is adjuk ki (minimális felület).
+- **Miért itt és nem külön nézet-mezőben:** a `revealed_card` az egyetlen mező, amit a nézet fázishoz kötve ad ki — bármi, amit ide teszünk, automatikusan örökli a reveal-előtti-elrejtést. Nulla új anti-leak-felület.
+
+---
+
+## 11.6 Új / bővített Edge Functions (pontos I/O)
+
+### 11.6.1 `register_steal` — VALÓS implementáció (a stub lecserélése)
+
+A jelenlegi F2-stub (`register_steal`, jelenleg nincs élő kód) valós implementációja.
+
+**Bemenet:**
+```jsonc
+{ "roundId": "uuid", "position": 2 }   // a stealer SAJÁT idővonalán megjelölt rés (AC22.4)
+```
+**Kimenet (siker):**
+```jsonc
+{ "ok": true, "tokensLeft": 1, "stealCount": 3 }   // tokensLeft = a levonás utáni egyenleged
+```
+**Ki hívhatja / mikor / validáció:**
+- **Jogosultság:** a szoba játékosa (`players.auth_uid = auth.uid()`), DE **nem** az `active_player_id` (AC22.2 — nem lophatod meg magad). A host-eszköznek nincs `players` sora → nem hívhatja (AC22.2).
+- **Fázis:** csak `phase='stealing'` ÉS `now() < steal_deadline` (AC22.1). Lejárt ablak → `409 steal_window_closed`.
+- **Token-feltétel (AC22.3):** a levonás az `adjust_tokens(playerId, -1)` RPC-n át; ha 0 sort ad → `409 insufficient_tokens` (a `StealButton` a kliensen már letiltott 0 tokennél, de a szerver a végső háló).
+- **Pozíció kötelező (AC22.4):** `position` szám kell; hiánya → `400 position_required`.
+- **Egy steal / játékos / kör (AC22.5):** ha a `rounds.steals`-ben már van elem ezzel a `playerId`-vel → `409 already_stole` (és NEM von le újabb tokent).
+- **Írás (atomikus, optimista zár a fázisra):**
+  ```
+  1. adjust_tokens(playerId, -1)  → ha 0 sor: insufficient_tokens, STOP
+  2. append StealEntry a rounds.steals-hez, DE a fázis-zárral:
+     update rounds set steals = steals || $newEntry
+       where id=roundId and phase='stealing' and steal_deadline > now()
+       and not (steals @> $[{"playerId": playerId}])   -- idempotens dupla-védelem
+       returning jsonb_array_length(steals)
+     → ha 0 sor: a fázis közben lezárult VAGY már loptál → a levont tokent
+       vissza kell írni (adjust_tokens(playerId, +1)) és 409-et adni.
+  ```
+  *(A 2. lépés `where`-je + a `not steals @> ...` idempotencia együtt garantálja, hogy dupla-klikk / retry ne vonjon le 2 tokent — ha a beszúrás nem megy át, az 1. lépés levonását visszacsináljuk. Ez az egyetlen hely, ahol token-visszaírás történik register_steal-ben, és csak hiba-kompenzációként.)*
+- **Anti-leak (AC22.10):** a stealer a **rejtett kártyához relatív pozíciót** jelöl a saját idővonalán — sosem látja a kártya kilétét. A `register_steal` nem ad vissza semmilyen kártya-adatot vagy „helyes voltál-e" infót (az csak reveal-ben derül ki).
+- **Broadcast (11.8):** siker után a kliens (vagy a Function szerver-oldalon) `steal_registered` eventet küld a `room:{roomId}` csatornára, hogy a host és a többiek élőben lássák, hányan loptak (kártya-adat NÉLKÜL).
+
+### 11.6.2 `place_card` — bővítve (lásd 11.3.3)
+
+`nameGuess` opcionális paraméter + `steal_deadline = now()+15s` írása. Kimenet: `{ phase:'stealing', stealDeadline }`. A F1-es „host azonnal resolve-ol" viselkedést a host kliensnek le kell cserélnie: most a `steal_deadline`-ig vár (Frontend-teendő, 11.7).
+
+### 11.6.3 `resolve_round` — bővítve (lásd 11.4)
+
+Ugyanaz a HTTP-felület (`{ roundId }` → `{ phase, outcome, revealedCard }`), de a `revealedCard` most tartalmazza a `guess` és `steals` publikus eredményt (11.5). Új hibakód: `409 steal_window_open` (ha a host a `steal_deadline` előtt próbál resolve-olni és van/lehet még steal). A belső `resolveRound()` helper végzi a steal/guess/token logikát.
+
+### 11.6.4 `use_token` — átugrás (skip) és azonnali +1 kártya (draw-3)
+
+Egy Edge Function, két akcióval (mindkettő a soron lévő játékosé, a saját köre elején — F2-D3/F2-D4).
+
+**Bemenet:**
+```jsonc
+{ "roundId": "uuid", "action": "skip" }                 // 1 token: szám átugrása (AC20.5)
+// vagy
+{ "roundId": "uuid", "action": "draw3", "position": 2 } // 3 token: azonnali +1 kártya (AC20.6)
+```
+**Kimenet (skip):**
+```jsonc
+{ "action":"skip", "roundId":"<UJ-kör>", "roundNo":8, "audioUrl":"<signed>", "placingDeadline":"…", "tokensLeft":1 }
+```
+**Kimenet (draw3):**
+```jsonc
+{ "action":"draw3", "outcome":"correct", "revealedCard": { … }, "tokensLeft":0, "phase":"reveal" }
+```
+
+**`action: "skip"` (AC20.5, F2-D3):**
+- **Jogosultság:** csak az `active_player_id`; **fázis `playing`** (a lerakás ELŐTT — AC20.5); még nincs `placement`.
+- **Teendő (atomikus):**
+  1. `adjust_tokens(activePlayerId, -1)` → 0 sor: `409 insufficient_tokens`.
+  2. Az aktuális kör lezárása **kártya nélkül**: a jelenlegi kártya kikerül (a `deck_cursor` már túllépett rá — nem húzható újra, ugyanaz a mechanika mint a dispute-nál, 11.1.4). A körre `phase='done'`, `outcome=null` (nem érvénytelenítés, nem timeout — egyszerűen skip; a `next_turn`-höz hasonló lezárás, de **ugyanaz a játékos jön**).
+  3. **`drawCard(roomId, activePlayerId)`** — ugyanaz a játékos, ÚJ kártya (F2-D3: úgy viselkedik, mint bármely kör; a steal-ablak is érvényes rá). Ez visszaadja az új `audioUrl`-t (csak a hostnak — de a `use_token`-t a player hívja!). **Anti-leak finomság:** a `skip` választ a **player** kapja, aki NEM kaphatja meg az `audioUrl`-t (D7). **Megoldás:** a `use_token` skip-ága az `audioUrl`-t **NEM** adja vissza a playernek; helyette `round_started` broadcastot küld, és a **host** a `draw_card`-ot (vagy annak audio-only ágát) újrahívja a signed URL-ért — pontosan mint egy normál új körnél. Lásd F2-A1 döntés lent.
+- **Nincs limit az átugrások számára (F2-D3);** a 2 induló token a természetes korlát.
+
+**`action: "draw3"` (AC20.6, F2-D4):**
+- **Jogosultság:** csak az `active_player_id`; **a saját köre ELEJÉN** (F2-D4: a rejtélyes kártya-húzás HELYETT, nem mellette). Fázis `playing`, nincs `placement`.
+- **Teendő (atomikus):**
+  1. `adjust_tokens(activePlayerId, -3)` → 0 sor: `409 insufficient_tokens`.
+  2. A kártya **felfedve** kerül a játékoshoz (F2-D4: azonnal be kell illeszteni, zene/időlimit nélkül). A `position` a bemenetben jön (a felfedett kártyát a játékos már látja, tehát tudatosan illeszti).
+  3. **`resolveRound`-szerű kiértékelés azonnal:** `evaluatePlacement(position, card.year, timeline)` → ha helyes, beépül; ha helytelen, **elveszik és a 3 token nem jár vissza** (AC20.6). Mivel a kártya itt **felfedett** (a játékos látja, mielőtt illeszt), ez NEM sért anti-leaket — a `draw3` szándékosan felfedett húzás.
+  4. A kör lezárása: mivel a `draw3` a saját kört **helyettesíti** (F2-D4: nem külön kör), a kör `phase='reveal'→done` lesz, és a `next_turn` a következő játékosra lép. **Nincs zene, nincs steal-ablak** ennél a kártyánál (felfedett húzás, azonnali illesztés).
+- **Séma-megjegyzés:** a `draw3` a felfedett kártyát a `rounds.card_id`-be írja és `revealed_card`-ot azonnal kitölti (a kártya definíció szerint felfedett), majd `phase='reveal'`. A player-facing nézet így korrektül azonnal mutatja.
+
+> **F2-A3 (Architect-döntés — draw3 külön kör-sor):** a `draw3` egy **külön `rounds` sort** hoz létre (`phase='reveal'` állapotban, felfedett kártyával), NEM módosítja a jelenlegi „rejtélyes" kört. Így a körszámlálás tiszta: az aktuális `playing` kör `phase='done'`-ra megy (skip-szerűen, de a token-3-mal), és a `draw3` egy azonnal-revealt kör. Ez konzisztens a fázis-géppel és a `next_turn` nem igényel új ágat.
+
+### 11.6.5 `dispute_round` — vitagomb (kör-érvénytelenítés, S24)
+
+**Bemenet:** `{ "roundId": "uuid" }`
+**Kimenet:** `{ "ok": true, "outcome": "disputed", "refunded": [{ "playerId":"…","amount":1 }] }`
+- **Ki hívhatja (AC24.1):** **kizárólag a host** (`is_room_host` / `rooms.host_uid = auth.uid()`). Player → `403 not_host`.
+- **Mikor (AC24.2, F2-D8):** csak `phase='reveal'`, a `next_turn` ELŐTT. `reveal`-en kívül → `409 not_disputable`.
+- **Teendő (atomikus, optimista zár):**
+  ```
+  1. betölti a round-ot (steals, name_guess, active_player_id, phase)
+  2. UPDATE rounds set phase='done', outcome='disputed'
+       where id=roundId and phase='reveal'   -- optimista zár
+       returning *   → 0 sor: 409 already_advanced
+  3. A LEFOGLALÁS UTÁN (token-visszaírás, AC24.4 — F2-D8: senki nem veszít semmit):
+       a) minden StealEntry-re: adjust_tokens(entry.playerId, +1)   -- steal-token vissza
+       b) ha a körben volt skip/draw3 token-költés ... — LÁSD megjegyzés lent
+       c) a bemondás-jutalom: ha guessCorrect volt és a resolve MÁR jóváírta a +1-et,
+          azt VISSZA kell vonni (adjust_tokens(activePlayerId, -1)), mert a kör
+          érvénytelenül (a bemondás sem számít) — AC24.3: "mintha a kör meg sem történt volna".
+       d) ha a resolve a kártyát MÁR beépítette az idővonalba (correct/steal-winner),
+          azt EL kell távolítani (delete timeline_cards ... + a pozíciók vissza-indexelése),
+          hogy az idővonal a kör előtti állapotba kerüljön (AC24.3).
+  4. next_turn hívása (a KÖVETKEZŐ játékosra lép — F2-D8: nem ismétel ugyanaz)
+  ```
+- **A kártya kikerül a pakliból (AC24.3):** a `deck_cursor` már túllépett rá, nem húzható újra — automatikus (11.1.4).
+- **Token-semlegesség (AC24.4):** a fentiek után minden játékos nettó token-változása a körből **0**.
+- **F2-D8-hoz:** a dispute a countdown-ot a **kliens** oldalon állítja meg (a host UI a vitagomb megnyomásakor azonnal leállítja az 5 mp-es auto-tovább timert); a szerver oldalon a `phase='reveal'`-zár garantálja, hogy ha közben a `next_turn` már lefutott, a dispute `409 already_advanced`-et kap (nem lehet visszamenőleg érvényteleníteni egy már továbblépett kört).
+
+> **F2-A4 (Architect-döntés — a `guessCorrect` +1 visszavonása dispute-nál):** mivel a bemondás-jutalom `+1` a resolve-ban íródik jóvá (AC21.7), és a dispute a resolve UTÁN történik, a dispute-nak **vissza kell vonnia** ezt a +1-et (3.c), hogy az AC24.3 „mintha meg sem történt volna" teljesüljön. Ez a `name_guess.correct` mezőből tudható (a resolve kitöltötte). Hasonlóan a steal-winner kártya-beépítését is visszacsináljuk (3.d).
+> **A skip/draw3 dispute-ja nem értelmezett:** a skip (`use_token skip`) kártya nélkül zárul, a draw3 azonnal-reveal; a vitagomb a **normál reveal** kimenetre vonatkozik (rossz évszám a felfedett kártyán). A skip-nek nincs reveal-je, a draw3 felfedett kártyáját a játékos maga látta illesztéskor — ezekre a dispute nem alkalmazható (a `phase='reveal'` + `outcome in ('correct','wrong','timeout')` feltétel a diszputálhatóság kapuja; a `draw3` reveal-je diszputálható marad, ha „rossz évszám" merül fel — ez konzisztens).
+
+### 11.6.6 `next_turn` — bővítve az auto-skip presence-logikával (S25)
+
+A meglévő `next_turn` (győzelem/pakli-kifogyás/következő-játékos + draw) bővül a **presence-alapú offline-átugrással** (F2-D9/F2-D10).
+
+**Bemenet:** `{ "roomId": "uuid" }` (változatlan)
+**Kimenet (bővített):**
+```jsonc
+{ "next": "draw", "roundId": "uuid", "activePlayerId":"uuid", "skipped": ["uuid-offline-1","uuid-offline-2"] }
+// vagy
+{ "next": "paused", "reason": "all_offline" }        // F2-D10: mindenki offline → parti szünetel
+// vagy
+{ "next": "finished", "winnerPlayerIds": ["uuid"] }
+```
+**Auto-skip logika (a következő-játékos meghatározásában, F2-D10):**
+```
+nextPlayerId = getNextPlayerId(...)               [MEGLÉVŐ]
+skipped = []
+loop (max = players.length iteráció, végtelen ciklus ellen):
+  ha players[nextPlayerId].connected === true → BREAK (megvan az online következő)
+  egyébként (offline):                            [F2-D9: connected=false a 15mp presence-timeoutból]
+    skipped.push(nextPlayerId)
+    nextPlayerId = getNextPlayerId(nextPlayerId)   -- korlátlanul tovább (F2-D10)
+    ha végigértünk mindenkin (skipped.length === players.length):
+      → rooms.status='paused'; RETURN { next:'paused', reason:'all_offline' }  (F2-D10)
+draw_card(nextPlayerId) az első online játékosra
+```
+- **F2-D9:** a `connected` mezőt a presence-timeout (15 mp) állítja `false`-ra. **Ki írja a `connected`-et:** a host kliens a presence `leave`/timeout eseményéből hív egy pehelysúlyú `set_presence` mutációt (vagy a meglévő `reconnect`/leave út bővítése), ami a `players.connected`-et frissíti — a `next_turn` ezt a **szerver-oldali** `connected` mezőt olvassa (AC25.7: nem bízik egyetlen kliens pillanatnyi jelzésében sem, a tartós `connected` mezőt nézi).
+- **F2-D10:** korlátlanul lép tovább egymást követő offline játékosokon, amíg online-t talál; ha mindenki offline → `paused`. A `missed_turns` mezőt (séma) a skip-eléskor növelhetjük statisztikához/UI-jelzéshez (AC25.5 „⚠ offline" jelzés), de a döntés a `connected`-en alapul, nem a `missed_turns`-ön (F2-D10 újraértelmezése: nincs kemény „max 1×" korlát).
+- **A soron lévő offline lejárata (AC25.2):** ha a sor egy offline játékosra kerül, akit a `next_turn` mégis kiválasztott (mert a kör közben csatlakozott le, vagy épp ő az aktív), a `placing_deadline` lejáratakor a szokásos `resolveRound` timeout-tal zárja (D6) — ezt a pg_cron háló amúgy is elvégzi. A **presence-alapú proaktív** átugrás a `next_turn`-beli ciklus (fent), ami már a kör KEZDETEKOR kihagyja az offline következőt, hogy ne kelljen 90 mp-et várni (AC25.5b „rövidített auto-skip").
+- **Host-lecsatlakozás (AC25.6):** változatlan — PAUSE + 2 perc türelmi idő, NEM ez a logika kezeli.
+
+---
+
+## 11.7 A `resolveRound` deadline-ellenőrzés és a pg_cron háló F2-módosítása
+
+A pg_cron háló (`auto_resolve_expired_rounds`, 9. szakasz) **egy ponton bővül** F2-ben:
+
+- **Jelenleg** csak `placing_deadline < now()`-t figyel `phase in ('playing','placing','stealing')` mellett. **Probléma F2-ben:** egy `stealing` fázisú kör, ahol a `placing_deadline` már rég lejárt (a lerakás megtörtént), de a `steal_deadline` a mérvadó — a jelenlegi lekérdezés ezt esetleg túl korán vagy rossz feltétellel zárná.
+- **F2-módosítás:** a lekérdezés két ágra bomlik:
+  ```sql
+  -- (a) playing/placing fázis, lejárt placing_deadline (MEGLÉVŐ, D6 timeout)
+  -- (b) stealing fázis, lejárt steal_deadline (ÚJ, a 15 mp-es ablak vége)
+  where (phase in ('playing','placing') and placing_deadline < now())
+     or (phase = 'stealing' and steal_deadline < now())
+  ```
+- A `resolveRound` `stealing` fázisnál a `steal_deadline`-t ellenőrzi (nem a `placing_deadline`-t) a `requireDeadlinePassed`-hez. **Backend-teendő:** a `resolveRound`-ba egy fázis-függő deadline-választás (`phase==='stealing' ? steal_deadline : placing_deadline`).
+- **Broadcast változatlan:** a cron a sikeres resolve után `round_revealed` eventet küld (9.1) — F2-ben ugyanígy, a reveal-adat már tartalmazza a steal/guess eredményt.
+
+---
+
+## 11.8 Realtime csatorna-bővítés (a 15 mp-es ablak alatt)
+
+A 4. szakasz `room:{roomId}` broadcast-csatornája **két új eventtel** bővül. Anti-leak invariáns változatlan: **egyetlen payload sem tartalmaz kártya-adatot vagy `card_id`-t.**
+
+| Event | Küldi | Payload | Ki reagál | Reakció |
+|---|---|---|---|---|
+| `steal_registered` | register_steal (kliens vagy szerver-oldali broadcast) | `{ roundId, stealCount }` | host + minden player | a host H5 „X-en lopnak" számláló frissül; a playerek látják, hányan léptek — **NEM derül ki, ki mit jelölt** (csak a darabszám) |
+| `steal_window_closed` | resolve_round / auto_resolve (a reveal-lel együtt) | `{ roundId }` | mind | a `stealing` fázis vége → átmenet reveal-re; a kliens refetch `round_public` (most már `revealed_card` a steal/guess eredménnyel) |
+| `round_disputed` | dispute_round | `{ roundId }` | mind | AC24.7 „a host érvénytelenítette a kört" jelzés; refetch → `phase='done'`, `outcome='disputed'` |
+| `turn_auto_skipped` | next_turn (ha `skipped` nem üres) | `{ skipped: [playerId…] }` | mind | AC25.5 „⚠ X offline — kihagyva" jelzés a host/player UI-n |
+
+**A `card_placed` és `round_revealed` közé ékelődő fázis kliensoldalon:**
+- **F1-ben:** `card_placed` → (0 mp stealing) → `round_revealed` gyakorlatilag azonnal.
+- **F2-ben:** `card_placed` → **a `round_public.phase='stealing'` és a `steal_deadline` alapján a kliensek egy 15 mp-es steal-ablakot renderelnek** (host: „lopás folyamatban, 15…0 mp", `CountdownTimer` a `steal_deadline`-ból; nem-aktív playerek: `StealButton` + pozíciójelölő aktív; aktív player: „várakozás a lopásokra"). A `steal_registered` eventek élőben növelik a számlálót. A `steal_deadline` lejártakor a host `resolve_round`-ot hív → `round_revealed` (vagy a cron zárja) → reveal-képernyő a steal/guess eredménnyel. **A fázisváltás forrása mindig a szerver** (`round_public.phase`), a kliens csak refetchel.
+
+**A steal-ablak alatti pozíció-jelölés (anti-leak):** a stealer a saját idővonalán a **rejtett kártyához** jelöl rést; ez a jelölés **kliens-lokális**, amíg a `register_steal`-t le nem adja — nem broadcastoljuk (ellentétben a soron lévő húzásával, ami a `:drag` csatornán megy a hostnak). A steal-pozíció sosem hagyja el a klienst a `register_steal` hívásig, és utána is csak a szerverre megy (a `steals` jsonb belső mezőjeként), sosem a többi kliensre. Így egy stealer nem látja, egy másik hova jelölt (nem is kell — F2-D5 szerint úgyis csak az első helyes nyer körsorrendben).
+
+---
+
+## 11.9 Anti-leak — F2-specifikus megerősítés (kötelező invariánsok)
+
+> A prompt kiemelt kérése: a **bemondás (`name_guess`) validálása MINDIG szerveroldalon.** Ezt itt egyértelműen rögzítem, mert F2-ben ez a legkockázatosabb új leak-felület.
+
+1. **A fuzzy matching SOSEM fut kliensen.** A `evaluateGuess()` (`_shared/steal.ts`) kizárólag Edge Function-ben hívódik (`resolveRound`), service-role klienssel, ami a `deck_cards`-ot olvassa. A kliens **a nyers beírt sztringet** küldi (`place_card` → `rounds.name_guess.{artistGuess,titleGuess}`), és a helyes cím/előadó **soha nem kerül a kliensre a reveal előtt**. Ha a matching kliensen futna, a helyes választ le kellene küldeni a klienshez → azonnali leak. **Ezt tilos megtenni.**
+2. **A steal-kiértékelés is kizárólag szerveroldali** (`evaluateSteals()`, `resolveRound`). A stealer a rejtett kártyához relatív pozíciót jelöl; a „helyes volt-e" csak a reveal-ben derül ki. A steal-ablak alatt a kártya kiléte nem megy ki (AC22.10).
+3. **A `round_public` nézet F2-ben sem ad ki `name_guess`-t, `steals`-t vagy `card_id`-t** a reveal előtt. Minden reveal-utáni eredmény a `revealed_card` jsonb-n át megy (11.5), ami fázishoz kötött. **Backend-figyelmeztetés:** a nézetet NE bővítsd a belső mezőkkel „kényelemből" — az azonnali leak lenne.
+4. **A token-egyenleg (`players.tokens`) kimegy a kliensre** (a `players` RLS engedi — a UI-hoz kell, AC20.2). **Ez leak-veszélyt hordoz**, mert a bemondás-jutalom +1 elárulná a reveal előtt, hogy a bemondás talált. **Ezért a +1 token jóváírása a reveal-tranzakcióban történik** (AC21.7, 11.4), nem a bemondáskor — így a token-egyenleg nem változik a reveal előtt, és nem szivárogtat.
+5. **A `steal_registered` broadcast csak darabszámot küld** (`stealCount`), sosem azt, ki hova jelölt vagy hogy a jelölés helyes-e.
+
+---
+
+## 11.10 Implementációs jegyzék (Backend + Frontend, sorrendben)
+
+> `[BE]`/`[FE]` a felelős. A függőségek (mi blokkol mit) explicit. F2.1 (S20–S22) előbb, F2.2 (S23–S25) utána — a PRD 5b.0 alfázis-bontása szerint.
+
+**F2.1 — Fázis E: token-alap + shared logika (BE, minden más előfeltétele):**
+1. `[BE]` **Migráció `007_f2_tokens_steals`:** `players_tokens_nonneg` check; `adjust_tokens(player_id, delta)` atomikus RPC (11.4.2). *(Blokkolja: minden token-művelet.)*
+2. `[BE]` **`_shared/steal.ts`:** `StealEntry`/`NameGuess` típusok, `evaluateGuess()` (a meglévő `similarity`/`primaryArtist`-tel — NE írd újra), `evaluateSteals()` (a meglévő `evaluatePlacement`-tel). *(Blokkolja: resolve_round bővítés, register_steal.)*
+3. `[BE]` **`_shared/round.ts` bővítése:** `resolveRound()` steal/guess/token-ág (11.4); fázis-függő deadline-választás (11.7). *(Blokkolja: resolve_round, auto_resolve, use_token/draw3.)*
+
+**F2.1 — Fázis F: token/steal/guess Edge Functions (BE, a Fázis E után):**
+4. `[BE]` **`place_card` bővítése:** `nameGuess` param + `steal_deadline = now()+15s` (11.3.3). *(Blokkolja: a valós steal-ablak; a Frontend host-timerét is.)*
+5. `[BE]` **`register_steal` valós implementáció** (11.6.1) — a stub lecserélése; `adjust_tokens(-1)` + fázis-zárolt append. *(Függ: 1, 2.)*
+6. `[BE]` **`resolve_round` bővítése** (11.6.3): a bővített `resolveRound()` hívása + `steal_window_open` hibakód. *(Függ: 3.)*
+7. `[BE]` **`auto_resolve_expired_rounds` bővítése** (11.7): a `steal_deadline`-ág a lekérdezésbe. *(Függ: 3; a host-timer megbízhatatlanságának hálója — ne maradjon ki.)*
+8. `[BE]` **`use_token`** (11.6.4): `skip` (F2-D3) + `draw3` (F2-D4) ágak, `adjust_tokens` költéssel. *(Függ: 1, 3.)*
+
+**F2.1 — Fázis G: Frontend token/steal/guess (FE, a Fázis F Edge-ekkel párhuzamosítható a szerződés alapján):**
+9. `[FE]` **`TokenCounter`** a `PlayerBadge`/`PlayerTimelineRow` mellett (AC20.2) — a `players.tokens` RLS-mezőből, real-time frissülés a `players` refetchre.
+10. `[FE]` **`GuessInput`** a P3 „Bemondom!" kapcsoló alatt (AC21.1) — a mezők a lerakásig gyűlnek, a **LERAKOM a `place_card`-ba a `nameGuess`-t is beteszi** (11.3.3). *(Függ: 4.)*
+11. `[FE]` **A host steal-ablak kezelése:** a `place_card` után a host **már NEM hív azonnal `resolve_round`-ot** — a `steal_deadline`-ig vár (`CountdownTimer`), utána resolve-ol; közben a `steal_registered` eventeket számolja. **Ez a legfontosabb F1→F2 kliens-változás** (a jelenlegi „azonnali resolve" logikát le kell cserélni). *(Függ: 4, 6.)*
+12. `[FE]` **`StealButton` + pozíciójelölő** a nem-aktív playereken a `stealing` fázisban (AC22.4): a rejtett kártyához rés-jelölés a saját idővonalon → `register_steal`. 0 tokennél letiltva (AC20.4). *(Függ: 5.)*
+13. `[FE]` **Reveal-eredmény megjelenítés** (AC21.8, AC22.11): a `revealed_card.guess` és `.steals` publikus adatból (11.5) — ki mondott be sikeresen, ki lopott, ki nyerte a kártyát.
+14. `[FE]` **`use_token` UI:** a saját kör elején skip-gomb (1🪙) és draw3-gomb (3🪙, F2-D4) — a `use_token` hívás. *(Függ: 8.)*
+
+**F2.2 — Fázis H: polish (a F2.1 stabilizálása után):**
+15. `[BE]` **`dispute_round`** (11.6.5) — host-only, reveal-fázis, token-visszaírás + timeline-visszaállítás + `next_turn`. *(Függ: 1, 3.)*
+16. `[BE]` **`next_turn` auto-skip** (11.6.6) — presence-alapú offline-átugrás (F2-D10) + `set_presence`/`connected`-írás út (a `reconnect`/leave bővítése vagy új pehely-mutáció). *(Függ: a `connected` mező szerver-oldali karbantartása.)*
+17. `[FE]` **Vitagomb** (host H5, AC24.1) — `dispute_round` hívás; **a countdown azonnali leállítása a gombnyomáskor** (F2-D8). *(Függ: 15.)*
+18. `[FE]` **Reveal-show** (S23): `RevealCard variant='show'` host-animáció + hangeffekt (AC23.1); player haptika (`navigator.vibrate`, feature-detection, AC23.2/AC23.3); `prefers-reduced-motion` (AC23.4, hang marad — F2-D7).
+19. `[FE]` **Auto-skip UI** (AC25.5): „⚠ offline — kihagyva" jelzés a `turn_auto_skipped` eventből + `paused` képernyő, ha mindenki offline. *(Függ: 16.)*
+
+**Fázis I — Integráció + verifikáció (BE+FE, majd QA):**
+20. **Anti-leak hálózati ellenőrzés (kritikus, 11.9):** a nem-aktív player forgalmában a `stealing`-reveal alatt SEHOL nem jelenik meg a helyes cím/előadó/`name_guess.correct`/`steals[].correct`/`card_id`; a token-egyenleg NEM változik a reveal előtt (a bemondás-jutalom csak reveal-ben jön).
+21. **Token-konzisztencia teszt (AC20.8):** párhuzamos steal-ek + draw3 ugyanattól a játékostól → nincs negatív egyenleg, nincs dupla-levonás, nincs „elveszett" token (az `adjust_tokens` atomicitása + a fázis-zár).
+22. **Steal-verseny teszt (F2-D5):** több helyes stealer → körsorrendben az első nyer, a többi (helyes is) elveszti a tokent; rossz lerakásnál a kártya a nyertes idővonalára kerül.
+23. **Dispute + token-semlegesség (AC24.4):** érvénytelenítés után minden nettó token-változás 0, a kártya kikerül, a következő játékos jön (F2-D8).
+24. **Végigjátszás F2 szabályokkal:** 3–4 kliens + host, teljes parti tokennel/steallel/bemondással, indulástól token-tie-breakes győzelemig (F2-D6).
+
+---
+
+## 11.11 F2 Architect-döntések (dokumentálva, a prompt „magad dönts" felhatalmazása alapján)
+
+Ahol a források technikai (nem termék-) döntést igényeltek, döntöttem és jelöltem:
+
+- **F2-A1 — a `use_token skip` audio-átadása:** a skip-et a **player** hívja, de az `audioUrl`-t (D7) csak a host kaphatja. Ezért a skip-válasz a playernek `audioUrl` NÉLKÜL tér vissza; egy `round_started` broadcast után a **host** kéri le a signed URL-t (a `draw_card` már létező mintája szerint) — ugyanaz, mint egy normál új körnél. Nulla anti-leak-kompromisszum.
+- **F2-A2 — a 15 mp fix kivárása F2.1-ben:** a „mindenki döntött → korai resolve" optimalizációt F2.1-ben NEM építjük (kevesebb versenyhelyzet-él); a steal-ablak mindig teljes 15 mp. Ha a playtest lassúnak érzi, F2.2-es finomítás lehet (egy `skip_steal` explicit jelzéssel). Egyszerűbb, robusztusabb indulás.
+- **F2-A3 — a `draw3` külön `rounds` sor:** a 3-tokenes felfedett kártya külön, azonnal-reveal `rounds` sort kap; az aktuális rejtélyes kör skip-szerűen `done`-ra megy. Tiszta körszámlálás, nincs új `next_turn`-ág.
+- **F2-A4 — dispute a resolve-jutalmakat visszavonja:** mivel a bemondás-+1 és a kártya-beépítés a resolve-ban történik, a dispute (ami a resolve UTÁN fut) ezeket explicit visszacsinálja (token −1, timeline-törlés + vissza-indexelés), hogy az AC24.3 „mintha meg sem történt volna" pontosan teljesüljön.
+- **F2-A5 — `adjust_tokens` RPC minden token-mutációhoz:** az olvasás-utáni-írás versenyhelyzet ellen egyetlen atomikus `security definer` RPC (`update ... where tokens + delta >= 0 returning`), ami a fedezet-ellenőrzést (AC20.7) az adatbázisban végzi. Ez az egyetlen új DB-objektum a token-rendszerhez.
+- **F2-A6 — a reveal-eredmény a `revealed_card` jsonb-n át:** a steal/guess eredményt NEM a `round_public` nézet új mezőin, hanem a fázishoz kötött `revealed_card`-ban adjuk ki — így az anti-leak automatikus, nulla új leak-felület.
+
+## 11.12 Nyitott kérdések
+
+Az F2 döntések (F2-D1–F2-D10) minden termék-szintű kérdést lezártak; a fenti F2-A1–A6 tisztán technikai döntés. **Nincs KÉRDÉS A TULAJHOZ** ebben a tervben — minden nyitott pont technikai volt és eldönthető a rögzített döntésekből + a meglévő architektúrából.
+
+Egyetlen **működési előfeltétel** (nem F2-specifikus, de F2-t is érinti): a pg_cron biztonsági háló csak akkor zárja a lejárt steal-ablakokat automatikusan, ha a Vault-beli `service_role` secret valós (BACKEND-NOTES 9.2 egyszeri manuális lépése). F2-ben a steal-ablak lezárása is ezen a hálón (is) múlik, tehát ez a lépés F2 előtt elvégzendő.
+
+---
+
+*F2 terv vége. A Backend a Fázis E-ből indul (migráció + shared logika), a Frontend a Fázis G-ből (a szerződés-alapú párhuzamosítással). Eltérés esetén ezt a szakaszt frissíteni kell (CLAUDE.md szabály).*
