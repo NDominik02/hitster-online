@@ -392,6 +392,29 @@ export default function HostRoomPage() {
           {loadError && <span className="text-danger">{loadError}</span>}
         </div>
 
+        {/*
+         * AUDIO-HOTFIX (2026-07-03): az <audio> elem korábban a "playing" fázis JSX ágában volt,
+         * tehát csak akkor létezett a DOM-ban, ha roomStatus === "playing" ÉS a round NEM reveal
+         * fázisú. A handleNextTurn() → beginRound() hívásláncban viszont setAudioUrl(draw.audioUrl)
+         * MINDIG a round state frissítése (refreshRound) ELŐTT fut le — a nextTurn()-ből visszakapott
+         * roundId-vel a `round` state pillanatnyilag MÉG a régi, reveal fázisú kör (revealedCard-dal),
+         * tehát pont akkor, amikor az audioUrl useEffect lefutna, a JSX a reveal ágat rendereli, ahol
+         * nincs <audio> elem — audioRef.current NULL, a useEffect feltétele hamis, a .play() sosem
+         * hívódik meg. A round state csak EZUTÁN vált "playing"-re (refreshRound a beginRound végén),
+         * de akkor már nincs újabb audioUrl-változás, ami újra triggerelné az effectet — a lejátszó
+         * csendben néma marad.
+         *
+         * Az 1. körnél (handleStart) ez nem jelentkezett, mert ott a refreshRound(res.roundId) a
+         * beginRound hívás ELŐTT fut le, tehát a round state már "playing" volt, mire a
+         * setAudioUrl(draw.audioUrl) a JSX playing-ágát (és benne az <audio> elemet) aktiválta.
+         *
+         * Megoldás: az <audio> elemet KIVESSZÜK a fázis-feltételes JSX-ből, és feltétel nélkül,
+         * a komponens gyökerében, rejtve rendereljük — így az audioRef élettartama nem kötődik a
+         * round.phase-hez, sosem vész el fázisváltás közben, és minden audioUrl-változás megbízhatóan
+         * eléri a valódi <audio> DOM elemet, függetlenül attól, hogy melyik JSX-ág aktív éppen.
+         */}
+        <audio ref={audioRef} className="hidden" />
+
         {roomStatus === "lobby" && (
           <section className="space-y-8 text-center">
             <h1 className="text-2xl font-bold">CSATLAKOZZ A JÁTÉKHOZ!</h1>
@@ -442,7 +465,6 @@ export default function HostRoomPage() {
 
             <div className="flex flex-col items-center gap-6">
               <MysteryCard spinning size="lg" />
-              <audio ref={audioRef} />
               <AudioProgressBar current={0} duration={30} playing={Boolean(audioUrl) && !audioLocked} />
             </div>
 
