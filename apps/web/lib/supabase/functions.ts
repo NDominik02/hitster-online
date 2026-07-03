@@ -218,9 +218,24 @@ export async function resolveRound(roundId: string) {
 /** next_turn (ARCHITECTURE 3.9) — host hívja ~5 mp reveal után */
 export async function nextTurn(roomId: string) {
   return invoke<
-    | { next: "draw"; roundId: string }
+    | { next: "draw"; roundId: string; activePlayerId?: string; skipped?: string[] }
     | { next: "finished"; winnerPlayerIds: string[] }
   >("next_turn", { roomId });
+}
+
+/**
+ * set_presence (ARCHITECTURE 11.6.6, F2-D9) — HOST-ONLY. A host figyeli a Supabase Realtime
+ * Presence-t minden játékosra, és amikor valakinek a jelenléte ~15 mp-ig hiányzik, ezt hívja
+ * `connected: false`-szal — a `next_turn` auto-skip logikája ezt a szerveroldali flaget nézi,
+ * NEM egy élő kliens-jelzést (AC25.7). Amikor a jelenlét visszatér, `connected: true`-val
+ * ugyanez hívandó.
+ */
+export async function setPresence(
+  roomId: string,
+  playerId: string,
+  connected: boolean
+): Promise<{ ok: true; playerId: string; connected: boolean }> {
+  return invoke("set_presence", { roomId, playerId, connected });
 }
 
 /** reconnect (ARCHITECTURE 3.10 / 7.2 / BACKEND-NOTES 3.) */

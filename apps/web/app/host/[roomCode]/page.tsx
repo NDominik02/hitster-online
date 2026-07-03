@@ -24,6 +24,7 @@ import {
   resolveRound,
   disputeRound,
   overrideGuess,
+  setPresence,
   nextTurn,
   fetchPlayers,
   fetchRoundPublic,
@@ -75,6 +76,19 @@ export default function HostRoomPage() {
 
   // F2 (S25, AC25.5) — "Anna kimaradt, mert lecsatlakozott" toast a turn_auto_skipped eventből.
   const [autoSkipNames, setAutoSkipNames] = useState<string[] | null>(null);
+
+  // F2 (S25, F2-D9/F2-D10) — presence-alapú auto-skip bekötése. A `players` state-et ref-ben is
+  // tartjuk (a setInterval closure elavulna a puszta state-re hivatkozva — ugyanaz a minta, mint
+  // a korábbi stale-closure javításoknál). A `presentIdsRef` a legutóbbi Realtime Presence
+  // pillanatképet tárolja, a `missingSinceRef` pedig azt, mióta hiányzik folyamatosan egy adott
+  // játékos — csak a 15 mp-es küszöb (F2-D9) átlépésekor hívjuk a `set_presence`-t, hogy egy
+  // pillanatnyi hálózati akadozás ne jelezzen azonnal lecsatlakozást.
+  const playersRef = useRef<Player[]>([]);
+  useEffect(() => {
+    playersRef.current = players;
+  }, [players]);
+  const presentIdsRef = useRef<Set<string>>(new Set());
+  const missingSinceRef = useRef<Map<string, number>>(new Map());
 
   // A QR-kódhoz a valódi, kliensről elérhető origin kell — window.location.origin
   // félrevezető, ha a host localhost-on nyitja meg (a telefonon scannelve a
@@ -199,7 +213,49 @@ export default function HostRoomPage() {
         setDragGhostIndex(payload.slotIndex);
       }
     },
+    onPresenceChange: (state) => {
+      // A Realtime Presence state kulcsai a track()-nél megadott presenceKey-ek — a playerek
+      // a saját player.id-jükkel iratkoznak fel (lásd play/[roomCode] useRoomChannel hívása),
+      // a host "host"-tal. A "host" kulcsot kihagyjuk, a többi a jelenleg jelen lévő játékosok.
+      presentIdsRef.current = new Set(Object.keys(state).filter((key) => key !== "host"));
+    },
   });
+
+  // F2 (S25, F2-D9/F2-D10) — periodikus ellenőrzés: ha egy regisztrált játékos folyamatosan
+  // hiányzik a Presence-ből legalább 15 mp-ig, a host jelenti a szervernek (set_presence,
+  // connected:false) — a next_turn ez alapján ugorja át automatikusan a köreit (a szerver,
+  // nem egyetlen kliens pillanatnyi jelzése dönt, AC25.7). Visszatéréskor connected:true.
+  useEffect(() => {
+    if (!roomId) return;
+    const CHECK_INTERVAL_MS = 5000;
+    const DISCONNECT_THRESHOLD_MS = 15000;
+
+    const interval = setInterval(() => {
+      const present = presentIdsRef.current;
+      const now = Date.now();
+      for (const p of playersRef.current) {
+        if (present.has(p.id)) {
+          missingSinceRef.current.delete(p.id);
+          if (p.connected === false) {
+            setPresence(roomId, p.id, true)
+              .then(() => refreshPlayers(roomId))
+              .catch(() => {});
+          }
+          continue;
+        }
+        const missingSince = missingSinceRef.current.get(p.id);
+        if (missingSince === undefined) {
+          missingSinceRef.current.set(p.id, now);
+        } else if (now - missingSince >= DISCONNECT_THRESHOLD_MS && p.connected !== false) {
+          setPresence(roomId, p.id, false)
+            .then(() => refreshPlayers(roomId))
+            .catch(() => {});
+        }
+      }
+    }, CHECK_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [roomId, refreshPlayers]);
 
   async function handleStart() {
     if (!roomId) return;
@@ -301,6 +357,14 @@ export default function HostRoomPage() {
         await refreshTimelines(roomId);
         await broadcastEvent("game_finished", { winnerPlayerIds: res.winnerPlayerIds });
       } else {
+        // F2 (S25, AC25.5) — ha a szerver átugrott lecsatlakozott játékosokat, jelezzük
+        // közvetlenül itt is (a broadcast a saját magunknak küldött eseményt jellemzően nem
+        // adja vissza), hogy a host maga is lássa a toast-ot, nem csak a többi kliens.
+        if (res.skipped && res.skipped.length > 0) {
+          const names = res.skipped.map((id) => playersRef.current.find((p) => p.id === id)?.name ?? "Valaki");
+          setAutoSkipNames(names);
+          await broadcastEvent("turn_auto_skipped", { skipped: res.skipped });
+        }
         await broadcastEvent("turn_advanced", { roundId: res.roundId });
         setAudioUrl(null);
         setDragGhostIndex(null);
