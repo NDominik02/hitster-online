@@ -52,3 +52,37 @@ F1: a host csak ugyanarról az eszközről csatlakozhat vissza (localStorage-ala
 
 ## A4 — Nézet vs. RPC a timeline_public-hoz (Architect)
 A Backend F1 implementáció közben döntheti el (definer-nézet vagy definer-RPC), a koordinátor nem köti meg előre — ez implementációs részlet, nem termékdöntés.
+
+---
+
+# F2 döntések (PRD 5b szakasz nyitott kérdései, PM felvetette)
+
+## F2-D1 — Részleges bemondás-jutalom (F2-Q1)
+Marad a **"mindkettő kell"** szabály — ha csak a cím VAGY csak az előadó helyes, nincs token. Indok: ez volt az eredeti PLAN.md szándéka, és a részjutalom bonyolítaná a UI-t (két külön visszajelzés) kevés játékértékért cserébe.
+
+## F2-D2 — Fuzzy küszöb + több-előadós szám (F2-Q2)
+A 0,85-ös normalizált Levenshtein-hasonlósági küszöb marad. Több-előadős számnál a **fő előadó** az első listázott (`primaryArtist()` — ugyanaz a segédfüggvény, amit a deck-pipeline már használ MusicBrainz/iTunes egyeztetéshez, konzisztencia miatt).
+
+## F2-D3 — Szám-átugrás utáni steal + korlát (F2-Q3)
+A tokennel átugrott kártya utáni új húzás **ugyanúgy viselkedik**, mint bármely más kör (a steal-ablak is érvényes rá) — nincs speciális eset. Nincs külön limit az átugrások számára körönként; a 2 induló token természetes szűkösséget ad, extra korlát felesleges bonyolítás lenne.
+
+## F2-D4 — Azonnali +1 kártya (3 token) időzítése (F2-Q4)
+Csak a soron lévő játékos saját körének ELEJÉN hívható, a rejtélyes kártya-húzás HELYETT (nem mellette) — a felfedett kártyát azonnal be kell illesztenie zene/időlimit nélkül. Ez a saját körét helyettesíti (nem külön, extra kör), így a körszámlálás egyszerű marad.
+
+## F2-D5 — Steal-verseny és token-visszatérítés (F2-Q5)
+(a) Több játékos is megpróbálhat egyszerre lopni ugyanabban az ablakban. (b) **Nincs token-visszatérítés** a helyesen jelölő, de nem nyertes stealereknek — a token egy tét, nem biztosítás. Csak az elsőként helyesnek bizonyuló (körsorrend szerinti) stealer kapja meg a kártyát; minden más steal-kísérlet (helyes vagy helytelen) elveszíti a tokent. Egyszerű, egyértelmű szabály.
+
+## F2-D6 — Token-alapú tie-break megerősítve (F2-Q6)
+Igen — F2-től a győzelmi döntetlent (azonos leghosszabb idővonal) a **több token** dönti el; ha a tokenek is egyenlők, marad a D3 szerinti megosztott győzelem.
+
+## F2-D7 — Hangeffekt reduced-motion mellett (F2-Q7)
+A `prefers-reduced-motion` **csak a mozgást/animációt** tiltja le, a hangeffektet NEM — ez külön accessibility-szempont (mozgásérzékenység ≠ hangpreferencia), a WCAG megfogalmazás is erre vonatkozik szűken.
+
+## F2-D8 — Vitagomb viselkedése (F2-Q8)
+(a) A vitagomb megnyomása **azonnal megállítja** az 5 mp-es auto-tovább visszaszámlálót. (b) Érvénytelenítés után **nem ismétel** ugyanaz a játékos — a kör egyszerűen érvénytelenné válik (mintha meg sem történt volna, senki nem veszít semmit), és a menet a KÖVETKEZŐ játékoshoz lép tovább, ahogy egy normál kör után történne.
+
+## F2-D9 — Presence timeout (F2-Q9)
+15 másodperc — elfogadva a PM javaslata.
+
+## F2-D10 — "Max 1× kihagyható" pontos szemantikája (F2-Q10)
+Újraértelmezve, egyértelműbben: a presence-alapú gyorsított kihagyás **egymást követő, jelenleg lecsatlakozott játékosokra korlátlanul** alkalmazható — a rendszer sorban továbblép, amíg egy online játékost nem talál (nem áll meg mesterségesen az első lecsatlakozottnál). Ha mindenki lecsatlakozott, a parti szünetel. Ez robusztusabb, mint egy kemény "csak 1" korlát, ami feleslegesen végigváratná a partit egy második, egymást követő offline játékoson.
