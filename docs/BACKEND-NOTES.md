@@ -2,6 +2,8 @@
 
 *Készült: 2026-07-02 · Backend Engineer · Forrás: ARCHITECTURE.md 9. szakasz Fázis A–B*
 
+**Éles URL:** https://hitster-online-eta.vercel.app — Vercel projekt a `NDominik02/hitster-online` GitHub repóra kötve (`main` ág → production auto-deploy).
+
 Ez a dokumentum a Frontend Engineer agentnek szól: mi készült el a backend oldalon,
 és hogyan kell integrálni a Next.js appból. A teljes API-szerződés az
 `ARCHITECTURE.md` 3. szakaszában van részletesen leírva — ez itt a gyors
