@@ -220,6 +220,7 @@ export async function nextTurn(roomId: string) {
   return invoke<
     | { next: "draw"; roundId: string; activePlayerId?: string; skipped?: string[] }
     | { next: "finished"; winnerPlayerIds: string[] }
+    | { next: "paused"; reason: string }
   >("next_turn", { roomId });
 }
 

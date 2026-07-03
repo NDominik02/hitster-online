@@ -214,10 +214,22 @@ export default function HostRoomPage() {
       }
     },
     onPresenceChange: (state) => {
-      // A Realtime Presence state kulcsai a track()-nél megadott presenceKey-ek — a playerek
-      // a saját player.id-jükkel iratkoznak fel (lásd play/[roomCode] useRoomChannel hívása),
-      // a host "host"-tal. A "host" kulcsot kihagyjuk, a többi a jelenleg jelen lévő játékosok.
-      presentIdsRef.current = new Set(Object.keys(state).filter((key) => key !== "host"));
+      // BUGFIX: a Supabase Realtime Presence a channel() saját, VÉLETLEN kapcsolat-kulcsaival
+      // csoportosít (`presenceState()` felső szintű kulcsai NEM a track()-nek átadott `key`
+      // mezőt használják, hacsak a csatorna létrehozásakor explicit `config.presence.key`-t nem
+      // adunk meg — ezt a useRoomChannel jelenleg nem teszi). A korábbi implementáció
+      // `Object.keys(state)`-et nézte, ami ezért SOHA nem egyezett egyetlen player.id-vel sem —
+      // minden játékos mindig "hiányzónak" tűnt, 15 mp múlva mindenkit lecsatlakozottnak
+      // jelentett (ez okozta az élesben látott hamis "mindenki offline → szünetel" leállást).
+      // A helyes megoldás: a track()-kel elküldött payload (benne a `key: presenceKey` mezővel)
+      // a presence ÉRTÉKEK között van, nem a kulcsok között — azokat kell kiolvasni.
+      const ids = new Set<string>();
+      for (const entries of Object.values(state)) {
+        for (const entry of entries as Array<{ key?: string }>) {
+          if (entry?.key && entry.key !== "host") ids.add(entry.key);
+        }
+      }
+      presentIdsRef.current = ids;
     },
   });
 
@@ -356,6 +368,11 @@ export default function HostRoomPage() {
         setWinnerPlayerIds(res.winnerPlayerIds);
         await refreshTimelines(roomId);
         await broadcastEvent("game_finished", { winnerPlayerIds: res.winnerPlayerIds });
+      } else if (res.next === "paused") {
+        // F2-D10: mindenki offline-nak tűnt a szerver szerint — a szoba szünetel, amíg valaki
+        // vissza nem tér (vagy a host újra nem próbálja, miután a jelenlét-figyelés frissült).
+        // A backend-javítás óta (2026-07-03) ez a state ÚJRAPRÓBÁLHATÓ, nem zsákutca.
+        setRoomStatus("paused");
       } else {
         // F2 (S25, AC25.5) — ha a szerver átugrott lecsatlakozott játékosokat, jelezzük
         // közvetlenül itt is (a broadcast a saját magunknak küldött eseményt jellemzően nem
@@ -818,6 +835,18 @@ export default function HostRoomPage() {
               )}
               <AppButton onClick={handleNextTurn}>Következő kör ▶</AppButton>
             </div>
+          </section>
+        )}
+
+        {roomStatus === "paused" && (
+          <section className="flex flex-col items-center gap-6 py-12 text-center">
+            <h2 className="text-2xl font-bold">⏸ A parti szünetel</h2>
+            <p className="text-text-muted max-w-md">
+              A szerver úgy látja, senki nincs jelen épp — várd meg, amíg a játékosok
+              visszatérnek (a jelzés magától frissül néhány másodperc múlva), vagy próbáld
+              újra most.
+            </p>
+            <AppButton onClick={handleNextTurn}>Újrapróbálom ▶</AppButton>
           </section>
         )}
 

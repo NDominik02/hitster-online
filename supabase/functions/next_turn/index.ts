@@ -41,7 +41,14 @@ Deno.serve(async (req: Request) => {
 
   if (roomError || !room) return errorResponse('room_not_found', 'A szoba nem található.', 404);
   if (room.host_uid !== callerUid) return errorResponse('not_host', 'Csak a host léptetheti a kört.', 403);
-  if (room.status !== 'playing') return errorResponse('room_not_playing', 'A játék nincs folyamatban.', 409);
+  // BUGFIX (2026-07-03): a 'paused' állapot (F2-D10, "mindenki offline") korábban zsákutca volt
+  // — ez a guard MINDEN következő hívást elutasított, mert csak 'playing'-et engedett át, holott
+  // a kommentek (lásd lent) kifejezetten azt ígérték, hogy egy újabb next_turn hívás fel tudja
+  // oldani a szünetet, ha időközben valaki visszatért. 'paused'-ból is engedjük a próbálkozást —
+  // ha az alábbi skip-ellenőrzés ismét mindenkit offline-nak talál, egyszerűen 'paused' marad.
+  if (room.status !== 'playing' && room.status !== 'paused') {
+    return errorResponse('room_not_playing', 'A játék nincs folyamatban.', 409);
+  }
 
   // S14: win check first — a player may have just reached winTarget.
   const winCheck = await checkWinnersAndFinish(supabase, room.id);
@@ -89,6 +96,13 @@ Deno.serve(async (req: Request) => {
     // and the host retries) will resume normally.
     await supabase.from('rooms').update({ status: 'paused', updated_at: new Date().toISOString() }).eq('id', room.id);
     return jsonResponse({ next: 'paused', reason: 'all_offline' });
+  }
+
+  // Ha korábban 'paused'-ra állt (mindenki offline volt), de most sikerült legalább egy online
+  // játékost találni, explicit visszaállítjuk 'playing'-re — a drawCard maga nem érinti a
+  // rooms.status-t, ez itt a "feléledés" pillanata.
+  if (room.status === 'paused') {
+    await supabase.from('rooms').update({ status: 'playing', updated_at: new Date().toISOString() }).eq('id', room.id);
   }
 
   const draw = await drawCard(supabase, room.id, nextPlayerId);
