@@ -3,7 +3,7 @@
  * snake_case-t és nyers JSONB-t ad vissza; itt képezzük le a lib/game/types.ts camelCase
  * domain alakjára, amit a UI komponensek használnak.
  */
-import type { Database } from "../../../../packages/shared-types/database.types";
+import type { Database } from "../shared-types/database.types";
 import type {
   Deck,
   DeckReport,

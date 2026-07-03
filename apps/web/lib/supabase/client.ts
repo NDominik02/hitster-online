@@ -6,7 +6,7 @@
  * eu-central-1, project id cynedrshuqneztnymbxu). A `.env.local` .gitignore-olt, nem kerül git-be.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "../../../../packages/shared-types/database.types";
+import type { Database } from "../shared-types/database.types";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
