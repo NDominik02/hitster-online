@@ -99,12 +99,99 @@ export async function drawCard(roomId: string): Promise<DrawCardResponse> {
   return invoke("draw_card", { roomId });
 }
 
-/** place_card (ARCHITECTURE 3.6) — csak az aktív játékos hívhatja */
+/**
+ * place_card (ARCHITECTURE 3.6 / 11.3.3) — csak az aktív játékos hívhatja.
+ *
+ * F2-bővítés (ARCHITECTURE 11.3.3): opcionális `nameGuess` — a "Bemondom!" kapcsoló alatt
+ * gyűjtött előadó/cím a LERAKOM gombbal együtt megy fel egy hívásban (F2-D1). A Backend
+ * `place_card` Edge Function-je a jelen (2026-07-03-i) állapotában MÉG NEM fogadja el ezt a
+ * mezőt és MÉG NEM ír `steal_deadline`-t (ld. supabase/functions/place_card/index.ts — a UPDATE
+ * csak `placement`/`phase`-t állít). A hívás emiatt jelenleg ártalmatlanul figyelmen kívül
+ * hagyja a nameGuess-t (a Function egyszerűen nem olvassa a mezőt), és a válasz
+ * `stealDeadline: null` lesz — a hívó oldal (host steal-ablak logika) ezt defenzíven kezeli:
+ * null deadline esetén F1-szerűen azonnal resolve-ol. Amint a Backend bővíti a Function-t
+ * (ARCHITECTURE 11.3.3 szerint), ez a wrapper módosítás nélkül helyesen fog működni.
+ */
 export async function placeCard(
   roundId: string,
-  position: number
+  position: number,
+  nameGuess?: { artistGuess: string; titleGuess: string } | null
 ): Promise<{ phase: string; stealDeadline: string | null }> {
-  return invoke("place_card", { roundId, position });
+  return invoke("place_card", {
+    roundId,
+    position,
+    ...(nameGuess ? { nameGuess } : {}),
+  });
+}
+
+/**
+ * register_steal (ARCHITECTURE 11.6.1) — TODO F2: a szerveroldali Edge Function még nem
+ * létezik (nincs supabase/functions/register_steal/ mappa a Backend agent munkája
+ * befejezéséig). Ez a wrapper a végleges I/O-szerződést követi (ARCHITECTURE 11.6.1), hogy a
+ * StealButton komponens és a host steal-ablak UI a szerződés ellen épülhessen már most —
+ * amint a Backend deployolja a Function-t, ez a hívás módosítás nélkül működni fog.
+ *
+ * Bemenet: a stealer SAJÁT idővonalán megjelölt rés (position). Kimenet sikeres levonás után
+ * a hátralévő tokenek + a kör aktuális steal-darabszáma (host UI "X-en lopnak" számlálóhoz —
+ * de ezt jelenleg a `steal_registered` broadcast payload-ja adja, nem ez a válasz feltétlenül).
+ */
+export async function registerSteal(
+  roundId: string,
+  position: number
+): Promise<{ ok: true; tokensLeft: number; stealCount: number }> {
+  return invoke("register_steal", { roundId, position });
+}
+
+/**
+ * use_token (ARCHITECTURE 11.6.4) — TODO F2: a szerveroldali Edge Function még nem létezik.
+ * Két akció: `skip` (1 token, F2-D3 — szám átugrása lerakás előtt) és `draw3` (3 token,
+ * F2-D4 — azonnali felfedett +1 kártya, a `position` a bemenetben kötelező ehhez az ághoz).
+ */
+export async function useToken(
+  roundId: string,
+  action: "skip"
+): Promise<{
+  action: "skip";
+  roundId: string;
+  roundNo: number;
+  audioUrl?: string;
+  placingDeadline: string;
+  tokensLeft: number;
+}>;
+export async function useToken(
+  roundId: string,
+  action: "draw3",
+  position: number
+): Promise<{
+  action: "draw3";
+  outcome: string;
+  revealedCard: unknown;
+  tokensLeft: number;
+  phase: string;
+}>;
+export async function useToken(
+  roundId: string,
+  action: "skip" | "draw3",
+  position?: number
+): Promise<Record<string, unknown>> {
+  return invoke("use_token", {
+    roundId,
+    action,
+    ...(action === "draw3" ? { position } : {}),
+  });
+}
+
+/**
+ * dispute_round (ARCHITECTURE 11.6.5) — TODO F2: a szerveroldali Edge Function még nem
+ * létezik. HOST-ONLY, csak `phase='reveal'` alatt hívható (F2-D8 — a vitagomb a reveal-en
+ * jelenik meg, a next_turn ELŐTT). A szerver a token-visszaírást és timeline-visszaállítást
+ * végzi (AC24.4 — nettó token-változás 0); a kliens felelőssége csak az 5 mp-es
+ * auto-tovább countdown AZONNALI leállítása a gombnyomás pillanatában (F2-D8/a).
+ */
+export async function disputeRound(
+  roundId: string
+): Promise<{ ok: true; outcome: "disputed"; refunded: Array<{ playerId: string; amount: number }> }> {
+  return invoke("dispute_round", { roundId });
 }
 
 /** resolve_round (ARCHITECTURE 3.8) — HOST-ONLY, player hívásra 403 (BACKEND-NOTES 7.) */

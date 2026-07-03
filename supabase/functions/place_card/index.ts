@@ -1,12 +1,31 @@
-// place_card — ARCHITECTURE.md 3.6
+// place_card — ARCHITECTURE.md 3.6, bővítve F2.1-ben (11.3.3)
 // Caller: the active player only. This is the ONLY writer of rounds.placement
 // (AC9.3: the client never writes the table directly).
-// F1: stealEnabled is always false, so the 'stealing' phase is a 0-second
-// pass-through — the schema/phase machine supports it for F2 but nothing
-// waits on it here.
+//
+// F2 CHANGE FROM F1 (important for the Frontend — see docs/BACKEND-NOTES.md):
+// place_card now writes a REAL steal_deadline (now()+15s, AC22.1) and the
+// 'stealing' phase is no longer a 0-second pass-through. Callers must NOT
+// immediately call resolve_round after a successful place_card response
+// anymore — they must wait for stealDeadline to elapse (or for the server to
+// close the window via the pg_cron safety net) before resolve_round will
+// succeed. Calling resolve_round before stealDeadline now returns
+// 409 steal_window_open.
+//
+// nameGuess (F2-D1, S21) is optional and — if present — is written verbatim
+// (unevaluated) into rounds.name_guess in the SAME update as the placement.
+// It is NEVER evaluated here: evaluateGuess() only ever runs inside
+// resolveRound (anti-leak, 11.9 #1) — place_card doesn't even read
+// deck_cards, so it has no way to check correctness even if it wanted to.
 
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
+
+const STEAL_WINDOW_SEC = 15; // AC22.1
+
+interface NameGuessInput {
+  artistGuess?: string;
+  titleGuess?: string;
+}
 
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
@@ -16,7 +35,7 @@ Deno.serve(async (req: Request) => {
   const callerUid = await getCallerUid(req);
   if (!callerUid) return errorResponse('unauthorized', 'Be kell jelentkezni.', 401);
 
-  let body: { roundId?: string; position?: number };
+  let body: { roundId?: string; position?: number; nameGuess?: NameGuessInput };
   try {
     body = await req.json();
   } catch {
@@ -46,10 +65,29 @@ Deno.serve(async (req: Request) => {
     return errorResponse('not_your_turn', 'Nem te vagy soron.', 403);
   }
 
+  // AC21.2: nameGuess is optional. If present, stash it raw — correct is
+  // filled in later by resolveRound, never here.
+  let nameGuessRow: { artistGuess: string; titleGuess: string; correct: null; createdAt: string } | null = null;
+  if (body.nameGuess && (body.nameGuess.artistGuess || body.nameGuess.titleGuess)) {
+    nameGuessRow = {
+      artistGuess: body.nameGuess.artistGuess ?? '',
+      titleGuess: body.nameGuess.titleGuess ?? '',
+      correct: null,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  const stealDeadline = new Date(Date.now() + STEAL_WINDOW_SEC * 1000).toISOString();
+
   // Optimistic lock: only succeeds if the round is still in a placeable phase.
   const { data: updated, error: updateError } = await supabase
     .from('rounds')
-    .update({ placement: body.position, phase: 'stealing' })
+    .update({
+      placement: body.position,
+      phase: 'stealing',
+      steal_deadline: stealDeadline,
+      ...(nameGuessRow ? { name_guess: nameGuessRow } : {}),
+    })
     .eq('id', body.roundId)
     .in('phase', ['playing', 'placing'])
     .select()

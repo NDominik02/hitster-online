@@ -49,11 +49,17 @@ Deno.serve(async (req: Request) => {
 
   // D6/A2: the host cannot fake an early timeout — resolveRound rejects a
   // null placement unless the server-computed deadline has actually passed.
+  // F2 (11.7): when the round is in 'stealing' phase, resolveRound checks
+  // steal_deadline instead of placing_deadline — the host cannot close the
+  // 15s steal window early either (AC22.1).
   const result = await resolveRound(supabase, body.roundId, { requireDeadlinePassed: true });
 
   if (!result.ok) {
     if (result.error === 'deadline_not_reached') {
       return errorResponse('deadline_not_reached', 'Az időlimit még nem járt le.', 409);
+    }
+    if (result.error === 'steal_window_open') {
+      return errorResponse('steal_window_open', 'A lopási ablak még nyitva van.', 409);
     }
     if (result.error === 'phase_conflict' || result.conflict) {
       return errorResponse('phase_conflict', 'A kör már le van zárva.', 409);

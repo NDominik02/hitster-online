@@ -11,12 +11,16 @@ import { TippingScreen } from "@/components/game/TippingScreen";
 import { OutcomeBanner } from "@/components/game/OutcomeBanner";
 import { ConnectionOverlay } from "@/components/system/ConnectionOverlay";
 import { PlayerBadge } from "@/components/lobby/PlayerBadge";
-import type { Player, PlayerColorId, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
+import { StealButton } from "@/components/game/StealButton";
+import { CountdownTimer } from "@/components/game/CountdownTimer";
+import { playerColorValue } from "@/lib/game/colors";
+import type { NameGuessInput, Player, PlayerColorId, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
 import { ensureAnonymousSession } from "@/lib/supabase/client";
 import {
   reconnect,
   joinRoom,
   placeCard,
+  registerSteal,
   fetchPlayers,
   fetchRoundPublic,
   getTimeline,
@@ -30,6 +34,29 @@ import { useRoomChannel } from "@/lib/game/useRoomChannel";
  * és mindig a round_public view-t olvassa (SOHA a rounds táblát) + a get_timeline RPC-t
  * (nem view — BACKEND-NOTES 2. eltérés az ARCHITECTURE.md-től).
  */
+/**
+ * F2 (S25, AC25.5) — "X kimaradt, mert lecsatlakozott" toast, a `turn_auto_skipped` eventből.
+ * Fixed pozícióban jelenik meg, a fázistól/JSX-ágtól függetlenül (a hívó minden korai-return
+ * ág legkülső elemébe illeszti, hogy ne vesszen el egyik nézeten sem).
+ */
+function AutoSkipToast({ names, onDismiss }: { names: string[]; onDismiss: () => void }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed top-0 inset-x-0 z-50 flex justify-center px-4 py-2 pointer-events-none"
+    >
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="pointer-events-auto bg-warning text-[#0B0B14] text-sm font-semibold rounded-[var(--radius-pill)] px-4 py-2 shadow-lg"
+      >
+        ⚠ {names.join(", ")} kimaradt, mert lecsatlakozott
+      </button>
+    </div>
+  );
+}
+
 export default function PlayRoomPage() {
   const params = useParams<{ roomCode: string }>();
   const roomCode = params.roomCode;
@@ -43,6 +70,18 @@ export default function PlayRoomPage() {
   const [activeTimeline, setActiveTimeline] = useState<TimelineCardPublic[]>([]);
   const [winnerPlayerIds, setWinnerPlayerIds] = useState<string[]>([]);
   const [roomFinished, setRoomFinished] = useState(false);
+
+  // F2 (S22, ARCHITECTURE 11.6.1) — steal-ablak lokális állapot. `stolenInRound` a körhöz
+  // kötött (AC22.5: egy steal/játékos/kör), ezért roundId-vel kulcsolt — új körnél a
+  // round_started/turn_advanced ág úgyis nullázza a round state-et, tehát ez a Set implicit
+  // "üríthető" lenne körönként; a legegyszerűbb megbízható jelzés mégis a roundId-alapú tárolás.
+  const [stealSubmittedForRound, setStealSubmittedForRound] = useState<string | null>(null);
+  const [stealSubmitting, setStealSubmitting] = useState(false);
+  const [stealError, setStealError] = useState<string | null>(null);
+  const [stealCount, setStealCount] = useState(0);
+
+  // F2 (S25, AC25.5) — "Anna kimaradt, mert lecsatlakozott" jelzés a turn_auto_skipped eventből.
+  const [autoSkipBanner, setAutoSkipBanner] = useState<string[] | null>(null);
 
   // P1 form state
   const [name, setName] = useState("");
@@ -132,6 +171,9 @@ export default function PlayRoomPage() {
         if (rid) {
           const r = await refreshRound(rid);
           setPlacedOutcome(null);
+          setStealCount(0);
+          setStealSubmittedForRound(null);
+          setStealError(null);
           if (me) setMyTimeline(await refreshTimelineFor(roomId, me.id));
           if (r) setActiveTimeline(await refreshTimelineFor(roomId, r.activePlayerId));
         }
@@ -147,6 +189,12 @@ export default function PlayRoomPage() {
         setRoomFinished(true);
         const ids = (payload as { winnerPlayerIds?: string[] })?.winnerPlayerIds ?? [];
         setWinnerPlayerIds(ids);
+      } else if (event === "steal_registered") {
+        const count = (payload as { stealCount?: number })?.stealCount;
+        if (typeof count === "number") setStealCount(count);
+      } else if (event === "turn_auto_skipped") {
+        const skipped = (payload as { skipped?: string[] })?.skipped ?? [];
+        if (skipped.length > 0) setAutoSkipBanner(skipped);
       }
     },
   });
@@ -230,10 +278,10 @@ export default function PlayRoomPage() {
     }
   }
 
-  async function handlePlaceCard(slotIndex: number) {
+  async function handlePlaceCard(slotIndex: number, nameGuess?: NameGuessInput | null) {
     if (!round) return;
     try {
-      await placeCard(round.id, slotIndex);
+      await placeCard(round.id, slotIndex, nameGuess);
       await refreshRound(round.id);
       // A host figyeli a placement-et és hívja a resolve_round-ot; itt jelezzük a broadcastot,
       // hogy a host (és a többi player) azonnal frissítse a round_public állapotot.
@@ -243,10 +291,36 @@ export default function PlayRoomPage() {
     }
   }
 
+  /**
+   * F2 (S22, ARCHITECTURE 11.6.1) — register_steal hívás. TODO F2: az Edge Function még nem
+   * él (a Backend nem végzett még, ld. functions.ts registerSteal jsdoc) — ez a handler a
+   * végleges szerződés ellen épül, hívásra hibát fog dobni (404/nincs function), amit a UI
+   * hibaüzenetként jelez, amíg a Backend nem deployolja. Bekötése módosítás nélkül életbe lép.
+   */
+  async function handleSteal(position: number) {
+    if (!round) return;
+    setStealSubmitting(true);
+    setStealError(null);
+    try {
+      await registerSteal(round.id, position);
+      setStealSubmittedForRound(round.id);
+      await broadcastEvent("steal_registered", { roundId: round.id });
+    } catch (err) {
+      setStealError(err instanceof Error ? err.message : "Nem sikerült leadni a lopást.");
+    } finally {
+      setStealSubmitting(false);
+    }
+  }
+
   const takenColors = players.filter((p) => p.id !== me?.id).map((p) => p.color);
   const takenByName = Object.fromEntries(
     players.filter((p) => p.id !== me?.id).map((p) => [p.color, p.name])
   ) as Partial<Record<PlayerColorId, string>>;
+
+  // F2 (S25, AC25.5) — a turn_auto_skipped payload playerId-kat ad; itt oldjuk fel névre.
+  const autoSkipNames = autoSkipBanner
+    ? autoSkipBanner.map((id) => players.find((p) => p.id === id)?.name ?? "Valaki")
+    : null;
 
   if (checkingReconnect) {
     return (
@@ -327,6 +401,14 @@ export default function PlayRoomPage() {
   // P5 — reveal-visszajelzés (bármelyik player, saját eredmény).
   if (round && round.phase === "reveal" && round.revealedCard) {
     const success = placedOutcome === "correct";
+    // F2 (AC21.8, AC22.11, ARCHITECTURE 11.5) — a saját bemondás/steal eredménye, ha volt.
+    // Csak reveal fázisban érkezik (anti-leak), a revealedCard.guess/.steals mezőkből —
+    // ezek hiányoznak (undefined), amíg a Backend nem bővíti a resolve_round-ot (11.6.3).
+    const myGuessResult =
+      round.revealedCard.guess && round.revealedCard.guess.byPlayerId === me.id
+        ? round.revealedCard.guess
+        : null;
+    const myStealResult = round.revealedCard.steals?.find((s) => s.playerId === me.id) ?? null;
     return (
       <div className="flex flex-col flex-1 min-h-screen">
         <div className="flex-1 flex flex-col items-center justify-center px-6 py-8 gap-6 max-w-sm mx-auto w-full text-center">
@@ -339,6 +421,16 @@ export default function PlayRoomPage() {
           <p className="font-semibold">
             {round.revealedCard.artist} – {round.revealedCard.year}
           </p>
+          {myGuessResult && (
+            <p className={myGuessResult.correct ? "text-success font-semibold" : "text-text-muted"}>
+              {myGuessResult.correct ? "🎤 Bemondás sikeres — +1 🪙" : "🎤 Bemondás nem talált"}
+            </p>
+          )}
+          {myStealResult && (
+            <p className={myStealResult.won ? "text-success font-semibold" : "text-text-muted"}>
+              {myStealResult.won ? "🕵️ Sikeres lopás — tiéd a kártya!" : "🕵️ A lopás nem sikerült"}
+            </p>
+          )}
           <div>
             <h2 className="text-text-muted text-sm uppercase tracking-wide mb-2">A te idővonalad</h2>
             <Timeline cards={myTimeline} />
@@ -351,17 +443,19 @@ export default function PlayRoomPage() {
     );
   }
 
-  // P3 — a te köröd, tippelés.
-  if (round && isMyTurn && round.phase !== "reveal" && round.phase !== "done") {
+  // P3 — a te köröd, tippelés. A `stealing` fázis SOSEM ide tartozik, még a soron lévőnek
+  // sem (F2-D5: a soron lévő nem lophat saját magától, ő a lenti "várakozás a lopásokra"
+  // ágba esik — az ARCHITECTURE 11.3.2 szerint a lerakás UTÁN nyílik a 15 mp-es steal-ablak).
+  if (round && isMyTurn && round.phase !== "stealing" && round.phase !== "reveal" && round.phase !== "done") {
     return (
       <TippingScreen
         key={round.id}
         cards={myTimeline}
         ownerColor={me.color}
         deadlineIso={round.placingDeadline}
-        onConfirm={(slotIndex) => {
+        onConfirm={(slotIndex, nameGuess) => {
           sendDragUpdate({ playerId: me.id, slotIndex });
-          handlePlaceCard(slotIndex);
+          handlePlaceCard(slotIndex, nameGuess);
         }}
         onExpire={() => {
           // D6: lejáratkor a host resolve_round-ot hív; a player itt csak vár a broadcastra.
@@ -370,14 +464,50 @@ export default function PlayRoomPage() {
     );
   }
 
-  // P2' — más köre, megfigyelő.
-  if (round && activePlayer && !isMyTurn) {
+  // P4 — steal-ablak, saját köröm épp lezajlott (aktív vagyok, de már stealing fázisban).
+  // F2-D5: a soron lévő nem lophat, csak várja a többiek reakcióját / a deadline lejártát.
+  if (round && isMyTurn && round.phase === "stealing") {
     return (
       <div className="flex flex-col flex-1 min-h-screen">
         <div className="flex-1 flex flex-col px-6 py-6 gap-6 max-w-sm mx-auto w-full">
+          <div className="flex items-center justify-between">
+            <PlayerBadge name={`${me.name} (te)`} color={me.color} state="active" tokens={me.tokens} />
+            {round.stealDeadline && (
+              <CountdownTimer deadlineIso={round.stealDeadline} size="md" warningAt={5} />
+            )}
+          </div>
+          <p className="text-text-muted text-sm">Lerakva! Most 15 mp-ig bárki ellophatja, ha szerinte rossz helyre tetted…</p>
+          {stealCount > 0 && (
+            <p className="text-warning font-semibold">🕵️ {stealCount} játékos próbál lopni…</p>
+          )}
           <div>
-            <PlayerBadge name={activePlayer.name} color={activePlayer.color} state="active" />
-            <p className="text-text-muted text-sm mt-1">«húzza a kártyát…»</p>
+            <h2 className="text-text-muted text-sm uppercase tracking-wide mb-2">A te idővonalad</h2>
+            <Timeline cards={myTimeline} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // P2' — más köre, megfigyelő (playing/placing) VAGY P4 — steal-ablak nem-aktív játékosként.
+  if (round && activePlayer && !isMyTurn) {
+    const stealing = round.phase === "stealing";
+    return (
+      <div className="flex flex-col flex-1 min-h-screen">
+        {autoSkipNames && (
+          <AutoSkipToast names={autoSkipNames} onDismiss={() => setAutoSkipBanner(null)} />
+        )}
+        <div className="flex-1 flex flex-col px-6 py-6 gap-6 max-w-sm mx-auto w-full">
+          <div className="flex items-center justify-between">
+            <div>
+              <PlayerBadge name={activePlayer.name} color={activePlayer.color} state="active" tokens={activePlayer.tokens} />
+              <p className="text-text-muted text-sm mt-1">
+                {stealing ? "«lerakta a kártyát»" : "«húzza a kártyát…»"}
+              </p>
+            </div>
+            {stealing && round.stealDeadline && (
+              <CountdownTimer deadlineIso={round.stealDeadline} size="md" warningAt={5} />
+            )}
           </div>
 
           <div>
@@ -387,13 +517,35 @@ export default function PlayRoomPage() {
             <Timeline cards={activeTimeline} />
           </div>
 
-          <div>
-            <h2 className="text-text-muted text-sm uppercase tracking-wide mb-2">A te idővonalad</h2>
-            <Timeline cards={myTimeline} />
-          </div>
-
-          <p className="text-text-muted text-sm">Zene szól a közös képernyőn 🔊</p>
-          <p className="text-text-muted">Várd ki a köröd 🙂</p>
+          {stealing ? (
+            <>
+              {stealCount > 0 && (
+                <p className="text-warning text-sm text-center">🕵️ {stealCount} játékos próbál lopni…</p>
+              )}
+              {stealError && (
+                <p role="alert" className="text-sm text-danger">
+                  {stealError}
+                </p>
+              )}
+              <StealButton
+                cards={myTimeline}
+                ownerColorValue={playerColorValue(me.color)}
+                tokens={me.tokens ?? 0}
+                alreadyStole={stealSubmittedForRound === round.id}
+                submitting={stealSubmitting}
+                onSteal={handleSteal}
+              />
+            </>
+          ) : (
+            <>
+              <div>
+                <h2 className="text-text-muted text-sm uppercase tracking-wide mb-2">A te idővonalad</h2>
+                <Timeline cards={myTimeline} />
+              </div>
+              <p className="text-text-muted text-sm">Zene szól a közös képernyőn 🔊</p>
+              <p className="text-text-muted">Várd ki a köröd 🙂</p>
+            </>
+          )}
         </div>
       </div>
     );
@@ -402,8 +554,11 @@ export default function PlayRoomPage() {
   // P2 — lobby várakozás (még nincs induló kör).
   return (
     <div className="flex flex-col flex-1 min-h-screen">
+      {autoSkipNames && (
+        <AutoSkipToast names={autoSkipNames} onDismiss={() => setAutoSkipBanner(null)} />
+      )}
       <div className="flex-1 flex flex-col px-6 py-6 gap-6 max-w-sm mx-auto w-full">
-        <PlayerBadge name={`${me.name} (te)`} color={me.color} />
+        <PlayerBadge name={`${me.name} (te)`} color={me.color} tokens={me.tokens} />
         <p className="text-text-muted">Várj a hostra…</p>
         <p className="text-text-muted text-sm">«a host mindjárt elindítja»</p>
 

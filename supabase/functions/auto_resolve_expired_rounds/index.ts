@@ -29,6 +29,13 @@
 // player-side round_public polling fallback would still pick it up via
 // direct DB reads, but the host has no equivalent fallback yet — see
 // docs/BACKEND-NOTES.md for the frontend follow-up).
+//
+// F2 (ARCHITECTURE.md 11.8): when the resolved round was in 'stealing' phase
+// (i.e. this cron run is the one that actually closed the 15s steal window,
+// rather than a leftover 'playing'/'placing' timeout), an additional
+// `steal_window_closed` broadcast is sent first — this is the event the
+// steal-window countdown UI is documented to listen for, distinct from the
+// more general `round_revealed`.
 
 import { adminClient } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse } from '../_shared/cors.ts';
@@ -51,16 +58,37 @@ Deno.serve(async (req: Request) => {
 
   const supabase = adminClient();
 
-  const { data: expiredRounds, error: findError } = await supabase
+  // F2 (ARCHITECTURE.md 11.7): a round in 'stealing' phase is gated by
+  // steal_deadline (the 15s window, AC22.1), not placing_deadline (whose
+  // deadline already passed — that's WHY the round is in 'stealing' phase).
+  // Querying placing_deadline for 'stealing' rounds would either never match
+  // (if placing_deadline is now in the past for unrelated reasons) or match
+  // immediately without waiting for the actual steal window — both wrong.
+  // Two branches, OR'd together, mirroring resolveRound's own phase-dependent
+  // deadline choice so the query and the evaluation logic never disagree
+  // about which round is "expired".
+  const nowIso = new Date().toISOString();
+
+  const { data: expiredPlacing, error: placingError } = await supabase
     .from('rounds')
     .select('id, room_id')
-    .in('phase', ['playing', 'placing', 'stealing'])
-    .lt('placing_deadline', new Date().toISOString())
+    .in('phase', ['playing', 'placing'])
+    .lt('placing_deadline', nowIso)
     .not('placing_deadline', 'is', null);
 
-  if (findError) {
+  const { data: expiredStealing, error: stealingError } = await supabase
+    .from('rounds')
+    .select('id, room_id')
+    .eq('phase', 'stealing')
+    .lt('steal_deadline', nowIso)
+    .not('steal_deadline', 'is', null);
+
+  if (placingError || stealingError) {
     return errorResponse('db_error', 'Nem sikerült a lejárt körök lekérdezése.', 500);
   }
+
+  const stealingRoundIds = new Set((expiredStealing ?? []).map((r: { id: string }) => r.id));
+  const expiredRounds = [...(expiredPlacing ?? []), ...(expiredStealing ?? [])];
 
   const results: Array<{ roundId: string; roomId: string; ok: boolean; skipped?: boolean; error?: string }> = [];
 
@@ -81,6 +109,14 @@ Deno.serve(async (req: Request) => {
     // after a successful resolve_round call (ARCHITECTURE.md 4.1).
     try {
       const channel = supabase.channel(`room:${round.room_id}`);
+      if (stealingRoundIds.has(round.id)) {
+        // 11.8: this cron run is the one that closed the 15s steal window.
+        await channel.send({
+          type: 'broadcast',
+          event: 'steal_window_closed',
+          payload: { roundId: round.id },
+        });
+      }
       await channel.send({
         type: 'broadcast',
         event: 'round_revealed',

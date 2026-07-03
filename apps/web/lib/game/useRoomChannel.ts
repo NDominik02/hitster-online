@@ -25,7 +25,13 @@ export type RoomChannelEvent =
   | "card_placed"
   | "round_revealed"
   | "turn_advanced"
-  | "game_finished";
+  | "game_finished"
+  // F2 (ARCHITECTURE 11.8) — a 15 mp-es steal-ablak eventjei. A payloadok SOSEM tartalmaznak
+  // kártya-adatot vagy card_id-t (anti-leak, 11.9/5.): steal_registered csak darabszámot küld.
+  | "steal_registered"
+  | "steal_window_closed"
+  | "round_disputed"
+  | "turn_auto_skipped";
 
 export interface UseRoomChannelOptions {
   roomId: string | null;

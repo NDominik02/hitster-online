@@ -80,6 +80,19 @@ export interface RevealedCard {
   artist: string;
   year: number;
   artworkUrl?: string;
+  /**
+   * F2 (ARCHITECTURE 11.5) — a bemondás eredménye, csak reveal/done fázisban jelenik meg
+   * (anti-leak, a `revealed_card` jsonb-n át, sosem a `round_public` nézet külön mezőjén).
+   * `null`, ha nem volt bemondás ebben a körben. A Backend F2-bővítése előtt ez a mező
+   * egyszerűen hiányzik a payloadból — a UI ezt `undefined`/`null`-ként kezeli.
+   */
+  guess?: { correct: boolean; byPlayerId: string } | null;
+  /**
+   * F2 (ARCHITECTURE 11.5) — a steal-kísérletek publikus eredménye (ki próbált, helyes
+   * volt-e, ki nyerte a kártyát). `position` szándékosan NINCS itt (belső infó, F2-D5).
+   * Üres tömb, ha nem volt steal-kísérlet ebben a körben.
+   */
+  steals?: Array<{ playerId: string; correct: boolean; won: boolean }>;
 }
 
 /** timeline_public nézet — csak felfedett, beépült kártyák publikus mezői. */
@@ -141,4 +154,10 @@ export interface DrawCardResponse {
 export interface DragBroadcastPayload {
   playerId: string;
   slotIndex: number | null;
+}
+
+/** F2 (ARCHITECTURE 11.3.3) — a "Bemondom!" kapcsoló alatt gyűjtött nyers beírt sztringek. */
+export interface NameGuessInput {
+  artistGuess: string;
+  titleGuess: string;
 }
