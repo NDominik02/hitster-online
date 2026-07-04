@@ -43,22 +43,31 @@ Deno.serve(async (req: Request) => {
   if (roomError || !room) return errorResponse('room_not_found', 'Nem található ilyen kódú szoba.', 404);
   if (room.status !== 'lobby') return errorResponse('room_not_joinable', 'A játék már elindult.', 409);
 
-  // Reconnect-friendly: if this auth_uid is already a player in this room,
-  // return the existing row rather than creating a duplicate (AC15.3).
-  const { data: existingPlayer } = await supabase
-    .from('players')
-    .select('*')
-    .eq('room_id', room.id)
-    .eq('auth_uid', callerUid)
-    .maybeSingle();
+  const isPassAndPlay = (room.settings as { mode?: string } | null)?.mode === 'pass_and_play';
 
-  if (existingPlayer) {
-    return jsonResponse({
-      roomId: room.id,
-      playerId: existingPlayer.id,
-      seatOrder: existingPlayer.seat_order,
-      status: room.status,
-    });
+  // Reconnect-friendly (csak "shared_screen" módban): ha ez az auth_uid már
+  // tag ebben a szobában, a meglévő sort adjuk vissza duplikáció helyett
+  // (AC15.3). Pass-and-play módban EZ SZÁNDÉKOSAN KIMARAD — egyetlen eszközön
+  // (egy auth_uid) körbeadva minden névre külön players sort kell létrehozni
+  // (a players_room_uid_idx UNIQUE megkötést emiatt migrációval eltávolítottuk,
+  // ld. 009_pass_and_play_multi_player_per_auth — a duplikáció-védelem itt,
+  // kódszinten marad a shared_screen ágra korlátozva).
+  if (!isPassAndPlay) {
+    const { data: existingPlayer } = await supabase
+      .from('players')
+      .select('*')
+      .eq('room_id', room.id)
+      .eq('auth_uid', callerUid)
+      .maybeSingle();
+
+    if (existingPlayer) {
+      return jsonResponse({
+        roomId: room.id,
+        playerId: existingPlayer.id,
+        seatOrder: existingPlayer.seat_order,
+        status: room.status,
+      });
+    }
   }
 
   const { count: playerCount } = await supabase
@@ -66,7 +75,6 @@ Deno.serve(async (req: Request) => {
     .select('id', { count: 'exact', head: true })
     .eq('room_id', room.id);
 
-  const isPassAndPlay = (room.settings as { mode?: string } | null)?.mode === 'pass_and_play';
   const maxPlayers = isPassAndPlay ? MAX_PLAYERS_PASS_AND_PLAY : MAX_PLAYERS;
 
   if ((playerCount ?? 0) >= maxPlayers) {
