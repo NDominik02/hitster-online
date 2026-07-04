@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AppButton } from "@/components/system/AppButton";
 import { ConnectionOverlay } from "@/components/system/ConnectionOverlay";
@@ -9,12 +9,9 @@ import { spotifyOauthCallback } from "@/lib/supabase/functions";
 import { consumeStoredCodeVerifier } from "@/lib/spotify/pkce";
 
 /**
- * S30 (Spotify Premium) — a Spotify OAuth redirect ide tér vissza `?code=...`-dal.
- * Elvégzi a token-cserét (spotify_oauth_callback), majd visszairányít a /host
- * szoba-létrehozó oldalra. A code_verifier sessionStorage-ból jön (lib/spotify/pkce) —
- * ha hiányzik (pl. az oldal új tabban nyílt meg), a folyamat nem folytatható.
+ * Belső komponens, ami hozzáfér a searchParams-hoz a Suspense kontextuson belül.
  */
-export default function SpotifyCallbackPage() {
+function SpotifyCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +23,10 @@ export default function SpotifyCallbackPage() {
       const spotifyError = searchParams.get("error");
 
       if (spotifyError) {
-        if (!cancelled) setError("A Spotify elutasította a csatlakozást (vagy megszakítottad).");
+        if (!cancelled)
+          setError(
+            "A Spotify elutasította a csatlakozást (vagy megszakítottad).",
+          );
         return;
       }
       if (!code) {
@@ -36,13 +36,19 @@ export default function SpotifyCallbackPage() {
 
       const codeVerifier = consumeStoredCodeVerifier();
       if (!codeVerifier) {
-        if (!cancelled) setError("A csatlakozás megszakadt (a böngésző-munkamenet elveszett) — próbáld újra.");
+        if (!cancelled)
+          setError(
+            "A csatlakozás megszakadt (a böngésző-munkamenet elveszett) — próbáld újra.",
+          );
         return;
       }
 
       const redirectUri = process.env.NEXT_PUBLIC_SPOTIFY_REDIRECT_URI;
       if (!redirectUri) {
-        if (!cancelled) setError("A Spotify-integráció nincs konfigurálva ezen a környezeten.");
+        if (!cancelled)
+          setError(
+            "A Spotify-integráció nincs konfigurálva ezen a környezeten.",
+          );
         return;
       }
 
@@ -52,7 +58,11 @@ export default function SpotifyCallbackPage() {
         if (!cancelled) router.replace("/host");
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Nem sikerült a Spotify-csatlakozás.");
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Nem sikerült a Spotify-csatlakozás.",
+          );
         }
       }
     })();
@@ -60,7 +70,7 @@ export default function SpotifyCallbackPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // A searchParams szándékosan nincs itt, mivel a callback csak egyszer fut le mountoláskor
 
   if (error) {
     return (
@@ -77,5 +87,24 @@ export default function SpotifyCallbackPage() {
     <div className="flex flex-1 items-center justify-center">
       <ConnectionOverlay mode="reconnecting" />
     </div>
+  );
+}
+
+/**
+ * S30 (Spotify Premium) — a Spotify OAuth redirect ide tér vissza `?code=...`-dal.
+ * A useSearchParams() miatt kötelező Suspense-be csomagolni, hogy a Next.js build
+ * sikeresen lefusson (kliensoldali dinamikus renderelés kényszerítése).
+ */
+export default function SpotifyCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-1 items-center justify-center">
+          <ConnectionOverlay mode="reconnecting" />
+        </div>
+      }
+    >
+      <SpotifyCallbackContent />
+    </Suspense>
   );
 }
