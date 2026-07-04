@@ -226,19 +226,15 @@ Ezután a cron a következő 20 mp-es ciklusban már sikeresen fog hitelesíteni
 
 **A tulaj/DevOps után-tesztje** (a fenti `vault.update_secret` lefuttatása után javasolt): hozz létre egy kört lejárt deadline-nal (ugyanaz a minta, mint a 9.3/1. pont), várj legfeljebb 20 másodpercet, majd `select phase, outcome from rounds where id = '...'` — `phase='reveal'`-nek kell lennie.
 
-### 9.4 TEENDŐ a Frontend Engineer felé — host-oldali fallback polling hiányzik
+### 9.4 MEGOLDVA (2026-07-02, Frontend) — host-oldali fallback polling
 
-A player-oldali `round_public` polling fallback (egy korábbi kör során bekötve a `app/play/[roomCode]/page.tsx`-be) automatikusan felfedezi az automata lezárást is, mert közvetlenül az adatbázist kérdezi le (nem a broadcast-ra vár) — **playerek oldalán nincs teendő**.
-
-**A HOST oldalon viszont NINCS hasonló fallback.** A host jelenlegi kódja a saját maga által indított `resolve_round` hívás sikeres válaszára és a saját broadcast-jára támaszkodik — ha a rendszer automatikusan (a cron-on át) zárja le a kört, amíg a host tabja háttérben volt (pontosan ez az eredeti hibajelenség), a host a `round_revealed` broadcast eventet megkapja (az `auto_resolve_expired_rounds` most már küldi, 9.1), **DE** ha a host tabja épp akkor tér vissza előtérbe, amikor a broadcast-ablak már lezárult (Supabase Realtime nem garantál üzenet-perzisztenciát háttérben lévő tabra), a host UI beragadhat a régi fázisnál, míg a player már friss idővonalat lát.
-
-**Javasolt megoldás (Frontend feladata):** a host oldalon (`app/host/[roomCode]/page.tsx` vagy az azt tápláló state-hook) tegyetek be egy `round_public`-ra pollingozó `useEffect`-et, ugyanazzal a mintával, mint a player oldalon már megvan — pl. amikor a tab visszatér előtérbe (`visibilitychange` event) VAGY egy alacsony frekvenciájú (5-10 mp) polling, ami összeveti a lekérdezett `phase`-t a jelenlegi UI-állapottal, és ha eltér (pl. a UI még `stealing`-et mutat, de az adatbázis már `reveal`-t), frissíti a képernyőt — pont úgy, mintha a broadcast érkezett volna. Ez nem új koncepció, csak a már meglévő player-oldali minta host-oldali megismétlése.
+Amikor ez a szakasz íródott, a host oldalon még nem volt hasonló fallback, mint a player oldalon. Azóta (2026-07-02-i hotfix) ez bekötésre került: `app/host/[roomCode]/page.tsx` mind a `visibilitychange`-alapú azonnali ellenőrzést (`checkServerRoundState`, amikor a tab előtérbe kerül), mind egy 10 mp-es alacsony frekvenciájú pollingot (`FALLBACK POLLING` komment, `roundIdForHostPolling` effekt) tartalmaz — mindkettő a `round_public`-ot kérdezi le és frissíti a UI-t, ha a szerver (host-hívás VAGY a pg_cron safety net) már előrébb jár. **Ez a TODO tehát rég lezárult, csak ez a dokumentum nem lett frissítve** — 2026-07-04-én, egy PM-státuszfelmérés kapcsán vettük észre, hogy a leírás elavult volt a tényleges kódhoz képest.
 
 ---
 
 ## 10. Nyitott kérdések / blokkolók
 
-Nincs blokkoló, DE van egy kritikus manuális lépés (lásd 9.2) és egy frontend-teendő (lásd 9.4).
+Nincs blokkoló, DE van egy kritikus manuális lépés (lásd 9.2). A korábbi frontend-teendő (9.4) azóta megoldva.
 
 - A **realtime broadcast küldése** kliensoldali felelősség (5. pont) — ha a Frontend inkább szerver-oldali broadcastot szeretne az Edge Functionökből, szóljatok, és utólag hozzáadom (`supabase.channel(...).send(...)` az admin klienssel minden mutáció után triviálisan beköthető). **Ez már megtörtént az `auto_resolve_expired_rounds`-nál** (9.1) — ha a mintát a többi mutációra (place_card, next_turn stb.) is szeretnétek szerver-oldalra hozni, szóljatok.
 
