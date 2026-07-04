@@ -6,8 +6,10 @@ import { AppButton } from "@/components/system/AppButton";
 import { SegmentedControl } from "@/components/system/SegmentedControl";
 import { GenerationProgress } from "@/components/game/GenerationProgress";
 import { CoverageReport } from "@/components/game/CoverageReport";
+import { ModeCard } from "@/components/lobby/ModeCard";
+import { RosterBuilder, type RosterEntry } from "@/components/pass-and-play/RosterBuilder";
 import { ensureAnonymousSession } from "@/lib/supabase/client";
-import { generateDeck, createRoom, pollDeckUntilReady, spotifyRefreshToken } from "@/lib/supabase/functions";
+import { generateDeck, createRoom, joinRoom, pollDeckUntilReady, spotifyRefreshToken } from "@/lib/supabase/functions";
 import { startSpotifyLogin } from "@/lib/spotify/pkce";
 import type { Deck } from "@/lib/game/types";
 
@@ -28,7 +30,7 @@ export default function HostCreatePage() {
   const [timeLimitSec, setTimeLimitSec] = useState(90);
   const [error, setError] = useState<string | null>(null);
 
-  const [phase, setPhase] = useState<"form" | "generating" | "report">("form");
+  const [phase, setPhase] = useState<"mode" | "form" | "generating" | "report">("mode");
   const [progress, setProgress] = useState<{ processed: number; total: number; step: string }>({
     processed: 0,
     total: 0,
@@ -36,6 +38,12 @@ export default function HostCreatePage() {
   });
   const [deck, setDeck] = useState<Deck | null>(null);
   const [creatingRoom, setCreatingRoom] = useState(false);
+
+  // PP0 (Pass-and-play mód-választó) — US-PP1: a mód a szoba-létrehozás ELŐTT dől el,
+  // menet közben nem váltható. "shared_screen" a jelenlegi (F1/F2) host+player mód.
+  const [mode, setMode] = useState<"shared_screen" | "pass_and_play" | null>(null);
+  const [roster, setRoster] = useState<RosterEntry[]>([]);
+  const [creatingRoster, setCreatingRoster] = useState(false);
 
   // S30 (Spotify Premium, F3) — a kapcsolat a SAJÁT auth.uid()-hez kötött, nem
   // egy adott szobához (Architect terv), ezért itt, a szoba létrehozása ELŐTT
@@ -117,14 +125,40 @@ export default function HostCreatePage() {
     setCreatingRoom(true);
     setError(null);
     try {
-      // A mód-választó UI (Pass-and-play) külön Frontend-feladat (task #16) — addig is
-      // mindig 'shared_screen'-t küldünk, ami a meglévő host+player viselkedést jelenti
-      // (a create_room erre esne vissza akkor is, ha ezt a mezőt egyáltalán nem küldenénk).
       const { code } = await createRoom(deck.id, { winTarget, timeLimitSec, stealEnabled: false, mode: "shared_screen" });
       router.push(`/host/${code}`);
     } catch (err) {
       setCreatingRoom(false);
       setError(err instanceof Error ? err.message : "Nem sikerült létrehozni a szobát.");
+    }
+  }
+
+  /**
+   * Pass-and-play — a névsor összeállítása UTÁN: egyetlen munkamenettel (auth_uid)
+   * hozzuk létre a szobát ÉS csatlakoztatjuk az összes roster-játékost egymás után
+   * (join_room pass_and_play módban minden hívásra új players sort hoz létre —
+   * ld. 009_pass_and_play_multi_player_per_auth migráció). Utána a solo state-gép
+   * oldalra navigálunk, nem a klasszikus /host/[roomCode]-ra.
+   */
+  async function handleCreatePassAndPlayRoom() {
+    if (!deck || roster.length < 2) return;
+    setCreatingRoster(true);
+    setError(null);
+    try {
+      const { code } = await createRoom(deck.id, {
+        winTarget,
+        timeLimitSec,
+        stealEnabled: false,
+        mode: "pass_and_play",
+      });
+      // Sorban, nem párhuzamosan — a szín/seat-ütközések elkerülése végett.
+      for (const entry of roster) {
+        await joinRoom(code, entry.name, entry.color);
+      }
+      router.push(`/host/${code}/solo`);
+    } catch (err) {
+      setCreatingRoster(false);
+      setError(err instanceof Error ? err.message : "Nem sikerült elindítani a partit.");
     }
   }
 
@@ -137,6 +171,31 @@ export default function HostCreatePage() {
           </h1>
           <button className="text-text-muted text-sm hover:text-text">? Súgó</button>
         </header>
+
+        {phase === "mode" && (
+          <div className="space-y-4">
+            <h2 className="text-2xl font-bold text-center mb-2">Hogyan játszotok?</h2>
+            <ModeCard
+              icon="📺"
+              title="Klasszikus"
+              description="Egy közös képernyő + mindenki a saját telefonján."
+              onClick={() => {
+                setMode("shared_screen");
+                setPhase("form");
+              }}
+            />
+            <ModeCard
+              icon="📱"
+              title="Add tovább!"
+              description="Egyetlen telefon, körbeadva — nincs szükség másik eszközre. 2–6 fő ajánlott."
+              highlighted
+              onClick={() => {
+                setMode("pass_and_play");
+                setPhase("form");
+              }}
+            />
+          </div>
+        )}
 
         {phase === "form" && (
           <>
@@ -246,14 +305,25 @@ export default function HostCreatePage() {
                 {error}
               </p>
             )}
-            <AppButton
-              size="lg"
-              fullWidth
-              disabled={!deck.report.meetsMinimum || creatingRoom}
-              onClick={handleCreateRoom}
-            >
-              {creatingRoom ? "Szoba létrehozása…" : "SZOBA LÉTREHOZÁSA ▶"}
-            </AppButton>
+
+            {deck.report.meetsMinimum && mode === "pass_and_play" ? (
+              <RosterBuilder
+                players={roster}
+                onAdd={(entry) => setRoster((r) => [...r, entry])}
+                onRemove={(i) => setRoster((r) => r.filter((_, idx) => idx !== i))}
+                onConfirm={handleCreatePassAndPlayRoom}
+                confirming={creatingRoster}
+              />
+            ) : (
+              <AppButton
+                size="lg"
+                fullWidth
+                disabled={!deck.report.meetsMinimum || creatingRoom}
+                onClick={handleCreateRoom}
+              >
+                {creatingRoom ? "Szoba létrehozása…" : "SZOBA LÉTREHOZÁSA ▶"}
+              </AppButton>
+            )}
             {!deck.report.meetsMinimum && (
               <AppButton variant="secondary" fullWidth onClick={() => setPhase("form")}>
                 Másik playlist
