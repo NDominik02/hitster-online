@@ -88,6 +88,7 @@ export function adaptRoom(row: RoomRow): Room {
     },
     currentRoundId: row.current_round_id,
     winnerPlayerIds: row.winner_player_ids ?? [],
+    spotifyPlaybackMode: (row.spotify_playback_mode as "preview" | "premium" | undefined) ?? "preview",
   };
 }
 

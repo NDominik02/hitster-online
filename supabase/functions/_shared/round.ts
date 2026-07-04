@@ -5,6 +5,7 @@
 
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { evaluateGuess, evaluateSteals, type NameGuess, type StealEntry } from './steal.ts';
+import { getValidSpotifyAccessToken } from './spotify.ts';
 
 export interface DrawResult {
   ok: boolean;
@@ -13,11 +14,54 @@ export interface DrawResult {
   roundNo?: number;
   activePlayerId?: string;
   audioUrl?: string; // signed URL — ONLY ever returned to the host caller (D7/6.4)
+  // S20 (F3, Web Playback SDK) — jelen VAN, ha a szoba 'premium' módban fut,
+  // a kártyának van spotify_uri-ja, ÉS a host Spotify-tokenje élő/frissíthető.
+  // A kliens EZT próbálja meg elsőként (spotify_playback_command proxyn
+  // keresztül — a nyers access token SOSEM megy ki a kliensnek, a proxy maga
+  // kéri le szerveroldalon), és csak hiba esetén esik vissza az audioUrl
+  // (preview) útra — sosem a szerver hibázik emiatt.
+  spotifyUri?: string;
   placingDeadline?: string;
   error?: string;
 }
 
 const SIGNED_URL_TTL_SEC = 60 * 5; // timeLimitSec (usually 90s) + buffer, capped generously at 5 min
+
+// S20 — közös segédfüggvény: egy adott kártyához feloldja a lejátszási
+// forrást (mindig kiszámolt preview audioUrl fallbackként, PLUSZ opcionális
+// premium spotifyUri). Ugyanezt használja a drawCard (új kör indításakor) ÉS
+// a draw_card Edge Function "már aktív kör" ága (amikor csak egy friss
+// signed URL-t kér újra a host anélkül, hogy új kört indítana) — így a két
+// hívási út sosem térhet el egymástól.
+export async function resolveCardPlayback(
+  supabase: SupabaseClient,
+  room: { host_uid: string; spotify_playback_mode?: string | null },
+  cardId: string
+): Promise<{ audioUrl?: string; spotifyUri?: string }> {
+  const { data: fullCard } = await supabase
+    .from('deck_cards')
+    .select('audio_url, spotify_uri')
+    .eq('id', cardId)
+    .single();
+
+  let audioUrl: string | undefined;
+  if (fullCard?.audio_url) {
+    const { data: signed } = await supabase.storage
+      .from('deck-audio')
+      .createSignedUrl(fullCard.audio_url, SIGNED_URL_TTL_SEC);
+    audioUrl = signed?.signedUrl;
+  }
+
+  let spotifyUri: string | undefined;
+  if (room.spotify_playback_mode === 'premium' && fullCard?.spotify_uri) {
+    // Csak ANNAK ellenőrzésére kérünk tokent, hogy a kapcsolat még él/frissíthető —
+    // magát a tokent SOSEM adjuk vissza a kliensnek (ld. fenti DrawResult jsdoc).
+    const token = await getValidSpotifyAccessToken(supabase, room.host_uid);
+    if (token) spotifyUri = fullCard.spotify_uri;
+  }
+
+  return { audioUrl, spotifyUri };
+}
 
 // Draws the next card for a room and creates a new `rounds` row.
 // `activePlayerId` must be resolved by the caller (start_game: first seat;
@@ -29,7 +73,7 @@ export async function drawCard(
 ): Promise<DrawResult> {
   const { data: room, error: roomError } = await supabase
     .from('rooms')
-    .select('id, deck_id, deck_cursor, settings, status')
+    .select('id, deck_id, deck_cursor, settings, status, host_uid, spotify_playback_mode')
     .eq('id', roomId)
     .single();
 
@@ -81,22 +125,14 @@ export async function drawCard(
   // D7/6.4: get the audio_url PATH from deck_cards (service-role bypasses RLS
   // here — this is the ONLY place the raw path is read) and issue a
   // short-lived signed URL. This response is only ever returned to the host.
-  const { data: fullCard } = await supabase.from('deck_cards').select('audio_url').eq('id', card.id).single();
-
-  let audioUrl: string | undefined;
-  if (fullCard?.audio_url) {
-    const { data: signed } = await supabase.storage
-      .from('deck-audio')
-      .createSignedUrl(fullCard.audio_url, SIGNED_URL_TTL_SEC);
-    audioUrl = signed?.signedUrl;
-  }
+  const playback = await resolveCardPlayback(supabase, room, card.id);
 
   return {
     ok: true,
     roundId: newRound.id,
     roundNo,
     activePlayerId,
-    audioUrl,
+    ...playback,
     placingDeadline,
   };
 }

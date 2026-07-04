@@ -70,11 +70,19 @@ export async function pollDeckUntilReady(
   }
 }
 
-/** create_room (ARCHITECTURE 3.2) */
+/**
+ * create_room (ARCHITECTURE 3.2).
+ *
+ * S20/S30 — a `spotifyPlaybackMode` KÉRÉS csak egy szándék-jelzés a
+ * kliens felől ("van csatlakoztatott Spotify-fiókom, próbáld a premium
+ * módot"); a szerver a create_room-ban mindig újra ellenőrzi a
+ * spotify_connections táblát, mielőtt ténylegesen bekapcsolná — a válasz
+ * `spotifyPlaybackMode` mezője a TÉNYLEGESEN beállított értéket adja vissza.
+ */
 export async function createRoom(
   deckId: string,
-  settings: RoomSettings
-): Promise<{ roomId: string; code: string; status: string }> {
+  settings: RoomSettings & { spotifyPlaybackMode?: "preview" | "premium" }
+): Promise<{ roomId: string; code: string; status: string; spotifyPlaybackMode: "preview" | "premium" }> {
   return invoke("create_room", { deckId, settings });
 }
 
@@ -308,4 +316,20 @@ export async function spotifyOauthCallback(
 /** spotify_refresh_token (S30) — friss access token a hívó saját Spotify-kapcsolatára. */
 export async function spotifyRefreshToken(): Promise<{ accessToken: string; expiresAt: string }> {
   return invoke("spotify_refresh_token", {});
+}
+
+/** spotify_list_devices (S20) — a hívó Spotify Connect-eszközei (Connect API-s eszközválasztóhoz). */
+export async function spotifyListDevices(): Promise<{
+  devices: Array<{ id: string; name: string; type: string; isActive: boolean }>;
+}> {
+  return invoke("spotify_list_devices", {});
+}
+
+/** spotify_playback_command (S20) — play/pause a megadott Spotify Connect device-on. */
+export async function spotifyPlaybackCommand(
+  action: "play" | "pause",
+  deviceId: string,
+  spotifyUri?: string
+): Promise<{ ok: true }> {
+  return invoke("spotify_playback_command", { action, deviceId, spotifyUri });
 }

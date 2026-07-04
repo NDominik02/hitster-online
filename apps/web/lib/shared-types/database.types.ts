@@ -202,6 +202,7 @@ export type Database = {
           host_uid: string
           id: string
           settings: Json
+          spotify_playback_mode: string
           status: Database["public"]["Enums"]["room_status"]
           updated_at: string
           winner_player_ids: string[]
@@ -215,6 +216,7 @@ export type Database = {
           host_uid: string
           id?: string
           settings?: Json
+          spotify_playback_mode?: string
           status?: Database["public"]["Enums"]["room_status"]
           updated_at?: string
           winner_player_ids?: string[]
@@ -228,6 +230,7 @@ export type Database = {
           host_uid?: string
           id?: string
           settings?: Json
+          spotify_playback_mode?: string
           status?: Database["public"]["Enums"]["room_status"]
           updated_at?: string
           winner_player_ids?: string[]
@@ -328,6 +331,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      spotify_connections: {
+        Row: {
+          access_expires_at: string
+          access_token: string
+          created_at: string
+          host_uid: string
+          id: string
+          product: string | null
+          refresh_token: string
+          scope: string
+          spotify_user_id: string
+          updated_at: string
+        }
+        Insert: {
+          access_expires_at: string
+          access_token: string
+          created_at?: string
+          host_uid: string
+          id?: string
+          product?: string | null
+          refresh_token: string
+          scope: string
+          spotify_user_id: string
+          updated_at?: string
+        }
+        Update: {
+          access_expires_at?: string
+          access_token?: string
+          created_at?: string
+          host_uid?: string
+          id?: string
+          product?: string | null
+          refresh_token?: string
+          scope?: string
+          spotify_user_id?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       timeline_cards: {
         Row: {
@@ -432,6 +474,10 @@ export type Database = {
       }
     }
     Functions: {
+      adjust_tokens: {
+        Args: { p_delta: number; p_player_id: string }
+        Returns: number
+      }
       get_timeline: {
         Args: { p_room_id: string }
         Returns: {

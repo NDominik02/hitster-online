@@ -131,7 +131,13 @@ export default function HostCreatePage() {
     setCreatingRoom(true);
     setError(null);
     try {
-      const { code } = await createRoom(deck.id, { winTarget, timeLimitSec, stealEnabled, mode: "shared_screen" });
+      const { code } = await createRoom(deck.id, {
+        winTarget,
+        timeLimitSec,
+        stealEnabled,
+        mode: "shared_screen",
+        spotifyPlaybackMode: spotifyStatus === "connected" ? "premium" : "preview",
+      });
       router.push(`/host/${code}`);
     } catch (err) {
       setCreatingRoom(false);

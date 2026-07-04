@@ -80,6 +80,7 @@ export const mockRoom: Room = {
   settings: { winTarget: 10, timeLimitSec: 90, stealEnabled: false, mode: "shared_screen" },
   currentRoundId: "round-mock-1",
   winnerPlayerIds: [],
+  spotifyPlaybackMode: "preview",
 };
 
 export const mockRoomLobby: Room = {

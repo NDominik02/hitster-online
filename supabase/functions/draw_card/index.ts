@@ -8,7 +8,7 @@
 
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
-import { drawCard, finishByDeckExhaustion } from '../_shared/round.ts';
+import { drawCard, finishByDeckExhaustion, resolveCardPlayback } from '../_shared/round.ts';
 
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
@@ -30,7 +30,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: room, error: roomError } = await supabase
     .from('rooms')
-    .select('id, host_uid, status, current_round_id')
+    .select('id, host_uid, status, current_round_id, spotify_playback_mode')
     .eq('id', body.roomId)
     .single();
 
@@ -48,23 +48,12 @@ Deno.serve(async (req: Request) => {
       .single();
 
     if (currentRound && currentRound.phase !== 'done') {
-      const { data: cardRow } = await supabase
-        .from('deck_cards')
-        .select('audio_url')
-        .eq('id', currentRound.card_id)
-        .single();
-      let audioUrl: string | undefined;
-      if (cardRow?.audio_url) {
-        const { data: signed } = await supabase.storage
-          .from('deck-audio')
-          .createSignedUrl(cardRow.audio_url, 300);
-        audioUrl = signed?.signedUrl;
-      }
+      const playback = await resolveCardPlayback(supabase, room, currentRound.card_id);
       return jsonResponse({
         roundId: currentRound.id,
         roundNo: currentRound.round_no,
         activePlayerId: currentRound.active_player_id,
-        audioUrl,
+        ...playback,
         placingDeadline: currentRound.placing_deadline,
       });
     }
@@ -93,6 +82,7 @@ Deno.serve(async (req: Request) => {
     roundNo: draw.roundNo,
     activePlayerId: draw.activePlayerId,
     audioUrl: draw.audioUrl,
+    spotifyUri: draw.spotifyUri,
     placingDeadline: draw.placingDeadline,
   });
 });

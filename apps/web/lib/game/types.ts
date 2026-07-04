@@ -60,6 +60,14 @@ export interface Room {
   settings: RoomSettings;
   currentRoundId: string | null;
   winnerPlayerIds: string[]; // D3: megosztott győzelem → tömb
+  /**
+   * S20/S30 (F3, Spotify Premium) — a rooms.spotify_playback_mode oszlop
+   * (NEM a settings JSON része — a szerver create_room-kor állítja be,
+   * és sosem bízik a kliens kérésében validáció nélkül). 'premium' esetén a
+   * host oldal a Web Playback SDK-t/Connect API-t próbálja meg elsőként,
+   * 'preview'-nál (alapértelmezett) az F1 óta ismert 30 mp-es <audio> megy.
+   */
+  spotifyPlaybackMode: "preview" | "premium";
 }
 
 /** A player-facing round nézet — tükrözi a round_public view-t, SOHA nincs benne card_id. */
@@ -148,7 +156,12 @@ export interface DrawCardResponse {
   roundId: string;
   roundNo: number;
   activePlayerId: string;
-  audioUrl: string; // signed URL, csak host
+  audioUrl: string; // signed URL, csak host — mindig jelen, premium módban is fallbackként
+  /** S20 (F3, Web Playback SDK) — csak 'premium' módú szobában, ha a kártyának van spotify_uri-ja
+   *  és a host Spotify-kapcsolata érvényes/frissíthető. Hiányában a kliens a preview audioUrl-re
+   *  esik vissza. A tényleges access token sosem jut el ide — a spotify_playback_command proxy
+   *  szerveroldalon kéri le, amikor a kliens ezzel az URI-vel lejátszást indít. */
+  spotifyUri?: string;
   placingDeadline: string;
 }
 

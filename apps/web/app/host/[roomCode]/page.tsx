@@ -9,6 +9,7 @@ import { PlayerList } from "@/components/lobby/PlayerList";
 import { MysteryCard } from "@/components/game/MysteryCard";
 import { AudioProgressBar } from "@/components/game/AudioProgressBar";
 import { AudioUnlockOverlay } from "@/components/game/AudioUnlockOverlay";
+import { SpotifyDevicePicker } from "@/components/game/SpotifyDevicePicker";
 import { PlayerTimelineRow } from "@/components/game/PlayerTimelineRow";
 import { RevealCard } from "@/components/game/RevealCard";
 import { OutcomeBanner } from "@/components/game/OutcomeBanner";
@@ -33,6 +34,8 @@ import {
 import { adaptRoundPublic } from "@/lib/supabase/adapters";
 import { useRoomChannel } from "@/lib/game/useRoomChannel";
 import { playRevealSound, primeSoundContext } from "@/lib/sound";
+import { getSupabaseClient } from "@/lib/supabase/client";
+import { useSpotifyPlayback } from "@/lib/spotify/useSpotifyPlayback";
 import type { Player, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
 
 /**
@@ -60,6 +63,19 @@ export default function HostRoomPage() {
   const [audioLocked, setAudioLocked] = useState(false);
   const [dragGhostIndex, setDragGhostIndex] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // S20 (F3, Spotify Premium) — a rooms.spotify_playback_mode oszlop (NEM a settings JSON
+  // része, ld. lib/game/types.ts Room.spotifyPlaybackMode jsdoc) — csak 'premium'-nál
+  // kapcsoljuk be az SDK-t/Connect API-t, hogy 'preview' módban egyáltalán ne fusson le
+  // semmilyen Spotify-betöltés.
+  const [spotifyPlaybackMode, setSpotifyPlaybackMode] = useState<"preview" | "premium">("preview");
+  const spotify = useSpotifyPlayback(spotifyPlaybackMode === "premium");
+  // Amikor a jelenlegi kör számát ténylegesen a Spotify játssza (nem a preview <audio>),
+  // ez jelzi az AudioProgressBar-nak/<audio>-nak, hogy ne induljon el a preview is.
+  const [spotifyPlaying, setSpotifyPlaying] = useState(false);
+  // A host bezárhatja a Connect-eszközválasztót anélkül, hogy eszközt választana — ilyenkor
+  // a parti egyszerűen a preview módra esik vissza, a picker nem jelenik meg újra.
+  const [spotifyPickerDismissed, setSpotifyPickerDismissed] = useState(false);
 
   // F2 (S22, ARCHITECTURE 11.8) — élő steal-számláló a `steal_registered` broadcastból
   // (H5 mintájára, D8: a host lát élő tükrözést, a payload csak darabszám, anti-leak).
@@ -152,6 +168,17 @@ export default function HostRoomPage() {
         await refreshPlayers(res.roomId);
         if (res.currentRoundId) await refreshRound(res.currentRoundId);
         await refreshTimelines(res.roomId);
+        // S20 — a rooms.spotify_playback_mode a reconnect válaszban nincs benne (az csak
+        // roomId/role/status/currentRoundId-t ad), ezért egy külön, közvetlen olvasás kell
+        // rá — a host RLS (is_room_host) miatt jogosult a saját szobája erre a mezőjére.
+        const { data: roomRow } = await getSupabaseClient()
+          .from("rooms")
+          .select("spotify_playback_mode")
+          .eq("id", res.roomId)
+          .maybeSingle();
+        if (!cancelled && roomRow?.spotify_playback_mode === "premium") {
+          setSpotifyPlaybackMode("premium");
+        }
       } catch (err) {
         if (!cancelled) {
           setLoadError(err instanceof Error ? err.message : "Nem sikerült betölteni a szobát.");
@@ -298,7 +325,17 @@ export default function HostRoomPage() {
     if (!roomId) return;
     try {
       const draw = await drawCard(roomId);
-      setAudioUrl(draw.audioUrl);
+      // S20 (F3) — 'premium' módban ELSŐKÉNT a Spotify-lejátszást próbáljuk (SDK vagy a host
+      // által kiválasztott Connect-eszköz); csak sikertelenség esetén (nincs eszköz, hiba a
+      // parancsnál) esünk vissza a megszokott preview <audio> útra — a játék emiatt sosem törik.
+      if (draw.spotifyUri) {
+        const played = await spotify.play(draw.spotifyUri);
+        setSpotifyPlaying(played);
+        setAudioUrl(played ? null : draw.audioUrl);
+      } else {
+        setSpotifyPlaying(false);
+        setAudioUrl(draw.audioUrl);
+      }
       await refreshRound(draw.roundId);
       await broadcastEvent("round_started", { roundId: draw.roundId, activePlayerId: draw.activePlayerId });
     } catch (err) {
@@ -397,6 +434,7 @@ export default function HostRoomPage() {
         }
         await broadcastEvent("turn_advanced", { roundId: res.roundId });
         setAudioUrl(null);
+        setSpotifyPlaying(false);
         setDragGhostIndex(null);
         await beginRound(res.roundId);
       }
@@ -723,7 +761,11 @@ export default function HostRoomPage() {
             ) : (
               <div className="flex flex-col items-center gap-6">
                 <MysteryCard spinning size="lg" />
-                <AudioProgressBar current={0} duration={30} playing={Boolean(audioUrl) && !audioLocked} />
+                <AudioProgressBar
+                  current={0}
+                  duration={30}
+                  playing={spotifyPlaying || (Boolean(audioUrl) && !audioLocked)}
+                />
               </div>
             )}
 
@@ -756,6 +798,14 @@ export default function HostRoomPage() {
                 ))}
               </div>
             </div>
+
+            <SpotifyDevicePicker
+              visible={spotify.needsDevicePicker && !spotifyPickerDismissed}
+              devices={spotify.connectDevices}
+              loading={spotify.loadingDevices}
+              onSelect={(deviceId) => spotify.selectDevice(deviceId)}
+              onSkip={() => setSpotifyPickerDismissed(true)}
+            />
 
             <AudioUnlockOverlay
               visible={audioLocked}

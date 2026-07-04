@@ -62,3 +62,49 @@ export async function fetchSpotifyProfile(accessToken: string): Promise<SpotifyP
   if (!res.ok) return null;
   return (await res.json()) as SpotifyProfile;
 }
+
+const EXPIRY_SAFETY_MARGIN_MS = 60_000; // refresh a bit before actual expiry
+
+// S30/S20 (F3, Web Playback SDK) — shared by spotify_refresh_token (client-facing)
+// AND internally by drawCard/spotify_list_devices/spotify_playback_command, so
+// those never need an extra internal HTTP hop just to get a fresh token.
+// Deletes the stored connection and returns null if the refresh token itself
+// is no longer usable (revoked on Spotify's side) — callers fall back to
+// preview mode silently in that case (Architect plan: no hard failures).
+export async function getValidSpotifyAccessToken(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  hostUid: string
+): Promise<{ accessToken: string; expiresAt: string } | null> {
+  const { data: connection } = await supabase
+    .from('spotify_connections')
+    .select('access_token, refresh_token, access_expires_at')
+    .eq('host_uid', hostUid)
+    .maybeSingle();
+
+  if (!connection) return null;
+
+  const expiresAt = new Date(connection.access_expires_at).getTime();
+  if (expiresAt - Date.now() > EXPIRY_SAFETY_MARGIN_MS) {
+    return { accessToken: connection.access_token, expiresAt: connection.access_expires_at };
+  }
+
+  const refreshed = await refreshSpotifyToken(connection.refresh_token);
+  if (!refreshed) {
+    await supabase.from('spotify_connections').delete().eq('host_uid', hostUid);
+    return null;
+  }
+
+  const newExpiresAt = new Date(Date.now() + refreshed.expires_in * 1000).toISOString();
+  await supabase
+    .from('spotify_connections')
+    .update({
+      access_token: refreshed.access_token,
+      ...(refreshed.refresh_token ? { refresh_token: refreshed.refresh_token } : {}),
+      access_expires_at: newExpiresAt,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('host_uid', hostUid);
+
+  return { accessToken: refreshed.access_token, expiresAt: newExpiresAt };
+}

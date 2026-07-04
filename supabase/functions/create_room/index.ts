@@ -3,6 +3,7 @@
 
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
+import { getValidSpotifyAccessToken } from '../_shared/spotify.ts';
 
 const MIN_USABLE_CARDS = 60; // D4
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous 0/O/1/I
@@ -25,7 +26,13 @@ Deno.serve(async (req: Request) => {
 
   let body: {
     deckId?: string;
-    settings?: { winTarget?: number; timeLimitSec?: number; stealEnabled?: boolean; mode?: string };
+    settings?: {
+      winTarget?: number;
+      timeLimitSec?: number;
+      stealEnabled?: boolean;
+      mode?: string;
+      spotifyPlaybackMode?: string;
+    };
   };
   try {
     body = await req.json();
@@ -52,6 +59,24 @@ Deno.serve(async (req: Request) => {
   if (deck.status !== 'ready') return errorResponse('deck_not_ready', 'A pakli még generálódik vagy hibás.', 409);
   if (deck.usable_count < MIN_USABLE_CARDS) {
     return errorResponse('deck_too_small', `A paklinak legalább ${MIN_USABLE_CARDS} kártyát kell tartalmaznia.`, 422);
+  }
+
+  // S20/S30 (F3, Spotify Premium): a kliens KÉRHETI a 'premium' módot, de a
+  // szerver sosem bízik ebben vakon — csak akkor kapcsoljuk be ténylegesen,
+  // ha a hívónak (a leendő host_uid-nak) van érvényes, Premium Spotify-
+  // kapcsolata. Enélkül csendben visszaesik 'preview'-re (F1/F2-től ismert
+  // 30 mp-es viselkedés) — soha nem hibázik emiatt a szoba-létrehozás.
+  let spotifyPlaybackMode: 'preview' | 'premium' = 'preview';
+  if (body.settings?.spotifyPlaybackMode === 'premium') {
+    const { data: connection } = await supabase
+      .from('spotify_connections')
+      .select('product')
+      .eq('host_uid', callerUid)
+      .maybeSingle();
+    if (connection?.product === 'premium') {
+      const token = await getValidSpotifyAccessToken(supabase, callerUid);
+      if (token) spotifyPlaybackMode = 'premium';
+    }
   }
 
   const settings = {
@@ -85,11 +110,17 @@ Deno.serve(async (req: Request) => {
       deck_id: body.deckId,
       status: 'lobby',
       settings,
+      spotify_playback_mode: spotifyPlaybackMode,
     })
     .select()
     .single();
 
   if (roomError || !room) return errorResponse('db_error', 'Nem sikerült a szoba létrehozása.', 500);
 
-  return jsonResponse({ roomId: room.id, code: room.code, status: room.status });
+  return jsonResponse({
+    roomId: room.id,
+    code: room.code,
+    status: room.status,
+    spotifyPlaybackMode,
+  });
 });
