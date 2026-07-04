@@ -72,6 +72,37 @@ export async function listDecks(limit = 30): Promise<Deck[]> {
   return (data ?? []).map(adaptDeck);
 }
 
+/** Ugyanaz a playlist-id kinyerő logika, mint a generate_deck Edge Function _shared/util.ts-ében. */
+function parsePlaylistIdFromUrl(urlOrId: string): string | null {
+  const m = urlOrId.match(/playlist[/:]([a-zA-Z0-9]+)/);
+  if (m) return m[1];
+  if (/^[a-zA-Z0-9]{10,30}$/.test(urlOrId)) return urlOrId;
+  return null;
+}
+
+/**
+ * "Ajánlott playlistek" (H1 gyorsválasztó, ld. lib/featuredPlaylists.ts) — mielőtt
+ * elindítanánk egy új generálást, megnézzük, van-e már KÉSZ pakli ugyanerre a
+ * playlistre (bárkitől, a decks RLS is_public szabálya miatt látható) — ha
+ * igen, azt azonnal újrahasználjuk, generálás/várakozás nélkül.
+ */
+export async function findReadyDeckByPlaylistUrl(url: string): Promise<Deck | null> {
+  const playlistId = parsePlaylistIdFromUrl(url);
+  if (!playlistId) return null;
+
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("decks")
+    .select("*")
+    .eq("source_playlist_id", playlistId)
+    .eq("status", "ready")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? adaptDeck(data) : null;
+}
+
 /**
  * Pollingozza a decks táblát ~2 mp-enként (BACKEND-NOTES 4. javaslat), amíg status 'ready' vagy
  * 'failed' nem lesz. Az onProgress callback minden pollingnál meghívódik a friss állapottal, hogy a

@@ -37,6 +37,7 @@
 import { adminClient } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
 import { normalize, primaryArtist, similarity, parsePlaylistId, sleep } from '../_shared/util.ts';
+import { getValidSpotifyAccessToken } from '../_shared/spotify.ts';
 
 const SPOTIFY_EMBED_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
@@ -46,6 +47,12 @@ const ITUNES_INTERVAL_MS = 1500; // kept as tight as the F0 prototype allows
 const ITUNES_MIN_MATCH_SCORE = 0.55;
 const MIN_USABLE_CARDS = 60; // D4
 const YEAR_DISAGREEMENT_THRESHOLD = 3; // F0-REPORT 4.: |MB - iTunes| >= 3 -> uncertain flag
+// S20-bővítés (F3): a Premium-kapcsolattal rendelkező hostoknál a hitelesített
+// Web API-val a 100-as embed-korlát fölé is lapozunk, de van egy józan felső
+// határ — a MusicBrainz 1 req/s throttle miatt 300 track már ~5-8 perc
+// generálást jelent (a meglévő self-chaining batch-logika ezt kezeli, csak
+// nem szabad a hostot a végtelenségig várakoztatni egyetlen playlistért).
+const MAX_TRACKS_PREMIUM = 300;
 
 // Time-boxing for the self-chaining background worker. Free tier wall clock
 // is 150s; we budget well under that per invocation so there's headroom for
@@ -138,6 +145,59 @@ async function fetchPlaylistViaEmbed(playlistId: string): Promise<FetchPlaylistR
     possiblyTruncatedAt100: tracks.length === 100,
     tracks,
   };
+}
+
+// S20-bővítés (F3): a Premium-kapcsolattal rendelkező host hitelesített
+// tokenjével lapozva lekéri a TELJES track-listát (a Spotify Web API
+// /playlists/{id}/tracks végpontja lapozható, nincs 100-as korlátja — az
+// anonim embed oldal viszont MAGA a Spotify vágja le 100-nál). A
+// preview_url mezőt a hitelesített API 2024 november óta nem adja vissza
+// megbízhatóan új appoknak (F0-REPORT 5. szakasz) — ezért ez a fetch szinte
+// biztosan null preview_url-lel tér vissza minden trackre; a hívó fél
+// (runGenerationWork) ráfedi az embed 100 track-nyi audioPreview adatát
+// URI alapján, 100 fölött pedig egyszerűen iTunes-fallbackre esik a track.
+async function fetchPlaylistTracksAuthenticated(
+  playlistId: string,
+  accessToken: string,
+  maxTracks: number
+): Promise<{ ok: boolean; tracks?: RawTrack[]; playlistName?: string; reason?: string }> {
+  try {
+    const metaRes = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}?fields=name`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!metaRes.ok) return { ok: false, reason: `playlist meta fetch failed (${metaRes.status})` };
+    const meta = await metaRes.json();
+
+    const tracks: RawTrack[] = [];
+    let url: string | null =
+      `https://api.spotify.com/v1/playlists/${playlistId}/tracks` +
+      `?fields=items(track(uri,name,artists(name),duration_ms,is_playable,preview_url)),next&limit=100`;
+
+    while (url && tracks.length < maxTracks) {
+      const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!res.ok) break; // a partial list is still more useful than bailing entirely
+      const page = await res.json();
+      for (const item of page.items ?? []) {
+        const t = item.track;
+        if (!t) continue;
+        tracks.push({
+          index: tracks.length,
+          uri: t.uri ?? null,
+          title: t.name,
+          artist: (t.artists ?? []).map((a: { name: string }) => a.name).join(', '),
+          durationMs: t.duration_ms ?? null,
+          spotifyPreviewUrl: t.preview_url ?? null,
+          isPlayable: t.is_playable ?? true,
+        });
+        if (tracks.length >= maxTracks) break;
+      }
+      url = page.next ?? null;
+    }
+
+    return { ok: true, tracks, playlistName: meta.name };
+  } catch (err) {
+    return { ok: false, reason: String(err) };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +454,40 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
       tracks = step1.tracks;
       playlistName = step1.playlistName ?? playlistId;
       possiblyTruncatedAt100 = step1.possiblyTruncatedAt100 ?? false;
+
+      // S20-bővítés (F3): ha az embed 100-nál levágottnak tűnik ÉS a pakli
+      // tulajdonosának van érvényes Premium-kapcsolata, próbáljuk a
+      // hitelesített, lapozható Web API-t a TELJES tracklistért. Bármilyen
+      // hiba (nincs kapcsolat, lejárt token, API-hiba) esetén NÉMÁN
+      // megmaradunk a 100-as embed-listánál — ez sosem buktathatja a
+      // generálást, csak egy opcionális bővítés.
+      if (possiblyTruncatedAt100) {
+        const { data: deckOwnerRow } = await supabase.from('decks').select('owner_id').eq('id', deckId).single();
+        const ownerId = deckOwnerRow?.owner_id as string | undefined;
+        if (ownerId) {
+          const { data: connection } = await supabase
+            .from('spotify_connections')
+            .select('product')
+            .eq('host_uid', ownerId)
+            .maybeSingle();
+          if (connection?.product === 'premium') {
+            const token = await getValidSpotifyAccessToken(supabase, ownerId);
+            if (token) {
+              const full = await fetchPlaylistTracksAuthenticated(playlistId, token.accessToken, MAX_TRACKS_PREMIUM);
+              if (full.ok && full.tracks && full.tracks.length > tracks.length) {
+                const previewByUri = new Map(
+                  tracks.filter((t) => t.uri).map((t) => [t.uri as string, t.spotifyPreviewUrl])
+                );
+                tracks = full.tracks.map((t) => ({
+                  ...t,
+                  spotifyPreviewUrl: t.uri ? (previewByUri.get(t.uri) ?? t.spotifyPreviewUrl) : t.spotifyPreviewUrl,
+                }));
+                possiblyTruncatedAt100 = full.tracks.length >= MAX_TRACKS_PREMIUM;
+              }
+            }
+          }
+        }
+      }
 
       await supabase
         .from('decks')

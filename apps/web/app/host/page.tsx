@@ -17,7 +17,9 @@ import {
   pollDeckUntilReady,
   spotifyRefreshToken,
   listDecks,
+  findReadyDeckByPlaylistUrl,
 } from "@/lib/supabase/functions";
+import { FEATURED_PLAYLISTS } from "@/lib/featuredPlaylists";
 import { startSpotifyLogin } from "@/lib/spotify/pkce";
 import type { Deck } from "@/lib/game/types";
 
@@ -81,15 +83,18 @@ export default function HostCreatePage() {
   }, []);
 
   // S31 (F3, pakli-könyvtár) — a host választhat "Új pakli" (playlist URL-ből
-  // generál) és "Meglévő pakli" (korábban generált saját/megosztott, a
-  // decks RLS-e alapján listázott) között. A könyvtárból választás azonnal
+  // generál), "Ajánlott" (tulaj által előre kiválasztott playlist-csomagok,
+  // ld. lib/featuredPlaylists.ts) és "Meglévő pakli" (korábban generált
+  // saját/megosztott, a decks RLS-e alapján listázott) között. A
+  // könyvtárból/ajánlottból választás — ha van már kész pakli rá — azonnal
   // a "report" fázisba ugrik, generálás/pollingozás nélkül.
-  const [deckSource, setDeckSource] = useState<"new" | "library">("new");
+  const [deckSource, setDeckSource] = useState<"new" | "featured" | "library">("new");
   const [libraryDecks, setLibraryDecks] = useState<Deck[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [currentUid, setCurrentUid] = useState<string | null>(null);
+  const [featuredLoadingUrl, setFeaturedLoadingUrl] = useState<string | null>(null);
 
-  async function handleSelectSource(source: "new" | "library") {
+  async function handleSelectSource(source: "new" | "featured" | "library") {
     setDeckSource(source);
     setError(null);
     if (source === "library" && libraryDecks.length === 0) {
@@ -112,6 +117,33 @@ export default function HostCreatePage() {
     setPhase("report");
   }
 
+  /**
+   * "Ajánlott playlistek" gyorsválasztó (ld. lib/featuredPlaylists.ts) — előbb
+   * megnézzük, van-e már KÉSZ pakli erre a playlistre (bárkitől), ha igen,
+   * azonnal újrahasználjuk generálás nélkül; ha nem, elindul a szokásos
+   * generálás (playlistUrl state-et is beállítjuk, hogy a "form" fázis
+   * visszatérésekor a mező ne legyen üres).
+   */
+  async function handleSelectFeatured(pl: { name: string; url: string }) {
+    setError(null);
+    setPlaylistUrl(pl.url);
+    setFeaturedLoadingUrl(pl.url);
+    try {
+      await ensureAnonymousSession();
+      const cached = await findReadyDeckByPlaylistUrl(pl.url);
+      if (cached) {
+        setDeck(cached);
+        setPhase("report");
+        return;
+      }
+      await handleGenerate(pl.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nem sikerült betölteni az ajánlott playlistet.");
+    } finally {
+      setFeaturedLoadingUrl(null);
+    }
+  }
+
   async function handleConnectSpotify() {
     await ensureAnonymousSession();
     const clientId = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID;
@@ -125,8 +157,15 @@ export default function HostCreatePage() {
 
   const urlLooksValid = /^https:\/\/open\.spotify\.com\/playlist\/[a-zA-Z0-9]+/.test(playlistUrl.trim());
 
-  async function handleGenerate() {
-    if (!urlLooksValid) {
+  /**
+   * `urlOverride` — az "Ajánlott playlistek" gyorsválasztó adja át explicit
+   * paraméterként (ld. handleSelectFeatured), mert a setPlaylistUrl(...) állapot-
+   * frissítés aszinkron/batch-elt, tehát egy közvetlenül utána hívott
+   * handleGenerate() még a RÉGI playlistUrl-t olvasná a state-ből.
+   */
+  async function handleGenerate(urlOverride?: string) {
+    const url = (urlOverride ?? playlistUrl).trim();
+    if (!urlOverride && !urlLooksValid) {
       setError("Érvénytelen Spotify playlist link. Ellenőrizd, és próbáld újra.");
       return;
     }
@@ -138,7 +177,7 @@ export default function HostCreatePage() {
       await ensureAnonymousSession();
 
       // A HTTP hívás azonnal visszatér a deckId-vel, a feldolgozás a szerveren fut tovább.
-      const { deckId } = await generateDeck(playlistUrl.trim());
+      const { deckId } = await generateDeck(url);
 
       // Pollingozzuk a decks táblát ~2 mp-enként, amíg ready/failed nem lesz (BACKEND-NOTES 4.).
       const result = await pollDeckUntilReady(deckId, (partial) => {
@@ -255,7 +294,8 @@ export default function HostCreatePage() {
               <h2 className="text-2xl font-bold mb-6">Új játék létrehozása</h2>
 
               {/* S31 (F3, pakli-könyvtár) — "Új pakli" (playlist URL-ből generál, F1 óta
-                  ismert) vagy "Meglévő pakli" (korábban generált saját/megosztott). */}
+                  ismert), "Ajánlott" (tulaj által előre kiválasztott csomagok) vagy
+                  "Meglévő pakli" (korábban generált saját/megosztott). */}
               <SegmentedControl
                 label="Pakli forrása"
                 ariaLabel="Pakli forrása"
@@ -263,11 +303,12 @@ export default function HostCreatePage() {
                 onChange={handleSelectSource}
                 options={[
                   { value: "new", label: "Új pakli" },
+                  { value: "featured", label: "Ajánlott" },
                   { value: "library", label: "Meglévő pakli" },
                 ]}
               />
 
-              {deckSource === "new" ? (
+              {deckSource === "new" && (
                 <div className="mt-3">
                   <label className="block mb-1 font-medium" htmlFor="playlist-url">
                     Spotify playlist link
@@ -286,7 +327,32 @@ export default function HostCreatePage() {
                     › Illeszd be egy Spotify playlist linkjét.
                   </p>
                 </div>
-              ) : (
+              )}
+
+              {deckSource === "featured" && (
+                <div className="mt-3 space-y-2">
+                  {FEATURED_PLAYLISTS.length === 0 ? (
+                    <p className="text-text-muted text-sm">Még nincs ajánlott playlist beállítva.</p>
+                  ) : (
+                    FEATURED_PLAYLISTS.map((pl) => (
+                      <button
+                        key={pl.url}
+                        type="button"
+                        disabled={featuredLoadingUrl !== null}
+                        onClick={() => handleSelectFeatured(pl)}
+                        className="w-full min-h-11 rounded-[var(--radius-button)] bg-surface-2 border-2 border-border hover:border-accent px-4 py-3 text-left disabled:opacity-50"
+                      >
+                        <span className="font-semibold">{pl.name}</span>
+                        {featuredLoadingUrl === pl.url && (
+                          <span className="text-text-muted text-sm ml-2">betöltés…</span>
+                        )}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {deckSource === "library" && (
                 <div className="mt-3">
                   <DeckLibrary
                     decks={libraryDecks}
@@ -372,7 +438,7 @@ export default function HostCreatePage() {
             </div>
 
             {deckSource === "new" && (
-              <AppButton size="lg" fullWidth disabled={!playlistUrl} onClick={handleGenerate}>
+              <AppButton size="lg" fullWidth disabled={!playlistUrl} onClick={() => handleGenerate()}>
                 PAKLI GENERÁLÁSA ▶
               </AppButton>
             )}
