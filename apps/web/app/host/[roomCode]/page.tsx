@@ -13,6 +13,7 @@ import { SpotifyDevicePicker } from "@/components/game/SpotifyDevicePicker";
 import { PlayerTimelineRow } from "@/components/game/PlayerTimelineRow";
 import { RevealCard } from "@/components/game/RevealCard";
 import { OutcomeBanner } from "@/components/game/OutcomeBanner";
+import { GameStats } from "@/components/game/GameStats";
 import { PlayerBadge } from "@/components/lobby/PlayerBadge";
 import { TimelineCard } from "@/components/game/TimelineCard";
 import { CountdownTimer } from "@/components/game/CountdownTimer";
@@ -29,14 +30,15 @@ import {
   nextTurn,
   fetchPlayers,
   fetchRoundPublic,
+  fetchRoom,
   getTimeline,
+  computeGameStats,
 } from "@/lib/supabase/functions";
 import { adaptRoundPublic } from "@/lib/supabase/adapters";
 import { useRoomChannel } from "@/lib/game/useRoomChannel";
 import { playRevealSound, primeSoundContext } from "@/lib/sound";
-import { getSupabaseClient } from "@/lib/supabase/client";
 import { useSpotifyPlayback } from "@/lib/spotify/useSpotifyPlayback";
-import type { Player, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
+import type { Player, PlayerGameStats, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
 
 /**
  * Host shell — a `rooms.status` + `round_public.phase`-ből derivált fázis alapján
@@ -56,6 +58,8 @@ export default function HostRoomPage() {
   const [round, setRound] = useState<RoundPublic | null>(null);
   const [timelines, setTimelines] = useState<Record<string, TimelineCardPublic[]>>({});
   const [winnerPlayerIds, setWinnerPlayerIds] = useState<string[]>([]);
+  // S41 (F4, statisztikák) — csak a parti végén töltjük be (nincs rá szükség menet közben).
+  const [gameStats, setGameStats] = useState<PlayerGameStats[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -169,15 +173,18 @@ export default function HostRoomPage() {
         if (res.currentRoundId) await refreshRound(res.currentRoundId);
         await refreshTimelines(res.roomId);
         // S20 — a rooms.spotify_playback_mode a reconnect válaszban nincs benne (az csak
-        // roomId/role/status/currentRoundId-t ad), ezért egy külön, közvetlen olvasás kell
-        // rá — a host RLS (is_room_host) miatt jogosult a saját szobája erre a mezőjére.
-        const { data: roomRow } = await getSupabaseClient()
-          .from("rooms")
-          .select("spotify_playback_mode")
-          .eq("id", res.roomId)
-          .maybeSingle();
-        if (!cancelled && roomRow?.spotify_playback_mode === "premium") {
+        // roomId/role/status/currentRoundId-t ad), ezért egy külön fetchRoom hívás kell rá.
+        const roomRow = await fetchRoom(res.roomId);
+        if (cancelled) return;
+        if (roomRow.spotifyPlaybackMode === "premium") {
           setSpotifyPlaybackMode("premium");
+        }
+        // Ha a host egy MÁR befejezett partiba csatlakozik vissza (pl. újratöltötte
+        // az oldalt a végeredmény-képernyőn), a winnerPlayerIds/statisztika a
+        // game_finished broadcastból sosem jönne meg újra — itt kell pótolni.
+        if (roomRow.status === "finished") {
+          setWinnerPlayerIds(roomRow.winnerPlayerIds);
+          computeGameStats(res.roomId).then(setGameStats).catch((err) => console.warn("[computeGameStats]", err));
         }
       } catch (err) {
         if (!cancelled) {
@@ -224,9 +231,14 @@ export default function HostRoomPage() {
         if (rid) await refreshRound(rid);
       } else if (event === "game_finished") {
         setRoomStatus("finished");
-        const ids = (payload as { winnerPlayerIds?: string[] })?.winnerPlayerIds ?? [];
-        setWinnerPlayerIds(ids);
+        const finishedPayload = payload as { winnerPlayerIds?: string[]; stats?: PlayerGameStats[] };
+        setWinnerPlayerIds(finishedPayload?.winnerPlayerIds ?? []);
         await refreshTimelines(roomId);
+        if (finishedPayload?.stats) {
+          setGameStats(finishedPayload.stats);
+        } else {
+          computeGameStats(roomId).then(setGameStats).catch((err) => console.warn("[computeGameStats]", err));
+        }
       } else if (event === "steal_registered") {
         const count = (payload as { stealCount?: number })?.stealCount;
         if (typeof count === "number") setStealCount(count);
@@ -417,7 +429,15 @@ export default function HostRoomPage() {
         setRoomStatus("finished");
         setWinnerPlayerIds(res.winnerPlayerIds);
         await refreshTimelines(roomId);
-        await broadcastEvent("game_finished", { winnerPlayerIds: res.winnerPlayerIds });
+        // A player kliens SOSEM olvassa a `rounds` táblát közvetlenül (anti-leak elv,
+        // ld. app/play/[roomCode]/page.tsx jsdoc) — a statisztikát a host számolja ki
+        // EGYSZER, és a game_finished broadcast payload-jában küldi tovább mindenkinek.
+        const stats = await computeGameStats(roomId).catch((err) => {
+          console.warn("[computeGameStats]", err);
+          return [];
+        });
+        setGameStats(stats);
+        await broadcastEvent("game_finished", { winnerPlayerIds: res.winnerPlayerIds, stats });
       } else if (res.next === "paused") {
         // F2-D10: mindenki offline-nak tűnt a szerver szerint — a szoba szünetel, amíg valaki
         // vissza nem tér (vagy a host újra nem próbálja, miután a jelenlét-figyelés frissült).
@@ -988,6 +1008,8 @@ export default function HostRoomPage() {
                 </div>
               </div>
             )}
+
+            <GameStats players={players} stats={gameStats} />
           </section>
         )}
       </div>

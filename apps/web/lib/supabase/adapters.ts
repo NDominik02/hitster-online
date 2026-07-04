@@ -53,6 +53,8 @@ export function adaptDeck(row: DeckRow): Deck {
       step: report.step ?? "fetching_playlist",
       failReason: report.reason ?? report.errorCode,
     },
+    ownerId: row.owner_id,
+    createdAt: row.created_at,
   };
 }
 

@@ -11,6 +11,7 @@ import { RevealCard } from "@/components/game/RevealCard";
 import { OutcomeBanner } from "@/components/game/OutcomeBanner";
 import { CountdownTimer } from "@/components/game/CountdownTimer";
 import { HandoffOverlay } from "@/components/pass-and-play/HandoffOverlay";
+import { GameStats } from "@/components/game/GameStats";
 import { ensureAnonymousSession, getSupabaseClient } from "@/lib/supabase/client";
 import {
   startGame,
@@ -20,11 +21,12 @@ import {
   fetchPlayers,
   fetchRoundPublic,
   getTimeline,
+  computeGameStats,
 } from "@/lib/supabase/functions";
 import { adaptRoundPublic } from "@/lib/supabase/adapters";
 import { playRevealSound, primeSoundContext } from "@/lib/sound";
 import { vibrateOutcome } from "@/lib/haptics";
-import type { NameGuessInput, Player, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
+import type { NameGuessInput, Player, PlayerGameStats, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
 
 type Screen = "handoff" | "playing" | "guard" | "reveal" | "finished";
 
@@ -53,6 +55,7 @@ export default function PassAndPlaySoloPage() {
   const [round, setRound] = useState<RoundPublic | null>(null);
   const [activeTimeline, setActiveTimeline] = useState<TimelineCardPublic[]>([]);
   const [winnerPlayerIds, setWinnerPlayerIds] = useState<string[]>([]);
+  const [gameStats, setGameStats] = useState<PlayerGameStats[]>([]);
 
   const [screen, setScreen] = useState<Screen>("handoff");
   const [handoffTarget, setHandoffTarget] = useState<Player | null>(null);
@@ -103,6 +106,7 @@ export default function PassAndPlaySoloPage() {
 
         if (room.status === "finished") {
           setWinnerPlayerIds(room.winner_player_ids ?? []);
+          computeGameStats(room.id).then(setGameStats).catch((err) => console.warn("[computeGameStats]", err));
           setScreen("finished");
         } else if (room.status === "playing" && room.current_round_id) {
           const r = await refreshRound(room.current_round_id);
@@ -164,6 +168,7 @@ export default function PassAndPlaySoloPage() {
         if (res.next === "finished") {
           setWinnerPlayerIds(res.winnerPlayerIds);
           await refreshPlayers(roomId);
+          computeGameStats(roomId).then(setGameStats).catch((err) => console.warn("[computeGameStats]", err));
           setScreen("finished");
         } else if (res.next === "paused") {
           // Pass-and-playben nincs presence-alapú lecsatlakozás, de a védelem megmarad —
@@ -345,6 +350,7 @@ export default function PassAndPlaySoloPage() {
             .map((w) => (
               <PlayerBadge key={w.id} name={w.name} color={w.color} size="lg" />
             ))}
+          <GameStats players={players} stats={gameStats} />
           <AppButton onClick={() => router.push("/host")}>Új parti</AppButton>
         </div>
       )}

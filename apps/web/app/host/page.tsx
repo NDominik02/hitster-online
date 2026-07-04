@@ -7,9 +7,17 @@ import { SegmentedControl } from "@/components/system/SegmentedControl";
 import { GenerationProgress } from "@/components/game/GenerationProgress";
 import { CoverageReport } from "@/components/game/CoverageReport";
 import { ModeCard } from "@/components/lobby/ModeCard";
+import { DeckLibrary } from "@/components/lobby/DeckLibrary";
 import { RosterBuilder, type RosterEntry } from "@/components/pass-and-play/RosterBuilder";
-import { ensureAnonymousSession } from "@/lib/supabase/client";
-import { generateDeck, createRoom, joinRoom, pollDeckUntilReady, spotifyRefreshToken } from "@/lib/supabase/functions";
+import { ensureAnonymousSession, getSupabaseClient } from "@/lib/supabase/client";
+import {
+  generateDeck,
+  createRoom,
+  joinRoom,
+  pollDeckUntilReady,
+  spotifyRefreshToken,
+  listDecks,
+} from "@/lib/supabase/functions";
 import { startSpotifyLogin } from "@/lib/spotify/pkce";
 import type { Deck } from "@/lib/game/types";
 
@@ -71,6 +79,38 @@ export default function HostCreatePage() {
       cancelled = true;
     };
   }, []);
+
+  // S31 (F3, pakli-könyvtár) — a host választhat "Új pakli" (playlist URL-ből
+  // generál) és "Meglévő pakli" (korábban generált saját/megosztott, a
+  // decks RLS-e alapján listázott) között. A könyvtárból választás azonnal
+  // a "report" fázisba ugrik, generálás/pollingozás nélkül.
+  const [deckSource, setDeckSource] = useState<"new" | "library">("new");
+  const [libraryDecks, setLibraryDecks] = useState<Deck[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [currentUid, setCurrentUid] = useState<string | null>(null);
+
+  async function handleSelectSource(source: "new" | "library") {
+    setDeckSource(source);
+    setError(null);
+    if (source === "library" && libraryDecks.length === 0) {
+      setLibraryLoading(true);
+      try {
+        await ensureAnonymousSession();
+        const [decks, { data: userData }] = await Promise.all([listDecks(), getSupabaseClient().auth.getUser()]);
+        setLibraryDecks(decks);
+        setCurrentUid(userData.user?.id ?? null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Nem sikerült betölteni a pakli-könyvtárat.");
+      } finally {
+        setLibraryLoading(false);
+      }
+    }
+  }
+
+  function handleSelectLibraryDeck(selected: Deck) {
+    setDeck(selected);
+    setPhase("report");
+  }
 
   async function handleConnectSpotify() {
     await ensureAnonymousSession();
@@ -214,22 +254,49 @@ export default function HostCreatePage() {
             <div>
               <h2 className="text-2xl font-bold mb-6">Új játék létrehozása</h2>
 
-              <label className="block mb-1 font-medium" htmlFor="playlist-url">
-                Pakli forrása
-              </label>
-              <input
-                id="playlist-url"
-                type="url"
-                value={playlistUrl}
-                onChange={(e) => setPlaylistUrl(e.target.value)}
-                placeholder="https://open.spotify.com/playlist/..."
-                className="w-full min-h-11 rounded-[var(--radius-button)] bg-surface-2 border-2 border-border focus-visible:border-accent px-4 py-3 text-base"
-                aria-invalid={Boolean(error)}
-                aria-describedby="playlist-url-help"
+              {/* S31 (F3, pakli-könyvtár) — "Új pakli" (playlist URL-ből generál, F1 óta
+                  ismert) vagy "Meglévő pakli" (korábban generált saját/megosztott). */}
+              <SegmentedControl
+                label="Pakli forrása"
+                ariaLabel="Pakli forrása"
+                value={deckSource}
+                onChange={handleSelectSource}
+                options={[
+                  { value: "new", label: "Új pakli" },
+                  { value: "library", label: "Meglévő pakli" },
+                ]}
               />
-              <p id="playlist-url-help" className="text-sm text-text-muted mt-1">
-                › Illeszd be egy Spotify playlist linkjét.
-              </p>
+
+              {deckSource === "new" ? (
+                <div className="mt-3">
+                  <label className="block mb-1 font-medium" htmlFor="playlist-url">
+                    Spotify playlist link
+                  </label>
+                  <input
+                    id="playlist-url"
+                    type="url"
+                    value={playlistUrl}
+                    onChange={(e) => setPlaylistUrl(e.target.value)}
+                    placeholder="https://open.spotify.com/playlist/..."
+                    className="w-full min-h-11 rounded-[var(--radius-button)] bg-surface-2 border-2 border-border focus-visible:border-accent px-4 py-3 text-base"
+                    aria-invalid={Boolean(error)}
+                    aria-describedby="playlist-url-help"
+                  />
+                  <p id="playlist-url-help" className="text-sm text-text-muted mt-1">
+                    › Illeszd be egy Spotify playlist linkjét.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-3">
+                  <DeckLibrary
+                    decks={libraryDecks}
+                    loading={libraryLoading}
+                    currentUid={currentUid}
+                    onSelect={handleSelectLibraryDeck}
+                  />
+                </div>
+              )}
+
               {error && (
                 <p role="alert" className="text-sm text-danger mt-1">
                   {error}
@@ -304,9 +371,11 @@ export default function HostCreatePage() {
               )}
             </div>
 
-            <AppButton size="lg" fullWidth disabled={!playlistUrl} onClick={handleGenerate}>
-              PAKLI GENERÁLÁSA ▶
-            </AppButton>
+            {deckSource === "new" && (
+              <AppButton size="lg" fullWidth disabled={!playlistUrl} onClick={handleGenerate}>
+                PAKLI GENERÁLÁSA ▶
+              </AppButton>
+            )}
           </>
         )}
 

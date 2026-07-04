@@ -12,7 +12,7 @@
 import { FunctionsHttpError } from "@supabase/supabase-js";
 import { getSupabaseClient } from "./client";
 import { adaptDeck, adaptPlayer, adaptRoom, adaptTimelineCard } from "./adapters";
-import type { Deck, DrawCardResponse, Player, Room, RoomSettings, TimelineCardPublic } from "../game/types";
+import type { Deck, DrawCardResponse, Player, PlayerGameStats, Room, RoomSettings, TimelineCardPublic } from "../game/types";
 
 async function invoke<T>(name: string, body: Record<string, unknown>): Promise<T> {
   const client = getSupabaseClient();
@@ -50,6 +50,26 @@ export async function pollDeckProgress(deckId: string): Promise<Deck> {
   const { data, error } = await client.from("decks").select("*").eq("id", deckId).single();
   if (error) throw error;
   return adaptDeck(data);
+}
+
+/**
+ * S31 (F3, pakli-könyvtár) — a host korábban generált (saját) vagy más által
+ * megosztott (is_public) kész paklikat listázhatja újrafelhasználásra, hogy ne
+ * kelljen minden partihoz újragenerálni. Nincs külön Edge Function — a decks
+ * RLS policy (owner_id = auth.uid() vagy is_public = true) már eleve csak a
+ * jogosult sorokat engedi át, közvetlen SELECT elég (ugyanaz a minta, mint
+ * pollDeckProgress-nél).
+ */
+export async function listDecks(limit = 30): Promise<Deck[]> {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("decks")
+    .select("*")
+    .eq("status", "ready")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map(adaptDeck);
 }
 
 /**
@@ -270,6 +290,50 @@ export async function getTimeline(roomId: string): Promise<TimelineCardPublic[]>
   const { data, error } = await client.rpc("get_timeline", { p_room_id: roomId });
   if (error) throw error;
   return (data ?? []).map(adaptTimelineCard);
+}
+
+/**
+ * S41 (F4, statisztikák) — a parti végén (rooms.status='finished') a `rounds`
+ * teljes történetéből számol játékosonkénti összesítőt. Direkt SELECT a
+ * `rounds` táblán (RLS: rounds_member_select — is_room_member), nincs
+ * anti-leak aggály: mire ez meghívódik, a parti már véget ért, minden kör
+ * reveal-je megtörtént. Nincs Edge Function, mert nincs mutáció — tiszta
+ * kliens-oldali aggregáció már látható adatokon.
+ */
+export async function computeGameStats(roomId: string): Promise<PlayerGameStats[]> {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("rounds")
+    .select("active_player_id, outcome, steals, name_guess")
+    .eq("room_id", roomId);
+  if (error) throw error;
+
+  const byPlayer = new Map<string, PlayerGameStats>();
+  const ensure = (playerId: string): PlayerGameStats => {
+    let stats = byPlayer.get(playerId);
+    if (!stats) {
+      stats = { playerId, correctPlacements: 0, wrongPlacements: 0, timeouts: 0, successfulSteals: 0, correctGuesses: 0 };
+      byPlayer.set(playerId, stats);
+    }
+    return stats;
+  };
+
+  for (const round of data ?? []) {
+    const active = ensure(round.active_player_id);
+    if (round.outcome === "correct") active.correctPlacements++;
+    else if (round.outcome === "wrong") active.wrongPlacements++;
+    else if (round.outcome === "timeout") active.timeouts++;
+
+    const nameGuess = round.name_guess as { correct?: boolean | null } | null;
+    if (nameGuess?.correct) active.correctGuesses++;
+
+    const steals = (round.steals ?? []) as Array<{ playerId: string; won: boolean | null }>;
+    for (const steal of steals) {
+      if (steal.won) ensure(steal.playerId).successfulSteals++;
+    }
+  }
+
+  return Array.from(byPlayer.values());
 }
 
 /** rooms tábla SELECT (RLS: is_room_member) — a room state refetch-hez broadcast után. */

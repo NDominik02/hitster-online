@@ -13,8 +13,9 @@ import { ConnectionOverlay } from "@/components/system/ConnectionOverlay";
 import { PlayerBadge } from "@/components/lobby/PlayerBadge";
 import { StealButton } from "@/components/game/StealButton";
 import { CountdownTimer } from "@/components/game/CountdownTimer";
+import { GameStats } from "@/components/game/GameStats";
 import { playerColorValue } from "@/lib/game/colors";
-import type { NameGuessInput, Player, PlayerColorId, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
+import type { NameGuessInput, Player, PlayerColorId, PlayerGameStats, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
 import { ensureAnonymousSession } from "@/lib/supabase/client";
 import {
   reconnect,
@@ -71,6 +72,10 @@ export default function PlayRoomPage() {
   const [activeTimeline, setActiveTimeline] = useState<TimelineCardPublic[]>([]);
   const [winnerPlayerIds, setWinnerPlayerIds] = useState<string[]>([]);
   const [roomFinished, setRoomFinished] = useState(false);
+  // S41 (F4, statisztikák) — a player kliens SOSEM olvassa a `rounds` táblát közvetlenül
+  // (anti-leak elv, ld. lentebb a game_finished ág jsdoc-ját) — a host számolja ki és
+  // a game_finished broadcast payload-jában küldi el.
+  const [gameStats, setGameStats] = useState<PlayerGameStats[]>([]);
 
   // F2 (S22, ARCHITECTURE 11.6.1) — steal-ablak lokális állapot. `stolenInRound` a körhöz
   // kötött (AC22.5: egy steal/játékos/kör), ezért roundId-vel kulcsolt — új körnél a
@@ -205,8 +210,12 @@ export default function PlayRoomPage() {
         if (rid) await applyRevealedRound(rid);
       } else if (event === "game_finished") {
         setRoomFinished(true);
-        const ids = (payload as { winnerPlayerIds?: string[] })?.winnerPlayerIds ?? [];
-        setWinnerPlayerIds(ids);
+        // Csak a broadcast payload-ból olvasunk (a host már kiszámolta) — a player kliens
+        // SOHA nem olvassa a `rounds` táblát közvetlenül, ugyanúgy, mint a round_public
+        // view-nál (anti-leak elv, ld. a fájl tetején lévő jsdoc-ot).
+        const finishedPayload = payload as { winnerPlayerIds?: string[]; stats?: PlayerGameStats[] };
+        setWinnerPlayerIds(finishedPayload?.winnerPlayerIds ?? []);
+        setGameStats(finishedPayload?.stats ?? []);
       } else if (event === "steal_registered") {
         const count = (payload as { stealCount?: number })?.stealCount;
         if (typeof count === "number") setStealCount(count);
@@ -409,6 +418,7 @@ export default function PlayRoomPage() {
             : `🎉 Nyert: ${winnerNames[0]?.name ?? "?"}`}
         </p>
         <p className="text-text-muted">A győzelem részletei a közös képernyőn láthatók.</p>
+        <GameStats players={players} stats={gameStats} />
       </div>
     );
   }

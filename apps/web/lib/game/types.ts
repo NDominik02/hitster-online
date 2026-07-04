@@ -141,6 +141,9 @@ export interface Deck {
   coveragePct: number;
   status: "generating" | "ready" | "failed";
   report: DeckReport;
+  /** S31 (F3, pakli-könyvtár) — a pakli-könyvtár listánál kell (saját vs. megosztott jelölés). */
+  ownerId?: string | null;
+  createdAt?: string;
   /** Generálás közbeni progress (BACKEND-NOTES 4.: decks.report.{processed,total,step}). */
   progress: {
     processed: number;
@@ -163,6 +166,22 @@ export interface DrawCardResponse {
    *  szerveroldalon kéri le, amikor a kliens ezzel az URI-vel lejátszást indít. */
   spotifyUri?: string;
   placingDeadline: string;
+}
+
+/**
+ * S41 (F4, statisztikák) — a `rounds` tábla teljes, befejezett (finished
+ * szoba) parti-történetéből számolt, játékosonkénti összesítő. A `rounds`
+ * SELECT RLS (rounds_member_select: is_room_member) bármely szobatagnak
+ * megengedi — nincs szükség külön Edge Function-re, a kliens maga számol
+ * (nincs itt semmilyen mutáció, csak már látható adat aggregálása).
+ */
+export interface PlayerGameStats {
+  playerId: string;
+  correctPlacements: number;
+  wrongPlacements: number;
+  timeouts: number;
+  successfulSteals: number;
+  correctGuesses: number;
 }
 
 /** Az élő húzás (drag) broadcast payload — csak vizuális, sosem játékállapot (AC10.1). */
