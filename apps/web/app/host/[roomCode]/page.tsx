@@ -64,10 +64,14 @@ export default function HostRoomPage() {
   // (H5 mintájára, D8: a host lát élő tükrözést, a payload csak darabszám, anti-leak).
   const [stealCount, setStealCount] = useState(0);
 
-  // F2 (S24, ARCHITECTURE 11.6.5, F2-D8) — vitagomb állapot: a countdown AZONNAL megáll a
-  // gombnyomáskor (a resolve_round válaszát nem kell megvárni), és amíg a dispute fut/lezajlott,
-  // a "Következő kör" auto-tovább logikát is felfüggesztjük ennél a körnél.
-  const [disputeState, setDisputeState] = useState<"idle" | "disputing" | "disputed">("idle");
+  // F2-D12 (2026-07-04, ÚJRATERVEZVE — ld. supabase/functions/dispute_round/index.ts jsdoc): a
+  // vitagomb már NEM nukolja a kört és NEM lép tovább automatikusan — a host beírja a szám
+  // tényleges évét, a szerver újraértékeli ez ellen a kört (kié legyen a kártya), és a kör MARAD
+  // reveal fázisban, a host a megszokott "Következő kör" gombbal halad tovább. `disputeOpen` az
+  // évszám-beviteli mező nyitva van-e; `disputeSaving` a hívás alatt tiltja a gombot.
+  const [disputeOpen, setDisputeOpen] = useState(false);
+  const [disputeYearInput, setDisputeYearInput] = useState("");
+  const [disputeSaving, setDisputeSaving] = useState(false);
 
   // A tulaj kérésére: a bemondás automatikus talált/nem-talált eredménye a vitagomb mellett,
   // külön is felülbírálható (a csapat közösen dönthet úgy, hogy a beírt cím/előadó elfogadható,
@@ -176,7 +180,8 @@ export default function HostRoomPage() {
         else if (round) await refreshRound(round.id);
         setDragGhostIndex(null);
         setStealCount(0);
-        setDisputeState("idle");
+        setDisputeOpen(false);
+        setDisputeYearInput("");
       } else if (event === "card_placed") {
         // Defensive: elsődlegesen a broadcast payload roundId-jét használjuk, ne a
         // closure-ből olvasott `round` state-et (lásd useRoomChannel stale closure fix).
@@ -198,9 +203,11 @@ export default function HostRoomPage() {
         const count = (payload as { stealCount?: number })?.stealCount;
         if (typeof count === "number") setStealCount(count);
       } else if (event === "round_disputed") {
-        setDisputeState("disputed");
+        // F2-D12: a kör NEM vált, csak az évszám/kimenet frissül ugyanazon a körön — pontosan
+        // úgy frissítünk, mint a round_revealed-nél (round + timeline-ok, a kártya új helye miatt).
         const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
         if (rid) await refreshRound(rid);
+        await refreshTimelines(roomId);
       } else if (event === "turn_auto_skipped") {
         const skipped = (payload as { skipped?: string[] })?.skipped ?? [];
         if (skipped.length > 0) {
@@ -314,28 +321,29 @@ export default function HostRoomPage() {
   }
 
   /**
-   * F2 (S24, ARCHITECTURE 11.6.5, F2-D8) — vitagomb. A countdown AZONNALI leállítása (F2-D8/a)
-   * a `disputeState` "disputing"-re állításával történik, MIELŐTT a hálózati hívás visszatér —
-   * a "Következő kör X mp múlva…" auto-tovább szöveg/logika ezt az állapotot nézi (lent, a
-   * reveal JSX ágban). TODO F2: a `dispute_round` Edge Function még nem létezik (a Backend
-   * nem végzett még, ld. functions.ts disputeRound jsdoc) — a hívás egyelőre hibát fog dobni,
-   * amit a UI hibaüzenetként jelez; a countdown-leállítás viszont MÁR MOST működik.
+   * F2-D12 (2026-07-04) — a host beírja a szám tényleges évét, a szerver újraértékeli ez ellen
+   * a kört (kié legyen a kártya), a kör MARAD reveal fázisban. A "Következő kör" gomb ezután a
+   * megszokott úton (handleNextTurn/beginRound) lép tovább — nincs itt semmilyen auto-advance.
    */
-  async function handleDispute() {
+  async function handleDisputeSubmit() {
     if (!round) return;
-    setDisputeState("disputing");
+    const year = Number.parseInt(disputeYearInput, 10);
+    if (!Number.isFinite(year)) {
+      setLoadError("Adj meg egy érvényes évszámot.");
+      return;
+    }
+    setDisputeSaving(true);
     try {
-      await disputeRound(round.id);
-      setDisputeState("disputed");
+      await disputeRound(round.id, year);
       await refreshRound(round.id);
       await refreshTimelines(roomId!);
-      await refreshPlayers(roomId!);
       await broadcastEvent("round_disputed", { roundId: round.id });
+      setDisputeOpen(false);
+      setDisputeYearInput("");
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Nem sikerült érvényteleníteni a kört.");
-      // Hiba esetén visszaállunk "idle"-re, hogy a gomb újra próbálható legyen — a countdown
-      // viszont NEM indul újra automatikusan (a felhasználó már jelezte a szándékát).
-      setDisputeState("idle");
+      setLoadError(err instanceof Error ? err.message : "Nem sikerült javítani az évszámot.");
+    } finally {
+      setDisputeSaving(false);
     }
   }
 
@@ -541,13 +549,12 @@ export default function HostRoomPage() {
   // (a resolve_round maga ellenőrzi szerveroldalon, hogy a steal_deadline tényleg lejárt-e).
   useEffect(() => {
     if (!round || round.phase !== "stealing" || !round.stealDeadline) return;
-    if (disputeState === "disputed") return; // már érvénytelenítve, ne próbáljunk resolve-olni
     const deadline = new Date(round.stealDeadline).getTime();
     const msLeft = Math.max(0, deadline - Date.now());
     const t = setTimeout(() => handleResolve(), msLeft + 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [round?.id, round?.phase, round?.stealDeadline, disputeState]);
+  }, [round?.id, round?.phase, round?.stealDeadline]);
 
   // Audio elindítása amikor új audioUrl érkezik.
   //
@@ -783,21 +790,19 @@ export default function HostRoomPage() {
                       </p>
                       {/* A tulaj kérésére: a bemondás elismerése a vitagombtól függetlenül is
                           felülbírálható, ha közösen úgy döntötök, hogy a beírtat elfogadjátok
-                          (vagy visszavonjátok) — ugyanabban az ablakban él, mint a vitagomb. */}
-                      {disputeState !== "disputed" && (
-                        <button
-                          type="button"
-                          className="text-xs text-text-muted underline hover:text-text disabled:opacity-50"
-                          disabled={guessOverrideSaving}
-                          onClick={() => handleOverrideGuess(!guess.correct)}
-                        >
-                          {guessOverrideSaving
-                            ? "Mentés…"
-                            : guess.correct
-                              ? "Mégsem talált (−1 🪙)"
-                              : "Elfogadjuk, mégis talált (+1 🪙)"}
-                        </button>
-                      )}
+                          (vagy visszavonjátok) — ez a döntés függetlenül él az évszám-javítástól. */}
+                      <button
+                        type="button"
+                        className="text-xs text-text-muted underline hover:text-text disabled:opacity-50"
+                        disabled={guessOverrideSaving}
+                        onClick={() => handleOverrideGuess(!guess.correct)}
+                      >
+                        {guessOverrideSaving
+                          ? "Mentés…"
+                          : guess.correct
+                            ? "Mégsem talált (−1 🪙)"
+                            : "Elfogadjuk, mégis talált (+1 🪙)"}
+                      </button>
                     </div>
                   )}
                   {steals.map((s) => (
@@ -810,31 +815,60 @@ export default function HostRoomPage() {
               );
             })()}
 
-            {disputeState === "disputed" ? (
-              <p className="text-warning text-sm" aria-live="polite">
-                ⚠ A kör érvénytelenítve — senki nem veszített/nyert semmit.
-              </p>
-            ) : (
-              <p className="text-text-muted text-sm" aria-live="polite">
-                «következő kör 5 mp múlva…»
-              </p>
-            )}
+            <p className="text-text-muted text-sm" aria-live="polite">
+              «következő kör…»
+            </p>
 
-            <div className="flex gap-3">
-              {/* F2 (S24, ARCHITECTURE 11.6.5, F2-D8) — vitagomb: csak addig érhető el, amíg a
-                  kör még nem lett diszputálva/lépve tovább. A gombnyomás AZONNAL leállítja az
-                  auto-tovább countdown-ot (F2-D8/a — a fenti szöveg is jelzi a disputeState-tel). */}
-              {disputeState !== "disputed" && (
+            {/* F2-D12 (2026-07-04) — évszám-javítás: a host beírja a szám tényleges évét, a
+                szerver újraértékeli ez ellen a kört (kié legyen a kártya), a kör MARAD reveal
+                fázisban — a "Következő kör" gomb utána a megszokott úton lép tovább. */}
+            {disputeOpen ? (
+              <div className="flex items-center gap-2">
+                <label htmlFor="dispute-year" className="text-sm text-text-muted">
+                  Valódi évszám:
+                </label>
+                <input
+                  id="dispute-year"
+                  type="number"
+                  inputMode="numeric"
+                  value={disputeYearInput}
+                  onChange={(e) => setDisputeYearInput(e.target.value)}
+                  placeholder={String(round.revealedCard.year)}
+                  className="w-24 min-h-11 rounded-[var(--radius-button)] bg-surface-2 border-2 border-border focus-visible:border-accent px-3 py-2 text-base"
+                />
+                <AppButton
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleDisputeSubmit}
+                  disabled={disputeSaving || !disputeYearInput}
+                >
+                  {disputeSaving ? "Mentés…" : "Frissítés"}
+                </AppButton>
+                <button
+                  type="button"
+                  className="text-text-muted text-sm underline"
+                  onClick={() => {
+                    setDisputeOpen(false);
+                    setDisputeYearInput("");
+                  }}
+                >
+                  Mégse
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-3">
                 <AppButton
                   variant="secondary"
-                  onClick={handleDispute}
-                  disabled={disputeState === "disputing"}
+                  onClick={() => {
+                    setDisputeOpen(true);
+                    setDisputeYearInput(String(round.revealedCard?.year ?? ""));
+                  }}
                 >
-                  {disputeState === "disputing" ? "Érvénytelenítés…" : "⚠ Vitatom (rossz évszám)"}
+                  ⚠ Vitatom (rossz évszám)
                 </AppButton>
-              )}
-              <AppButton onClick={handleNextTurn}>Következő kör ▶</AppButton>
-            </div>
+                <AppButton onClick={handleNextTurn}>Következő kör ▶</AppButton>
+              </div>
+            )}
           </section>
         )}
 

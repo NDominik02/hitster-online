@@ -13,10 +13,10 @@
 // revealed_card.guess.correct to the requested value, and adjusts the
 // active player's token balance by the delta (+1 if flipping to correct,
 // -1 if flipping to incorrect, 0/no-op if already at the requested value).
-// If the round later gets disputed (dispute_round), that function's own
-// refund logic reads round.name_guess.correct — since this function updates
-// that field, a subsequent dispute clawback stays correct without any
-// changes needed there.
+// dispute_round (F2-D12, the year-correction re-evaluation) never reads or
+// touches name_guess/its token — bemondás correctness is about title/artist
+// matching, independent of the song's year — so calling this before or
+// after a dispute_round call on the same round never interacts with it.
 
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';

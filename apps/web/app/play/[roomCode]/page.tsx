@@ -185,6 +185,13 @@ export default function PlayRoomPage() {
       } else if (event === "round_revealed") {
         const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
         if (rid) await applyRevealedRound(rid);
+      } else if (event === "round_disputed") {
+        // F2-D12 (2026-07-04): a host kijavította a szám évét — a kör NEM vált, csak a
+        // kimenet/kártya-hely és a megjelenített év frissül. Korábban ezt az eventet a player
+        // oldal egyáltalán nem kezelte (a régi, teljes-érvénytelenítős dispute alatt a player
+        // kliensek élesben "beragadtak" a régi eredménynél) — ugyanúgy frissítünk, mint reveal-nél.
+        const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
+        if (rid) await applyRevealedRound(rid);
       } else if (event === "game_finished") {
         setRoomFinished(true);
         const ids = (payload as { winnerPlayerIds?: string[] })?.winnerPlayerIds ?? [];

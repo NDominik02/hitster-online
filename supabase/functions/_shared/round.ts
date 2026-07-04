@@ -197,11 +197,10 @@ export interface ResolveRoundResult {
   };
 }
 
-// Fetches a single player's pre-insertion timeline years (ordered by
-// position), for steal-position evaluation (each stealer marks a gap on
-// THEIR OWN timeline — AC22.4 — so each stealer needs their own year list,
-// not the active player's).
-async function fetchTimelineYears(
+// Fetches a single player's timeline years (ordered by position). Used both
+// for the active player's own placement/steal evaluation and (exported) by
+// dispute_round to re-evaluate a round against a host-corrected year.
+export async function fetchTimelineYears(
   supabase: SupabaseClient,
   playerId: string
 ): Promise<{ rows: Array<{ id: string; position: number; card_id: string }>; years: number[] }> {
@@ -224,8 +223,9 @@ async function fetchTimelineYears(
 
 // Inserts `card` into `playerId`'s timeline at `position`, shifting any
 // existing cards at/after that position up by one. Shared by the
-// active-player-correct path and the steal-winner path (F2.1).
-async function insertIntoTimeline(
+// active-player-correct path, the steal-winner path (F2.1), and dispute_round
+// (re-applying a placement after a host year-correction).
+export async function insertIntoTimeline(
   supabase: SupabaseClient,
   playerId: string,
   cardId: string,
@@ -246,6 +246,35 @@ async function insertIntoTimeline(
     is_start: false,
     placed_round_no: null,
   });
+}
+
+// Finds and removes whichever timeline_cards row currently holds `cardId`
+// (a card can only ever sit on one player's timeline at a time), re-indexing
+// the rest of that player's timeline down by one. No-op if the card was
+// never inserted anywhere (e.g. outcome was 'wrong' with no winning steal).
+// Used by dispute_round to undo a round's placement before re-applying it
+// against a host-corrected year.
+export async function removeFromTimelineByCardId(supabase: SupabaseClient, cardId: string): Promise<void> {
+  const { data: insertedRow } = await supabase
+    .from('timeline_cards')
+    .select('id, player_id, position')
+    .eq('card_id', cardId)
+    .maybeSingle();
+
+  if (!insertedRow) return;
+
+  await supabase.from('timeline_cards').delete().eq('id', insertedRow.id);
+
+  const { data: laterRows } = await supabase
+    .from('timeline_cards')
+    .select('id, position')
+    .eq('player_id', insertedRow.player_id)
+    .gt('position', insertedRow.position)
+    .order('position', { ascending: true });
+
+  for (const row of laterRows ?? []) {
+    await supabase.from('timeline_cards').update({ position: row.position - 1 }).eq('id', row.id);
+  }
 }
 
 // Resolves a single round: evaluates the placement, the steal attempts

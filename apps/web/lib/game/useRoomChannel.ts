@@ -77,11 +77,17 @@ export function useRoomChannel({
   const onPresenceChangeRef = useRef(onPresenceChange);
   const onDragUpdateRef = useRef(onDragUpdate);
   const onSubscribedRef = useRef(onSubscribed);
+  // Ugyanez a stale-closure minta vonatkozik a presenceKey/presenceMeta-ra is (lásd lent, a
+  // track()-újrapróbálkozó effektnél és a subscribe callback-ben).
+  const presenceKeyRef = useRef(presenceKey);
+  const presenceMetaRef = useRef(presenceMeta);
   useEffect(() => {
     onEventRef.current = onEvent;
     onPresenceChangeRef.current = onPresenceChange;
     onDragUpdateRef.current = onDragUpdate;
     onSubscribedRef.current = onSubscribed;
+    presenceKeyRef.current = presenceKey;
+    presenceMetaRef.current = presenceMeta;
   });
 
   useEffect(() => {
@@ -100,7 +106,15 @@ export function useRoomChannel({
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
           isSubscribedRef.current = true;
-          if (presenceKey) roomChannel.track({ key: presenceKey, ...presenceMeta });
+          // A ref-et olvassuk, NEM a closure-be zárt `presenceKey` paramétert — ha a hívó oldalon
+          // (pl. a player oldalon) a `presenceKey` (me?.id) csak egy KÉSŐBBI render-ciklusban válik
+          // elérhetővé (mert a roomId- és a me-state beállítása közé egy `await` ékelődik, tehát nem
+          // egy React-batch-ben történik), ez a callback a feliratkozáskori (gyakran még undefined)
+          // értéket látná örökre — lásd a lenti track-újrapróbáló effektet is, ami a FORDÍTOTT
+          // sorrendet fedi le (presenceKey érkezik később, mint a SUBSCRIBED állapot).
+          if (presenceKeyRef.current) {
+            roomChannel.track({ key: presenceKeyRef.current, ...presenceMetaRef.current });
+          }
           onSubscribedRef.current?.();
         }
       });
@@ -121,8 +135,26 @@ export function useRoomChannel({
       roomChannelRef.current = null;
       dragChannelRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
+
+  // BUGFIX (2026-07-04): a player oldalon a `presenceKey` (me?.id) tipikusan EGY KÉSŐBBI
+  // render-ciklusban válik elérhetővé, mint a `roomId` — a join/reconnect handlerekben egy
+  // `await` (pl. refreshPlayers) van a `setRoomId(...)` ÉS a `setMe(...)` hívás között, tehát
+  // ezek NEM egy React-batchben futnak. Mire a `me` (és vele a presenceKey) beállna, a fenti
+  // `[roomId]`-only effekt már lefutott és feliratkozott — a subscribe callback ekkor még
+  // undefined presenceKey-t látott, tehát a `track()` SOHA nem hívódott meg a valódi
+  // player.id-vel. Emiatt a host Presence-figyelése sosem találta a játékost jelenlévőnek,
+  // és ~15 mp múlva (F2-D9) mindig lecsatlakozottnak jelentette — HIÁBA volt ténylegesen
+  // nyitva a player kliens (éles tünet: "offline" jelzés minden név mellett, holott minden
+  // eszköz nyitva volt). Ez a külön effekt a `presenceKey` VÁLTOZÁSÁRA figyel, és ha a
+  // csatorna eközben már SUBSCRIBED állapotba került, azonnal track()-el a friss kulccsal —
+  // a fenti subscribe callback (a ref-en keresztül) az ELLENKEZŐ sorrendet fedi le.
+  useEffect(() => {
+    if (!presenceKey) return;
+    if (!isSubscribedRef.current || !roomChannelRef.current) return;
+    roomChannelRef.current.track({ key: presenceKey, ...presenceMeta });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presenceKey]);
 
   /** A soron lévő player küldi húzás közben, throttle-ölve (~10-15/s, ARCHITECTURE 4.2). */
   function sendDragUpdate(payload: DragBroadcastPayload) {

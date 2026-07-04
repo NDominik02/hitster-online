@@ -182,16 +182,17 @@ export async function useToken(
 }
 
 /**
- * dispute_round (ARCHITECTURE 11.6.5) — TODO F2: a szerveroldali Edge Function még nem
- * létezik. HOST-ONLY, csak `phase='reveal'` alatt hívható (F2-D8 — a vitagomb a reveal-en
- * jelenik meg, a next_turn ELŐTT). A szerver a token-visszaírást és timeline-visszaállítást
- * végzi (AC24.4 — nettó token-változás 0); a kliens felelőssége csak az 5 mp-es
- * auto-tovább countdown AZONNALI leállítása a gombnyomás pillanatában (F2-D8/a).
+ * dispute_round — ÚJRATERVEZVE 2026-07-04 (F2-D12, ld. supabase/functions/dispute_round/index.ts
+ * jsdoc a teljes indoklásért). HOST-ONLY, csak `phase='reveal'` alatt hívható. A host megadja a
+ * szám TÉNYLEGES évét (`correctedYear`) — a szerver ez ellen újraértékeli a kört (kié legyen a
+ * kártya), frissíti a megjelenített évet, DE a kör MARAD reveal fázisban és NEM lép tovább
+ * automatikusan — a host a megszokott "Következő kör" gombbal halad tovább ezután.
  */
 export async function disputeRound(
-  roundId: string
-): Promise<{ ok: true; outcome: "disputed"; refunded: Array<{ playerId: string; amount: number }> }> {
-  return invoke("dispute_round", { roundId });
+  roundId: string,
+  correctedYear: number
+): Promise<{ ok: true; outcome: "correct" | "wrong"; revealedCard: unknown }> {
+  return invoke("dispute_round", { roundId, correctedYear });
 }
 
 /**
