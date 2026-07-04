@@ -403,3 +403,21 @@ Csak Backend-belső, de dokumentálva a teljesség kedvéért: `adjust_tokens(p_
 ### 11.12 Amit ELLENŐRIZNI érdemes anti-leak szempontból (QA-nak is releváns)
 
 A `stealing`-reveal közötti forgalomban a nem-aktív játékosok kliensén SOHA nem szabad megjelennie: a helyes cím/előadó/év, a `name_guess.correct` értéke, a `steals[].correct` értéke, vagy bármilyen `card_id`. A token-egyenleg (`players.tokens`) sem változhat a reveal előtt (a bemondás-jutalom csak reveal-ben íródik). Ez mind a `round_public` nézet + a fázis-függő `revealed_card` projekció miatt automatikusan garantált, de érdemes egy hálózati forgalom-ellenőrzést végezni a `stealing` fázis alatt, mielőtt ez élesedik.
+
+---
+
+## 12. Spotify Premium (S30) — Client ID rögzítve (2026-07-04), FONTOS KORREKCIÓ az Architect tervhez
+
+A tulaj regisztrált egy Spotify Developer App-ot ("hitster-online"), Redirect URI-k jóváhagyva:
+- `https://hitster-online-eta.vercel.app/host/spotify/callback` (éles)
+- `http://127.0.0.1:3000/host/spotify/callback` (helyi fejlesztés — **`127.0.0.1`, NEM `localhost`**, mert a Spotify a `localhost` hostnevet nem fogadja el HTTP-vel, csak a szó szerinti loopback IP-t)
+- API/SDK: **Web API** + **Web Playback SDK** bejelölve (Connect API-hoz nincs külön SDK-jelölő, az is a Web API-n megy).
+
+A **Client ID publikus, nem érzékeny adat** (ez a PKCE-folyam lényege — a Client ID szándékosan a böngésző-kódban van), ezért `apps/web/.env.local`-ba került (a projekt konvenciója szerint, ugyanúgy ahogy az anon key is itt van dokumentálva):
+```
+NEXT_PUBLIC_SPOTIFY_CLIENT_ID=37c5f553e7644e4c95a8ec3215401de5
+NEXT_PUBLIC_SPOTIFY_REDIRECT_URI=http://127.0.0.1:3000/host/spotify/callback
+```
+Éles környezetben (Vercel) a `NEXT_PUBLIC_SPOTIFY_REDIRECT_URI`-t a tulajnak/DevOps-nak külön be kell állítania a Vercel Project Settings → Environment Variables alatt a production redirect URI-ra — ezt a `.env.local` csak helyi fejlesztéshez fedi le.
+
+**KORREKCIÓ a System Architect S30 tervéhez (1.2/6.1 szakasz):** a terv feltételezte, hogy a token-csere Client Secret-et is igényel a szerveroldalon "confidential client" hitelesítéshez. Ez **tévedés** — a Spotify Authorization Code + PKCE folyam kifejezetten **nem igényel Client Secret-et** (ez a PKCE lényege: publikus kliensek, mint egy SPA, biztonságosan tudnak OAuth-ot csinálni secret nélkül, a `code_verifier`/`code_challenge` pár helyettesíti). A `spotify_oauth_callback`/`spotify_refresh_token` Edge Function-ök tehát **csak a Client ID-t igénylik** (ami akár environment variable-ként, akár egyszerűen a kérés body-jában átküldve is működne — de env var-ként tisztább), Client Secret-et **nem kell** se kérni a tulajtól, se tárolni sehol. Ez leegyszerűsíti a 6.1/6.2 Edge Function-ök implementációját: nincs szükség egy külön, extra-védett secret-re a token-cserénél, csak magára a Spotify válaszában kapott `access_token`/`refresh_token` párra (ami már eddig is a `spotify_connections` tábla feladata volt, RLS default-deny mögött).
