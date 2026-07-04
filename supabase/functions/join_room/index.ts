@@ -6,6 +6,7 @@ import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
 
 const MAX_PLAYERS = 8; // AC5.5
+const MAX_PLAYERS_PASS_AND_PLAY = 6; // Pass-and-play PRD: szűkebb létszámkorlát egyetlen körbeadott eszközön
 
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
@@ -34,7 +35,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: room, error: roomError } = await supabase
     .from('rooms')
-    .select('id, status')
+    .select('id, status, settings')
     .eq('code', code)
     .neq('status', 'finished')
     .maybeSingle();
@@ -65,8 +66,15 @@ Deno.serve(async (req: Request) => {
     .select('id', { count: 'exact', head: true })
     .eq('room_id', room.id);
 
-  if ((playerCount ?? 0) >= MAX_PLAYERS) {
-    return errorResponse('room_full', 'A szoba megtelt (max. 8 játékos).', 409);
+  const isPassAndPlay = (room.settings as { mode?: string } | null)?.mode === 'pass_and_play';
+  const maxPlayers = isPassAndPlay ? MAX_PLAYERS_PASS_AND_PLAY : MAX_PLAYERS;
+
+  if ((playerCount ?? 0) >= maxPlayers) {
+    return errorResponse(
+      'room_full',
+      isPassAndPlay ? `A szoba megtelt (max. ${MAX_PLAYERS_PASS_AND_PLAY} játékos ebben a módban).` : 'A szoba megtelt (max. 8 játékos).',
+      409
+    );
   }
 
   const { data: colorTaken } = await supabase

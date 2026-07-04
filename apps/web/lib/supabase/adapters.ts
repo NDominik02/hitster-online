@@ -84,6 +84,7 @@ export function adaptRoom(row: RoomRow): Room {
       winTarget: settings.winTarget ?? 10,
       timeLimitSec: settings.timeLimitSec ?? 90,
       stealEnabled: settings.stealEnabled ?? false,
+      mode: settings.mode ?? "shared_screen",
     },
     currentRoundId: row.current_round_id,
     winnerPlayerIds: row.winner_player_ids ?? [],

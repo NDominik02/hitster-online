@@ -77,7 +77,7 @@ export const mockRoom: Room = {
   hostUid: "host-mock",
   deckId: mockDeck.id,
   status: "playing",
-  settings: { winTarget: 10, timeLimitSec: 90, stealEnabled: false },
+  settings: { winTarget: 10, timeLimitSec: 90, stealEnabled: false, mode: "shared_screen" },
   currentRoundId: "round-mock-1",
   winnerPlayerIds: [],
 };

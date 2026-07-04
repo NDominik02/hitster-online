@@ -84,7 +84,10 @@ export default function HostCreatePage() {
     setCreatingRoom(true);
     setError(null);
     try {
-      const { code } = await createRoom(deck.id, { winTarget, timeLimitSec, stealEnabled: false });
+      // A mód-választó UI (Pass-and-play) külön Frontend-feladat (task #16) — addig is
+      // mindig 'shared_screen'-t küldünk, ami a meglévő host+player viselkedést jelenti
+      // (a create_room erre esne vissza akkor is, ha ezt a mezőt egyáltalán nem küldenénk).
+      const { code } = await createRoom(deck.id, { winTarget, timeLimitSec, stealEnabled: false, mode: "shared_screen" });
       router.push(`/host/${code}`);
     } catch (err) {
       setCreatingRoom(false);

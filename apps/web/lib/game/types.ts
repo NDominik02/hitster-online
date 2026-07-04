@@ -47,6 +47,8 @@ export interface RoomSettings {
   winTarget: number; // alap 10 (5 = gyors, 15 = maraton)
   timeLimitSec: number; // alap 90
   stealEnabled: boolean; // F1-ben mindig false
+  /** Pass-and-play (2026-07): a mód létrehozáskor rögzül, menet közben nem váltható. */
+  mode: "shared_screen" | "pass_and_play";
 }
 
 export interface Room {
