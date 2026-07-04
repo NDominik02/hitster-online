@@ -23,7 +23,10 @@ Deno.serve(async (req: Request) => {
   const callerUid = await getCallerUid(req);
   if (!callerUid) return errorResponse('unauthorized', 'Be kell jelentkezni.', 401);
 
-  let body: { deckId?: string; settings?: { winTarget?: number; timeLimitSec?: number; stealEnabled?: boolean } };
+  let body: {
+    deckId?: string;
+    settings?: { winTarget?: number; timeLimitSec?: number; stealEnabled?: boolean; mode?: string };
+  };
   try {
     body = await req.json();
   } catch {
@@ -31,6 +34,11 @@ Deno.serve(async (req: Request) => {
   }
 
   if (!body.deckId) return errorResponse('invalid_deck', 'Hiányzó pakli azonosító.', 400);
+
+  // Pass-and-play (2026-07): egyetlen eszköz, host-gép nélkül — a mód a
+  // létrehozáskor rögzül, menet közben nem váltható (US-PP1). Ismeretlen
+  // érték csendben 'shared_screen'-re esik vissza, nem hiba.
+  const mode = body.settings?.mode === 'pass_and_play' ? 'pass_and_play' : 'shared_screen';
 
   const supabase = adminClient();
 
@@ -49,7 +57,11 @@ Deno.serve(async (req: Request) => {
   const settings = {
     winTarget: body.settings?.winTarget ?? 10,
     timeLimitSec: body.settings?.timeLimitSec ?? 90,
-    stealEnabled: body.settings?.stealEnabled ?? false,
+    // Pass-and-play-ban a lopás kikényszerítve kikapcsolt (US-PP6) — akkor is,
+    // ha a kliens véletlenül mást küldene; nincs "másik játékos", aki lophatna
+    // egyetlen körbeadott eszközön.
+    stealEnabled: mode === 'pass_and_play' ? false : (body.settings?.stealEnabled ?? false),
+    mode,
   };
 
   // Generate a unique 4-letter code among active (non-finished) rooms.
