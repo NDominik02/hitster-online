@@ -27,6 +27,7 @@ import {
 } from "@/lib/supabase/functions";
 import { adaptRoundPublic } from "@/lib/supabase/adapters";
 import { useRoomChannel } from "@/lib/game/useRoomChannel";
+import { vibrateOutcome } from "@/lib/haptics";
 
 /**
  * Player shell — P1 (ha még nem tag) → P2..P5 a fázis alapján (ARCHITECTURE 5.1).
@@ -90,6 +91,16 @@ export default function PlayRoomPage() {
   const [joining, setJoining] = useState(false);
 
   const [placedOutcome, setPlacedOutcome] = useState<"correct" | "wrong" | "timeout" | null>(null);
+
+  // S23 (reveal-show) — a SAJÁT eredményhez kötött haptika (nem a globális round.outcome-hoz),
+  // körönként egyszer, a reveal-belépés pillanatában.
+  useEffect(() => {
+    if (round?.phase === "reveal" && round.revealedCard) {
+      const outcome = placedOutcome ?? (round.outcome === "disputed" ? "wrong" : round.outcome) ?? "wrong";
+      vibrateOutcome(outcome === "timeout" ? "timeout" : outcome === "correct" ? "correct" : "wrong");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round?.id, round?.phase]);
 
   const refreshPlayers = useCallback(async (rid: string) => {
     const list = await fetchPlayers(rid);

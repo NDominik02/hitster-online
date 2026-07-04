@@ -32,6 +32,7 @@ import {
 } from "@/lib/supabase/functions";
 import { adaptRoundPublic } from "@/lib/supabase/adapters";
 import { useRoomChannel } from "@/lib/game/useRoomChannel";
+import { playRevealSound, primeSoundContext } from "@/lib/sound";
 import type { Player, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
 
 /**
@@ -278,6 +279,10 @@ export default function HostRoomPage() {
 
   async function handleStart() {
     if (!roomId) return;
+    // S23: a START gomb egy garantált user-gesture — itt oldjuk fel a hangeffekt
+    // AudioContext-jét is (Chrome/Safari "suspended" állapotban tartaná az első
+    // reveal-ig enélkül), ugyanúgy, ahogy az <audio> elemet is user-gesture oldja fel.
+    primeSoundContext();
     try {
       const res = await startGame(roomId);
       setRoomStatus("playing");
@@ -576,6 +581,15 @@ export default function HostRoomPage() {
     }
   }, [audioUrl]);
 
+  // S23 (reveal-show) — a hangeffekt a reveal fázisba lépés PILLANATÁBAN szól egyszer,
+  // körönként (a `round?.id` dependency zárja ki, hogy re-render újra elsüsse).
+  useEffect(() => {
+    if (round?.phase === "reveal" && round.revealedCard) {
+      playRevealSound(round.outcome === "timeout" ? "wrong" : round.outcome === "correct" ? "correct" : "wrong");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round?.id, round?.phase]);
+
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center">
@@ -767,6 +781,8 @@ export default function HostRoomPage() {
               artist={round.revealedCard.artist}
               year={round.revealedCard.year}
               flipped
+              variant="show"
+              outcome={round.outcome === "timeout" ? "timeout" : round.outcome === "correct" ? "correct" : "wrong"}
             />
             <OutcomeBanner
               outcome={round.outcome === "timeout" ? "timeout" : round.outcome === "correct" ? "correct" : "wrong"}
