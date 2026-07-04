@@ -291,3 +291,21 @@ export async function fetchRoundPublic(roundId: string) {
   if (error) throw error;
   return data;
 }
+
+/**
+ * spotify_oauth_callback (S30) — a /host/spotify/callback oldal hívja, a
+ * Spotify redirectből kapott `code`-dal + a PKCE code_verifier-rel. Nincs
+ * roomId — a kapcsolat a hívó auth.uid()-jéhez kötött, nem egy szobához.
+ */
+export async function spotifyOauthCallback(
+  code: string,
+  codeVerifier: string,
+  redirectUri: string
+): Promise<{ connected: true; product: string | null; accessToken: string; expiresAt: string }> {
+  return invoke("spotify_oauth_callback", { code, codeVerifier, redirectUri });
+}
+
+/** spotify_refresh_token (S30) — friss access token a hívó saját Spotify-kapcsolatára. */
+export async function spotifyRefreshToken(): Promise<{ accessToken: string; expiresAt: string }> {
+  return invoke("spotify_refresh_token", {});
+}
