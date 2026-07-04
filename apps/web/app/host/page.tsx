@@ -28,6 +28,12 @@ export default function HostCreatePage() {
   const [playlistUrl, setPlaylistUrl] = useState("");
   const [winTarget, setWinTarget] = useState(10);
   const [timeLimitSec, setTimeLimitSec] = useState(90);
+  // S32 — a lopás (F2) alapból BE van kapcsolva (a "teljes Hitster élmény" már
+  // éles funkció), a host itt kapcsolhatja ki, ha egyszerűbb partit szeretne.
+  // Pass-and-play módban ez mindig kikapcsolt és nem módosítható (US-PP6) — a
+  // szerver ezt amúgy is kikényszeríti (create_room), itt csak vizuálisan is
+  // jelezzük, hogy a kapcsoló ne legyen félrevezető.
+  const [stealEnabled, setStealEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [phase, setPhase] = useState<"mode" | "form" | "generating" | "report">("mode");
@@ -125,7 +131,7 @@ export default function HostCreatePage() {
     setCreatingRoom(true);
     setError(null);
     try {
-      const { code } = await createRoom(deck.id, { winTarget, timeLimitSec, stealEnabled: false, mode: "shared_screen" });
+      const { code } = await createRoom(deck.id, { winTarget, timeLimitSec, stealEnabled, mode: "shared_screen" });
       router.push(`/host/${code}`);
     } catch (err) {
       setCreatingRoom(false);
@@ -250,7 +256,29 @@ export default function HostCreatePage() {
               />
             </div>
 
-            {/* ⟨F2⟩ hely fenntartva — steal, F1-ben rejtve (DESIGN H1 wireframe) */}
+            {/* S32 — lopás be/ki. Pass-and-play módban kikényszerítve kikapcsolt (US-PP6,
+                AC32.2) — a szerver amúgy is felülírná, itt csak vizuálisan is jelezzük. */}
+            <div className="rounded-[var(--radius-card)] border border-border bg-surface-2 px-4 py-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold text-sm">🕵️ Lopás</p>
+                <p className="text-text-muted text-xs mt-0.5">
+                  {mode === "pass_and_play"
+                    ? "Add tovább módban nincs lopás (egyedül nincs kitől)."
+                    : "Más játékosok 1 tokenért megpróbálhatják ellopni a rosszul lerakott kártyát."}
+                </p>
+              </div>
+              <div className={mode === "pass_and_play" ? "pointer-events-none opacity-50" : undefined}>
+                <SegmentedControl
+                  ariaLabel="Lopás engedélyezése"
+                  value={mode === "pass_and_play" ? "off" : stealEnabled ? "on" : "off"}
+                  onChange={(v) => setStealEnabled(v === "on")}
+                  options={[
+                    { value: "on", label: "Be" },
+                    { value: "off", label: "Ki" },
+                  ]}
+                />
+              </div>
+            </div>
 
             {/* S30 — Spotify Premium csatlakoztatás (opcionális, F3). Enélkül a parti
                 a megszokott ingyenes 30 mp-es preview-val indul, semmi nem változik. */}
