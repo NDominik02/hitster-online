@@ -4,6 +4,7 @@
 // truth" — one code path for mutating rounds/rooms).
 
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
+import { evaluateGuess, evaluateSteals, type NameGuess, type StealEntry } from './steal.ts';
 
 export interface DrawResult {
   ok: boolean;
@@ -186,18 +187,112 @@ export interface ResolveRoundResult {
   error?: string;
   phase?: 'reveal';
   outcome?: 'correct' | 'wrong' | 'timeout';
-  revealedCard?: { title: string; artist: string; year: number; artworkUrl: string | null };
+  revealedCard?: {
+    title: string;
+    artist: string;
+    year: number;
+    artworkUrl: string | null;
+    guess: { correct: boolean; byPlayerId: string } | null;
+    steals: Array<{ playerId: string; correct: boolean; won: boolean }>;
+  };
 }
 
-// Resolves a single round: evaluates the placement, writes phase='reveal' +
-// outcome + revealed_card in one UPDATE (2.6: no leak window), and — if
-// correct — inserts the card into the active player's timeline.
+// Fetches a single player's timeline years (ordered by position). Used both
+// for the active player's own placement/steal evaluation and (exported) by
+// dispute_round to re-evaluate a round against a host-corrected year.
+export async function fetchTimelineYears(
+  supabase: SupabaseClient,
+  playerId: string
+): Promise<{ rows: Array<{ id: string; position: number; card_id: string }>; years: number[] }> {
+  const { data: timeline } = await supabase
+    .from('timeline_cards')
+    .select('id, position, card_id')
+    .eq('player_id', playerId)
+    .order('position', { ascending: true });
+
+  const rows = timeline ?? [];
+  const years: number[] = [];
+  if (rows.length > 0) {
+    const cardIds = rows.map((t: { card_id: string }) => t.card_id);
+    const { data: cardData } = await supabase.from('deck_cards').select('id, year').in('id', cardIds);
+    const yearById = new Map((cardData ?? []).map((c: { id: string; year: number }) => [c.id, c.year]));
+    for (const t of rows) years.push(yearById.get(t.card_id) as number);
+  }
+  return { rows, years };
+}
+
+// Inserts `card` into `playerId`'s timeline at `position`, shifting any
+// existing cards at/after that position up by one. Shared by the
+// active-player-correct path, the steal-winner path (F2.1), and dispute_round
+// (re-applying a placement after a host year-correction).
+export async function insertIntoTimeline(
+  supabase: SupabaseClient,
+  playerId: string,
+  cardId: string,
+  position: number,
+  timelineRows: Array<{ id: string; position: number }>
+): Promise<void> {
+  const toShift = timelineRows.filter((t) => t.position >= position);
+  for (const t of toShift.sort((a, b) => b.position - a.position)) {
+    await supabase
+      .from('timeline_cards')
+      .update({ position: t.position + 1 })
+      .eq('id', t.id);
+  }
+  await supabase.from('timeline_cards').insert({
+    player_id: playerId,
+    card_id: cardId,
+    position,
+    is_start: false,
+    placed_round_no: null,
+  });
+}
+
+// Finds and removes whichever timeline_cards row currently holds `cardId`
+// (a card can only ever sit on one player's timeline at a time), re-indexing
+// the rest of that player's timeline down by one. No-op if the card was
+// never inserted anywhere (e.g. outcome was 'wrong' with no winning steal).
+// Used by dispute_round to undo a round's placement before re-applying it
+// against a host-corrected year.
+export async function removeFromTimelineByCardId(supabase: SupabaseClient, cardId: string): Promise<void> {
+  const { data: insertedRow } = await supabase
+    .from('timeline_cards')
+    .select('id, player_id, position')
+    .eq('card_id', cardId)
+    .maybeSingle();
+
+  if (!insertedRow) return;
+
+  await supabase.from('timeline_cards').delete().eq('id', insertedRow.id);
+
+  const { data: laterRows } = await supabase
+    .from('timeline_cards')
+    .select('id, position')
+    .eq('player_id', insertedRow.player_id)
+    .gt('position', insertedRow.position)
+    .order('position', { ascending: true });
+
+  for (const row of laterRows ?? []) {
+    await supabase.from('timeline_cards').update({ position: row.position - 1 }).eq('id', row.id);
+  }
+}
+
+// Resolves a single round: evaluates the placement, the steal attempts
+// (F2.1, S22) and the name-guess (F2.1, S21), then writes phase='reveal' +
+// outcome + revealed_card + steals + name_guess in ONE UPDATE (2.6/11.9: no
+// leak window — the reveal-gated round_public view only ever shows
+// revealed_card once phase flips, so nothing here is visible early). Only
+// AFTER that UPDATE successfully claims the round (optimistic lock) do we
+// run the token/timeline side-effects (11.4.2 — this is what prevents
+// double-crediting if the host and the pg_cron safety net race).
 //
 // `requireDeadlinePassed`: when true (host path), a null placement is only
-// accepted as a timeout if the deadline has actually lapsed server-side
-// (D6/A2 — the host cannot fake an early timeout). The cron path always
-// queries only rounds whose deadline has already passed, so it does not need
-// this guard, but passes true anyway defensively.
+// accepted as a timeout if the RELEVANT deadline has actually lapsed
+// server-side (D6/A2 — the host cannot fake an early close). F2 adds a
+// phase-dependent deadline choice (11.7): 'stealing' phase checks
+// steal_deadline, everything else checks placing_deadline. The cron path
+// always queries only rounds whose deadline has already passed, so it does
+// not need this guard, but passes true anyway defensively.
 export async function resolveRound(
   supabase: SupabaseClient,
   roundId: string,
@@ -207,7 +302,9 @@ export async function resolveRound(
 
   const { data: round, error: roundError } = await supabase
     .from('rounds')
-    .select('id, room_id, card_id, active_player_id, phase, placement, placing_deadline')
+    .select(
+      'id, room_id, card_id, active_player_id, phase, placement, placing_deadline, steal_deadline, steals, name_guess'
+    )
     .eq('id', roundId)
     .single();
 
@@ -217,7 +314,18 @@ export async function resolveRound(
     return { ok: false, error: 'phase_conflict' };
   }
 
-  const deadlinePassed = round.placing_deadline ? new Date(round.placing_deadline).getTime() <= Date.now() : true;
+  // 11.7: which deadline governs this round depends on its current phase.
+  // A 'stealing' round is gated by steal_deadline (the 15s window, AC22.1);
+  // 'playing'/'placing' rounds are gated by placing_deadline (D6) as before.
+  const relevantDeadline = round.phase === 'stealing' ? round.steal_deadline : round.placing_deadline;
+  const deadlinePassed = relevantDeadline ? new Date(relevantDeadline).getTime() <= Date.now() : true;
+
+  if (round.phase === 'stealing' && requireDeadlinePassed && !deadlinePassed) {
+    // AC22.1/11.3.2: the host cannot close the steal window early — only the
+    // 15s elapsing (or, in a future optimization, everyone having decided)
+    // may end it. F2.1 always waits the full 15s (F2-A2).
+    return { ok: false, error: 'steal_window_open' };
+  }
   if (round.placement === null && requireDeadlinePassed && !deadlinePassed) {
     return { ok: false, error: 'deadline_not_reached' };
   }
@@ -230,28 +338,56 @@ export async function resolveRound(
 
   if (cardError || !card) return { ok: false, error: 'card_not_found' };
 
-  // Fetch the active player's current timeline, ordered by position.
-  const { data: timeline, error: timelineError } = await supabase
-    .from('timeline_cards')
-    .select('id, position, card_id')
-    .eq('player_id', round.active_player_id)
-    .order('position', { ascending: true });
-
-  if (timelineError || !timeline) return { ok: false, error: 'db_error' };
-
-  const timelineYears: number[] = [];
-  if (timeline.length > 0) {
-    const cardIds = timeline.map((t: { card_id: string }) => t.card_id);
-    const { data: timelineCardData } = await supabase.from('deck_cards').select('id, year').in('id', cardIds);
-    const yearById = new Map((timelineCardData ?? []).map((c: { id: string; year: number }) => [c.id, c.year]));
-    for (const t of timeline) timelineYears.push(yearById.get(t.card_id) as number);
-  }
+  // Step 5 (11.4.1): evaluate the active player's own placement.
+  const active = await fetchTimelineYears(supabase, round.active_player_id);
 
   let outcome: 'correct' | 'wrong' | 'timeout';
+  let placementCorrect = false;
   if (round.placement === null) {
     outcome = 'timeout'; // D6: no finalized placement when the deadline lapsed
   } else {
-    outcome = evaluatePlacement(round.placement, card.year, timelineYears) ? 'correct' : 'wrong';
+    placementCorrect = evaluatePlacement(round.placement, card.year, active.years);
+    outcome = placementCorrect ? 'correct' : 'wrong';
+  }
+
+  // Step 6 (11.4.1): steal evaluation — only meaningful when there were any
+  // steal attempts. AC22.6: if the active placement was correct, every
+  // steal simply fails (no need to evaluate positions). AC22.7/F2-D5: if the
+  // active placement was wrong, the correct stealer nearest in turn order
+  // after the active player wins the card.
+  const steals: StealEntry[] = (round.steals ?? []) as StealEntry[];
+  let stealWinnerId: string | null = null;
+  let evaluatedSteals: StealEntry[] = steals;
+
+  if (steals.length > 0) {
+    if (placementCorrect) {
+      evaluatedSteals = steals.map((s) => ({ ...s, correct: false, won: false }));
+    } else {
+      // REDESIGN (2026-07-03): every steal position is an index on the
+      // ACTIVE PLAYER's timeline (`active.years`, already fetched above for
+      // the active player's own placement check) — not per-stealer own
+      // timelines anymore. Everyone contests the same board.
+      const { data: activePlayerRow } = await supabase
+        .from('players')
+        .select('seat_order')
+        .eq('id', round.active_player_id)
+        .single();
+      const activeSeatOrder = activePlayerRow?.seat_order ?? 0;
+
+      const result = evaluateSteals(steals, card, active.years, activeSeatOrder);
+      stealWinnerId = result.winnerPlayerId;
+      evaluatedSteals = result.entries;
+    }
+  }
+
+  // Step 7 (11.4.1): bemondás (name guess) evaluation — server-only,
+  // anti-leak (11.9 #1). AC21.7: the correct-flag and the token reward are
+  // only ever written/credited HERE, in the reveal transaction — never at
+  // place_card time, or the token balance would leak the answer early.
+  const nameGuess: NameGuess | null = (round.name_guess ?? null) as NameGuess | null;
+  let guessCorrect: boolean | null = null;
+  if (nameGuess) {
+    guessCorrect = evaluateGuess(nameGuess, card);
   }
 
   const revealedCard = {
@@ -259,15 +395,27 @@ export async function resolveRound(
     artist: card.artist,
     year: card.year,
     artworkUrl: card.artwork_url,
+    // 11.5: publicly visible reveal-time result, gated by round_public's
+    // phase-based projection — safe to include here unconditionally.
+    guess: nameGuess && guessCorrect !== null ? { correct: guessCorrect, byPlayerId: round.active_player_id } : null,
+    steals: evaluatedSteals.map((s) => ({ playerId: s.playerId, correct: !!s.correct, won: !!s.won })),
   };
 
-  // Single UPDATE writing phase + outcome + revealed_card together (2.6: no
-  // leak window). The `in('phase', [...])` clause is the optimistic lock:
-  // this is what makes it safe for the host path and the cron path to race
-  // — only one of them will affect a row.
+  const updatedNameGuess = nameGuess ? { ...nameGuess, correct: guessCorrect } : null;
+
+  // Step 9 (11.4.1): the single reveal UPDATE — phase + outcome +
+  // revealed_card + steals + name_guess together, optimistic-locked on
+  // phase. Whichever caller's UPDATE lands first (host vs. cron) is the only
+  // one that proceeds to the token/timeline side-effects below.
   const { data: updatedRound, error: updateError } = await supabase
     .from('rounds')
-    .update({ phase: 'reveal', outcome, revealed_card: revealedCard })
+    .update({
+      phase: 'reveal',
+      outcome,
+      revealed_card: revealedCard,
+      steals: evaluatedSteals,
+      name_guess: updatedNameGuess,
+    })
     .eq('id', roundId)
     .in('phase', ['playing', 'placing', 'stealing'])
     .select()
@@ -276,24 +424,34 @@ export async function resolveRound(
   if (updateError) return { ok: false, error: 'db_error' };
   if (!updatedRound) return { ok: false, conflict: true, error: 'phase_conflict' };
 
-  // S12: if correct, the card joins the timeline at the placed position,
-  // shifting later cards. If wrong/timeout, it's simply discarded (F1, no steal).
-  if (outcome === 'correct' && round.placement !== null) {
-    const toShift = timeline.filter((t: { position: number }) => t.position >= round.placement!);
-    for (const t of toShift.sort((a: { position: number }, b: { position: number }) => b.position - a.position)) {
-      await supabase
-        .from('timeline_cards')
-        .update({ position: t.position + 1 })
-        .eq('id', t.id);
-    }
-    await supabase.from('timeline_cards').insert({
-      player_id: round.active_player_id,
-      card_id: card.id,
-      position: round.placement,
-      is_start: false,
-      placed_round_no: null,
-    });
+  // Step 10 (11.4.1): AFTER the lock is claimed — token and timeline
+  // mutations. Never before the UPDATE above, or a losing racer could
+  // double-apply these.
+
+  // 10a — bemondás reward (AC20.3/AC21.7): +1 token to the active player.
+  if (guessCorrect) {
+    await supabase.rpc('adjust_tokens', { p_player_id: round.active_player_id, p_delta: 1 });
   }
+
+  // 10b — card placement into a timeline.
+  if (outcome === 'correct' && round.placement !== null) {
+    // S12: active player's own correct placement.
+    await insertIntoTimeline(supabase, round.active_player_id, card.id, round.placement, active.rows);
+  } else if (outcome === 'wrong' && stealWinnerId) {
+    // AC22.7, REDESIGN 2026-07-03: the winning stealer's `position` was an
+    // index on the ACTIVE PLAYER's timeline (what they were contesting),
+    // NOT a valid index on the winner's own board — their timeline has a
+    // different set of cards/years, so that index would be meaningless (or
+    // outright wrong) there. Compute the winner's OWN correct insertion
+    // index fresh, from the card's actual revealed year.
+    const winnerTimeline = await fetchTimelineYears(supabase, stealWinnerId);
+    const winnerPosition = findInsertionIndex(card.year, winnerTimeline.years);
+    await insertIntoTimeline(supabase, stealWinnerId, card.id, winnerPosition, winnerTimeline.rows);
+  }
+  // else: wrong/timeout with no steal winner — card is simply discarded (F1
+  // behavior preserved). 10c (steal token forfeiture) needs no action here —
+  // register_steal already deducted the token at registration time (F2-D5:
+  // no refunds for correct-but-non-winning or incorrect steals).
 
   return { ok: true, phase: 'reveal', outcome, revealedCard };
 }
@@ -301,13 +459,31 @@ export async function resolveRound(
 // S12/S13: a placement at index `pos` is correct if the card's year fits
 // between its neighbors on the (pre-insertion) timeline. Equal-year
 // neighbors count as correct on both sides (S13 tie-smoothing).
-function evaluatePlacement(pos: number, year: number, timelineYears: number[]): boolean {
+// Exported in F2.1 so _shared/steal.ts's evaluateSteals() can reuse the
+// exact same correctness rule for steal-position evaluation instead of
+// duplicating it (per the Architect's explicit warning that this was not
+// exported in F1 and would be needed here — ARCHITECTURE.md 11.2).
+export function evaluatePlacement(pos: number, year: number, timelineYears: number[]): boolean {
   const left = pos > 0 ? timelineYears[pos - 1] : null;
   const right = pos < timelineYears.length ? timelineYears[pos] : null;
 
   if (left !== null && year < left) return false;
   if (right !== null && year > right) return false;
   return true;
+}
+
+// REDESIGN 2026-07-03: finds the single correct insertion index for `year`
+// on a (sorted, ascending) timeline — used when a steal-winner's card must
+// be placed on THEIR OWN board, where the position they contested (an index
+// on the ACTIVE PLAYER's board) has no direct meaning. Picks the leftmost
+// valid gap (before the first strictly-greater year), matching the same
+// tie-smoothing spirit as evaluatePlacement (equal years are never a
+// mismatch on either side).
+export function findInsertionIndex(year: number, sortedTimelineYears: number[]): number {
+  for (let i = 0; i < sortedTimelineYears.length; i++) {
+    if (sortedTimelineYears[i] > year) return i;
+  }
+  return sortedTimelineYears.length;
 }
 
 // Turn order: next seat_order after the given player's, wrapping around.

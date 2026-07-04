@@ -11,6 +11,12 @@ export interface TimelineProps {
   scrollable?: boolean;
   onTapSelectSlot?: (index: number) => void;
   ownerColor?: string;
+  /**
+   * F2 (lopás) — a soron lévő játékos ide tette le a kártyát (`round.placement`), ezen az
+   * idővonalon élőben megjelölve. A lopó nem választhatja ki ezt a rést.
+   */
+  markedSlotIndex?: number | null;
+  markedColor?: string;
 }
 
 /** Vízszintes, görgethető idővonal-konténer, rések kezelése (DESIGN P3 wireframe, 5.1). */
@@ -21,6 +27,8 @@ export function Timeline({
   scrollable = true,
   onTapSelectSlot,
   ownerColor,
+  markedSlotIndex = null,
+  markedColor,
 }: TimelineProps) {
   const sorted = [...cards].sort((a, b) => a.position - b.position);
 
@@ -36,6 +44,9 @@ export function Timeline({
             selected={activeSlotIndex === 0}
             color={ownerColor}
             onTapSelect={onTapSelectSlot}
+            markedByActivePlayer={markedSlotIndex === 0}
+            markedColor={markedColor}
+            disabled={markedSlotIndex === 0}
           />
         )}
         {sorted.map((card, i) => (
@@ -48,6 +59,9 @@ export function Timeline({
                 selected={activeSlotIndex === i + 1}
                 color={ownerColor}
                 onTapSelect={onTapSelectSlot}
+                markedByActivePlayer={markedSlotIndex === i + 1}
+                markedColor={markedColor}
+                disabled={markedSlotIndex === i + 1}
               />
             )}
           </div>

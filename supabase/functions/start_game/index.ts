@@ -74,6 +74,16 @@ Deno.serve(async (req: Request) => {
     .eq('id', room.id);
   if (updateError) return errorResponse('db_error', 'Nem sikerült a szoba indítása.', 500);
 
+  // AC20.1 (ARCHITECTURE.md 11.1.1): tokens are explicitly reset to 2 at the
+  // Start moment, not just relied upon as the column default — this
+  // guarantees no lobby-time drift can leak into the game (F2: nothing
+  // moves tokens before Start anyway, but this makes the invariant explicit
+  // and future-proof).
+  await supabase
+    .from('players')
+    .update({ tokens: 2 })
+    .eq('room_id', room.id);
+
   const firstPlayerId = players[0].id;
   const draw = await drawCard(supabase, room.id, firstPlayerId);
   if (!draw.ok) return errorResponse('draw_failed', 'Nem sikerült az első kör indítása.', 500);

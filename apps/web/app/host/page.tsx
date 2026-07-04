@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppButton } from "@/components/system/AppButton";
 import { SegmentedControl } from "@/components/system/SegmentedControl";
 import { GenerationProgress } from "@/components/game/GenerationProgress";
 import { CoverageReport } from "@/components/game/CoverageReport";
 import { ensureAnonymousSession } from "@/lib/supabase/client";
-import { generateDeck, createRoom, pollDeckUntilReady } from "@/lib/supabase/functions";
+import { generateDeck, createRoom, pollDeckUntilReady, spotifyRefreshToken } from "@/lib/supabase/functions";
+import { startSpotifyLogin } from "@/lib/spotify/pkce";
 import type { Deck } from "@/lib/game/types";
 
 /**
@@ -35,6 +36,38 @@ export default function HostCreatePage() {
   });
   const [deck, setDeck] = useState<Deck | null>(null);
   const [creatingRoom, setCreatingRoom] = useState(false);
+
+  // S30 (Spotify Premium, F3) — a kapcsolat a SAJÁT auth.uid()-hez kötött, nem
+  // egy adott szobához (Architect terv), ezért itt, a szoba létrehozása ELŐTT
+  // is csatlakoztatható. A státuszt egy csendes spotify_refresh_token hívással
+  // deríti ki: siker = van kapcsolat, 404 (no_spotify_connection) = nincs.
+  const [spotifyStatus, setSpotifyStatus] = useState<"checking" | "connected" | "not_connected">("checking");
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await ensureAnonymousSession();
+        await spotifyRefreshToken();
+        if (!cancelled) setSpotifyStatus("connected");
+      } catch {
+        if (!cancelled) setSpotifyStatus("not_connected");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleConnectSpotify() {
+    await ensureAnonymousSession();
+    const clientId = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID;
+    const redirectUri = process.env.NEXT_PUBLIC_SPOTIFY_REDIRECT_URI;
+    if (!clientId || !redirectUri) {
+      setError("A Spotify-integráció nincs konfigurálva ezen a környezeten.");
+      return;
+    }
+    await startSpotifyLogin(clientId, redirectUri);
+  }
 
   const urlLooksValid = /^https:\/\/open\.spotify\.com\/playlist\/[a-zA-Z0-9]+/.test(playlistUrl.trim());
 
@@ -155,7 +188,25 @@ export default function HostCreatePage() {
               />
             </div>
 
-            {/* ⟨F2⟩/⟨F3⟩ hely fenntartva — steal + Premium, F1-ben rejtve (DESIGN H1 wireframe) */}
+            {/* ⟨F2⟩ hely fenntartva — steal, F1-ben rejtve (DESIGN H1 wireframe) */}
+
+            {/* S30 — Spotify Premium csatlakoztatás (opcionális, F3). Enélkül a parti
+                a megszokott ingyenes 30 mp-es preview-val indul, semmi nem változik. */}
+            <div className="rounded-[var(--radius-card)] border border-border bg-surface-2 px-4 py-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold text-sm">🎧 Spotify Premium</p>
+                <p className="text-text-muted text-xs mt-0.5">
+                  {spotifyStatus === "connected"
+                    ? "Csatlakoztatva — teljes számok szólnak majd 30 mp-es preview helyett."
+                    : "Opcionális — enélkül is megy a 30 mp-es ingyenes preview."}
+                </p>
+              </div>
+              {spotifyStatus !== "connected" && (
+                <AppButton size="sm" variant="secondary" onClick={handleConnectSpotify}>
+                  Csatlakoztatás
+                </AppButton>
+              )}
+            </div>
 
             <AppButton size="lg" fullWidth disabled={!playlistUrl} onClick={handleGenerate}>
               PAKLI GENERÁLÁSA ▶

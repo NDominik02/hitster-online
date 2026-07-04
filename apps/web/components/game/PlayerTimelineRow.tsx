@@ -10,12 +10,16 @@ export interface PlayerTimelineRowProps {
   isActive: boolean;
   /** Élő tükrözés — a soron lévő játékos húzása közben melyik rés aktív (ARCHITECTURE 4.2, D8). */
   ghostSlotIndex?: number | null;
-  /** F2-kész prop, F1-ben nem renderel semmit vele (DESIGN ⟨F2⟩). */
+  /**
+   * F2 (DESIGN ⟨F2⟩, AC20.2) — ha megadva, felülírja a `player.tokens`-t a megjelenítésnél
+   * (a legtöbb hívó egyszerűen a `player.tokens`-re hagyatkozhat, ez a prop csak akkor kell,
+   * ha a hívó külön akarja kontrollálni, pl. optimista UI-frissítéshez).
+   */
   tokens?: number;
 }
 
-/** Host H4 egy játékos-sora (név + mini-idővonal) — DESIGN H4 wireframe. */
-export function PlayerTimelineRow({ player, cards, isActive, ghostSlotIndex }: PlayerTimelineRowProps) {
+/** Host H4 egy játékos-sora (név + token + mini-idővonal) — DESIGN H4 wireframe. */
+export function PlayerTimelineRow({ player, cards, isActive, ghostSlotIndex, tokens }: PlayerTimelineRowProps) {
   const sorted = [...cards].sort((a, b) => a.position - b.position);
   const items: Array<{ type: "card"; card: TimelineCardPublic } | { type: "ghost" }> = [];
 
@@ -34,7 +38,13 @@ export function PlayerTimelineRow({ player, cards, isActive, ghostSlotIndex }: P
       style={isActive ? { boxShadow: `0 0 0 2px ${playerColorValue(player.color)}` } : undefined}
     >
       <div className="w-32 shrink-0">
-        <PlayerBadge name={player.name} color={player.color} state={!player.connected ? "offline" : isActive ? "active" : "online"} size="sm" />
+        <PlayerBadge
+          name={player.name}
+          color={player.color}
+          state={!player.connected ? "offline" : isActive ? "active" : "online"}
+          size="sm"
+          tokens={tokens ?? player.tokens}
+        />
       </div>
       <div className="flex gap-2 overflow-x-auto scrollbar-thin">
         {items.map((item, i) =>

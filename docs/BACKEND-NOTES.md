@@ -2,6 +2,8 @@
 
 *Készült: 2026-07-02 · Backend Engineer · Forrás: ARCHITECTURE.md 9. szakasz Fázis A–B*
 
+**Éles URL:** https://hitster-online-eta.vercel.app — Vercel projekt a `NDominik02/hitster-online` GitHub repóra kötve (`main` ág → production auto-deploy, Root Directory: `apps/web`).
+
 Ez a dokumentum a Frontend Engineer agentnek szól: mi készült el a backend oldalon,
 és hogyan kell integrálni a Next.js appból. A teljes API-szerződés az
 `ARCHITECTURE.md` 3. szakaszában van részletesen leírva — ez itt a gyors
@@ -224,18 +226,180 @@ Ezután a cron a következő 20 mp-es ciklusban már sikeresen fog hitelesíteni
 
 **A tulaj/DevOps után-tesztje** (a fenti `vault.update_secret` lefuttatása után javasolt): hozz létre egy kört lejárt deadline-nal (ugyanaz a minta, mint a 9.3/1. pont), várj legfeljebb 20 másodpercet, majd `select phase, outcome from rounds where id = '...'` — `phase='reveal'`-nek kell lennie.
 
-### 9.4 TEENDŐ a Frontend Engineer felé — host-oldali fallback polling hiányzik
+### 9.4 MEGOLDVA (2026-07-02, Frontend) — host-oldali fallback polling
 
-A player-oldali `round_public` polling fallback (egy korábbi kör során bekötve a `app/play/[roomCode]/page.tsx`-be) automatikusan felfedezi az automata lezárást is, mert közvetlenül az adatbázist kérdezi le (nem a broadcast-ra vár) — **playerek oldalán nincs teendő**.
-
-**A HOST oldalon viszont NINCS hasonló fallback.** A host jelenlegi kódja a saját maga által indított `resolve_round` hívás sikeres válaszára és a saját broadcast-jára támaszkodik — ha a rendszer automatikusan (a cron-on át) zárja le a kört, amíg a host tabja háttérben volt (pontosan ez az eredeti hibajelenség), a host a `round_revealed` broadcast eventet megkapja (az `auto_resolve_expired_rounds` most már küldi, 9.1), **DE** ha a host tabja épp akkor tér vissza előtérbe, amikor a broadcast-ablak már lezárult (Supabase Realtime nem garantál üzenet-perzisztenciát háttérben lévő tabra), a host UI beragadhat a régi fázisnál, míg a player már friss idővonalat lát.
-
-**Javasolt megoldás (Frontend feladata):** a host oldalon (`app/host/[roomCode]/page.tsx` vagy az azt tápláló state-hook) tegyetek be egy `round_public`-ra pollingozó `useEffect`-et, ugyanazzal a mintával, mint a player oldalon már megvan — pl. amikor a tab visszatér előtérbe (`visibilitychange` event) VAGY egy alacsony frekvenciájú (5-10 mp) polling, ami összeveti a lekérdezett `phase`-t a jelenlegi UI-állapottal, és ha eltér (pl. a UI még `stealing`-et mutat, de az adatbázis már `reveal`-t), frissíti a képernyőt — pont úgy, mintha a broadcast érkezett volna. Ez nem új koncepció, csak a már meglévő player-oldali minta host-oldali megismétlése.
+Amikor ez a szakasz íródott, a host oldalon még nem volt hasonló fallback, mint a player oldalon. Azóta (2026-07-02-i hotfix) ez bekötésre került: `app/host/[roomCode]/page.tsx` mind a `visibilitychange`-alapú azonnali ellenőrzést (`checkServerRoundState`, amikor a tab előtérbe kerül), mind egy 10 mp-es alacsony frekvenciájú pollingot (`FALLBACK POLLING` komment, `roundIdForHostPolling` effekt) tartalmaz — mindkettő a `round_public`-ot kérdezi le és frissíti a UI-t, ha a szerver (host-hívás VAGY a pg_cron safety net) már előrébb jár. **Ez a TODO tehát rég lezárult, csak ez a dokumentum nem lett frissítve** — 2026-07-04-én, egy PM-státuszfelmérés kapcsán vettük észre, hogy a leírás elavult volt a tényleges kódhoz képest.
 
 ---
 
 ## 10. Nyitott kérdések / blokkolók
 
-Nincs blokkoló, DE van egy kritikus manuális lépés (lásd 9.2) és egy frontend-teendő (lásd 9.4).
+Nincs blokkoló, DE van egy kritikus manuális lépés (lásd 9.2). A korábbi frontend-teendő (9.4) azóta megoldva.
 
 - A **realtime broadcast küldése** kliensoldali felelősség (5. pont) — ha a Frontend inkább szerver-oldali broadcastot szeretne az Edge Functionökből, szóljatok, és utólag hozzáadom (`supabase.channel(...).send(...)` az admin klienssel minden mutáció után triviálisan beköthető). **Ez már megtörtént az `auto_resolve_expired_rounds`-nál** (9.1) — ha a mintát a többi mutációra (place_card, next_turn stb.) is szeretnétek szerver-oldalra hozni, szóljatok.
+
+---
+
+## 11. F2.1 — Tokenek, bemondás, steal (2026-07-03, Backend Engineer)
+
+*Forrás: ARCHITECTURE.md 11. szakasz ("F2 — A teljes játék, technikai terv"), PRD.md 5b szakasz (S20–S25), DECISIONS.md F2-D1–F2-D10.*
+
+Ez a szakasz a Frontend agensnek szól: mi változott az F1-hez képest, milyen új API-szerződések vannak, és **melyik F1-es kliensminta törik el explicit módon**. Az F2.2 (reveal-show animáció, vitagomb UI, auto-skip UI — tisztán frontend polish) NINCS ebben a körben leszállítva a UI oldalán, de a hozzá tartozó két host-oldali funkció (`dispute_round`, `next_turn` auto-skip-bővítés) igen, mert alacsony kockázatú szerver-oldali munka volt.
+
+### 11.0 A LEGFONTOSABB VÁLTOZÁS — a `place_card` utáni azonnali resolve NEM HELYES TÖBBÉ
+
+**Ez törli az F1 host-kliens mintáját.** Az F1-ben a `place_card` után a host `app/host/[roomCode]/page.tsx`-ben (a "amikor a lerakás megtörtént... azonnal kiértékelünk" useEffect) rögtön meghívta a `resolve_round`-ot, mert a `stealing` fázis F1-ben 0 mp-es pass-through volt.
+
+**F2-ben ez megváltozik:** a `place_card` most valós `steal_deadline = now() + 15s`-et ír (AC22.1), és a `stealing` fázis ténylegesen 15 másodpercig tart. Ha a host most is azonnal hívná a `resolve_round`-ot, azt **409 `steal_window_open`** hibával utasítja el a szerver — a host nem tudja korán lezárni az ablakot (ez szándékos, nem bug: senki sem "vághatja le" a lopási lehetőséget).
+
+**A Frontendnek ezt kell tennie:**
+1. A `place_card` sikeres válasza most `{ phase: 'stealing', stealDeadline: '<ISO timestamp>' }`-ot ad vissza (ugyanaz a shape, mint F1-ben, de a `stealDeadline` most valódi, nem `null`/azonnali).
+2. A host kliens a `place_card` után **NE hívjon azonnal `resolve_round`-ot**. Ehelyett rendereljen egy 15 mp-es visszaszámlálót a `stealDeadline`-ból (ugyanaz a minta, mint a `placing_deadline`/`CountdownTimer` F1-ben), és **csak a `stealDeadline` lejárta után** hívja a `resolve_round`-ot.
+3. **Safety net változatlanul megvan:** ha a host mégsem hívná (pl. tab háttérben), a pg_cron biztonsági háló (`auto_resolve_expired_rounds`) 20 mp-enként ellenőrzi és lezárja a lejárt `stealing` fázisú köröket is (lásd 11.4 lent) — tehát a parti nem akad el, ha a host UI-implementáció késik.
+
+### 11.1 `place_card` — bővített bemenet (`nameGuess`)
+
+```jsonc
+// Bemenet (bővítve):
+{
+  "roundId": "uuid",
+  "position": 3,
+  "nameGuess": {              // OPCIONÁLIS — csak ha a "Bemondom!" kapcsoló be volt kapcsolva
+    "artistGuess": "tom jones",
+    "titleGuess":  "delilah"
+  }
+}
+// Kimenet (változatlan shape, de most valós stealDeadline):
+{ "phase": "stealing", "stealDeadline": "2026-07-03T18:00:20.000Z" }
+```
+
+- A `nameGuess` teljesen opcionális; ha kihagyod, minden úgy működik, mint F1-ben.
+- A bemondás helyessége **soha nem derül ki a `place_card` válaszából** — ez szándékos anti-leak (a helyes válasz csak a reveal fázisban, a `revealed_card.guess` mezőben jelenik meg, lásd 11.3).
+- A `+1` token jóváírás csak a reveal pillanatában történik (nem a lerakáskor) — ha a token-egyenleg azonnal nőne, az elárulná a reveal előtt, hogy a bemondás talált.
+
+### 11.2 `register_steal` — ÚJ, valós implementáció (F1-ben stub volt)
+
+```jsonc
+// Bemenet:
+{ "roundId": "uuid", "position": 2 }   // a stealer SAJÁT idővonalán megjelölt rés
+
+// Kimenet (siker):
+{ "ok": true, "tokensLeft": 1, "stealCount": 3 }
+
+// Hibák: 400 position_required · 403 not_a_player / cannot_steal_self ·
+//        409 steal_window_closed / already_stole / insufficient_tokens
+```
+
+- Hívható: **bármelyik nem soron lévő játékos**, kizárólag `phase='stealing'` alatt, a `steal_deadline` lejárta előtt.
+- **A `position` a stealer SAJÁT idővonalára vonatkozik**, nem a soron lévőére — ő ott jelöli meg, hova rakná a (rejtett) kártyát.
+- **Fontos UI-mintakövetelmény:** a `StealButton` csak akkor legyen aktív, ha (a) van legalább 1 token, ÉS (b) a játékos már jelölt egy pozíciót a saját idővonalán (AC22.4 — pozíció nélkül a hívás `400 position_required`-t ad).
+- A hívás egy steal-tokent azonnal levon (nem várja meg a reveal-t) — ha a steal rossznak bizonyul, **nincs visszatérítés** (F2-D5). Ha a steal-ablak közben lezárul vagy a játékos már lopott ebben a körben, a szerver automatikusan visszaírja a levont tokent és hibát ad.
+- A `steal_registered` broadcast eventet (csak darabszám, `{ roundId, stealCount }`, **nincs benne semmilyen pozíció- vagy helyesség-infó**) a kliensnek kell küldenie a sikeres hívás után — a Function maga nem broadcastol (ugyanaz a kliensoldali-broadcast konvenció, mint F1-ben, lásd az 5. szakaszt).
+
+### 11.3 `resolve_round` — bővített `revealedCard`, új hibakód
+
+```jsonc
+// Kimenet (bővítve):
+{
+  "phase": "reveal",
+  "outcome": "correct" | "wrong" | "timeout",
+  "revealedCard": {
+    "title": "Delilah", "artist": "Tom Jones", "year": 1968, "artworkUrl": "https://…",
+    "guess": { "correct": true, "byPlayerId": "uuid-active" } | null,
+    "steals": [
+      { "playerId": "uuid-a", "correct": true,  "won": true  },
+      { "playerId": "uuid-b", "correct": false, "won": false }
+    ]
+  }
+}
+```
+
+- **Új hibakód: `409 steal_window_open`** — ha a host (vagy bárki) a `steal_deadline` lejárta ELŐTT hívja meg, miközben a kör `stealing` fázisban van. Ugyanaz a minta, mint a régi `409 deadline_not_reached` a `placing_deadline`-ra.
+- A `revealedCard.guess`/`revealedCard.steals` **csak reveal után létezik** — a `round_public` nézetben a `revealed_card` mező fázis-függő (`phase in ('reveal','done')` esetén nem null), tehát anti-leak-biztos automatikusan, nincs teendő a nézet-lekérdezés oldalán.
+- **`steals[].position` NINCS a válaszban** — csak `playerId`, `correct`, `won`. A UI ebből tudja megjeleníteni: "Anna lopott, sikertelen" / "Béla lopott, ő kapta a kártyát", de a pontos jelölt pozíciót nem kell (és nem is szabad) megjeleníteni.
+
+### 11.4 `auto_resolve_expired_rounds` — most a `steal_deadline`-t is figyeli
+
+A pg_cron biztonsági háló (BACKEND-NOTES 9. szakasz) mostantól **két ágon** keres lejárt köröket: `playing`/`placing` fázisban a `placing_deadline`-t (mint eddig), és **`stealing` fázisban a `steal_deadline`-t** (új). Ha egy `stealing` kört a cron zár le (mert a host tabja nem hívta időben), a broadcast most **két eventet** küld egymás után: `steal_window_closed` majd `round_revealed` — mindkettőt érdemes figyelni, de a `round_revealed`-re való `round_public` refetch önmagában is elegendő a UI frissítéséhez.
+
+### 11.5 `use_token` — ÚJ függvény (skip + draw3)
+
+```jsonc
+// Bemenet (skip — 1 token, AC20.5):
+{ "roundId": "uuid", "action": "skip" }
+// Kimenet:
+{ "action": "skip", "roundId": "<ÚJ kör uuid>", "roundNo": 8, "placingDeadline": "…", "tokensLeft": 1 }
+
+// Bemenet (draw3 — 3 token, AC20.6/F2-D4):
+{ "roundId": "uuid", "action": "draw3", "position": 2 }
+// Kimenet:
+{ "action": "draw3", "roundId": "<ÚJ kör uuid>", "outcome": "correct"|"wrong", "revealedCard": {…}, "tokensLeft": 0, "phase": "reveal" }
+```
+
+- **Csak a soron lévő játékos hívhatja, kizárólag a saját köre ELEJÉN** (`phase='playing'`, még nincs `placement`) — F2-D3/F2-D4. Ha már lerakott vagy nem ő van soron: `409 not_turn_start` / `403 not_your_turn`.
+- **`skip` (1 token):** a jelenlegi rejtélyes kártya kikerül, a rendszer új kártyát húz, **ugyanaz a játékos** folytatja. **FONTOS anti-leak-részlet:** a skip válasz **NEM tartalmaz `audioUrl`-t** (a `use_token`-t a player hívja, az `audioUrl` D7 szerint host-only). A host a megszokott módon, a `draw_card` újrahívásával (vagy a `round_started`-szerű refetch-csel) kéri le az új signed URL-t a szoba `current_round_id`-jából — ugyanaz a minta, mint amikor egy lejárt signed URL-t kell frissíteni.
+- **`draw3` (3 token):** a kártya **felfedve** jön — a válasz azonnal tartalmazza a `revealedCard`-ot, a kliensnek a `position`-t **egy hívásban, a felfedett adatok láttán** kell megadnia (nincs külön "nézd meg, majd rakd le" lépés — a `position` már a bemenetben szerepel). Nincs zene, nincs `placing_deadline`, nincs steal-ablak erre a kártyára (F2-D4). Ha a behelyezés helytelen, a kártya elveszik és **a 3 token nem jár vissza**.
+- Mindkét ág `409 insufficient_tokens`-t ad, ha nincs elég token — a UI-nak a gombokat ez alapján kell letiltania (skip: <1 token, draw3: <3 token).
+
+### 11.6 `dispute_round` — ÚJ függvény (vitagomb, S24)
+
+```jsonc
+// Bemenet:
+{ "roundId": "uuid" }
+// Kimenet:
+{ "ok": true, "outcome": "disputed", "refunded": [{ "playerId": "…", "amount": 1 }], "next": "draw"|"finished", "roundId"?: "…" }
+```
+
+- **Kizárólag a host hívhatja**, és **kizárólag `phase='reveal'`** alatt (a `next_turn` előtt) — F2-D8. Ha már továbblépett a kör: `409 already_advanced`.
+- Hatás: a kártya kikerül a pakliból véglegesen, minden a körben elköltött/kapott token nettó 0-ra áll vissza (steal-tokenek visszaírva, bemondás-jutalom ha volt visszavonva, esetleges timeline-beépítés törölve és újraindexelve), és a `dispute_round` **maga lépteti a következő játékosra** (nem kell külön `next_turn`-t hívni utána — a válasz már tartalmazza az új kör adatait, ugyanúgy mint a `next_turn` válasza).
+- **A host UI-nak a vitagomb megnyomásakor azonnal le kell állítania a saját 5 mp-es auto-tovább visszaszámlálóját** (F2-D8/a) — ez kliensoldali felelősség, a szerver csak azt garantálja, hogy egy már lezárult (`next_turn` utáni) kört nem lehet visszamenőleg vitatni.
+- A `round_disputed` broadcast eventet (`{ roundId }`) a kliensnek kell küldenie sikeres hívás után (ugyanaz a kliensoldali-broadcast konvenció).
+
+### 11.7 `next_turn` — bővített kimenet (auto-skip, S25)
+
+```jsonc
+// Kimenet (bővítve):
+{ "next": "draw", "roundId": "uuid", "activePlayerId": "uuid", "skipped": ["uuid-offline-1", "uuid-offline-2"] }
+// vagy, ha mindenki offline:
+{ "next": "paused", "reason": "all_offline" }
+```
+
+- A `skipped` tömb azoknak a `players.id`-knak a listája, akiket a szerver **presence-alapon** (a `players.connected` mező alapján, NEM egy élő kliens-jelzés alapján — AC25.7) automatikusan átugrott, mert offline-nak voltak jelölve a kör-léptetés pillanatában. Ha üres, senkit sem ugrott át.
+- **Ha mindenki offline**, a `next_turn` NEM húz kártyát — `rooms.status = 'paused'`-ra vált, és `{ next: 'paused', reason: 'all_offline' }`-t ad vissza. A host UI-nak ezt egy "szünetel, várunk valakire" képernyővel kell kezelnie; a következő `next_turn` hívás (miután valaki visszatért) újra megpróbálja.
+- **A `turn_auto_skipped` broadcast eventet** (`{ skipped: [...] }`) a kliensnek kell küldenie, ha a `skipped` tömb nem üres — hogy a UI megjeleníthesse "⚠ X offline — kihagyva".
+
+### 11.8 ÚJ függvény: `set_presence` — a presence-alapú auto-skip előfeltétele
+
+```jsonc
+// Bemenet:
+{ "roomId": "uuid", "playerId": "uuid", "connected": false }
+// Kimenet:
+{ "ok": true, "playerId": "uuid", "connected": false }
+```
+
+- **Kizárólag a host hívhatja**, bármelyik játékosra (nem csak saját magára — ez szándékos, a host az egyetlen, aki mindenki Realtime Presence-ét figyeli).
+- **Ez a hiányzó láncszem a `next_turn` auto-skip logikájához**: a `next_turn` a `players.connected` **adatbázis-mezőt** olvassa (nem egy élő kliens-jelzést, AC25.7), és ezt a mezőt **a host kliensnek kell karbantartania** a saját Supabase Realtime Presence megfigyelésén keresztül.
+- **Frontend-teendő (ÚJ, F2-D9 szerint):** a host oldalon egy Presence-figyelő logika kell, ami minden játékosra 15 mp-es timeout-tal detektálja a lecsatlakozást (a heartbeat/leave eseményekből), és ilyenkor hívja a `set_presence`-t `connected: false`-szal. Amikor a presence visszatér, `connected: true`-val hívja újra. **Ha ezt a Frontend nem köti be, az auto-skip funkció csendben nem fog működni** (a `players.connected` mindig `true` marad az induló defaultról, tehát a `next_turn` soha nem fog senkit átugrani) — ez NEM hibát dob, egyszerűen nem lesz auto-skip viselkedés, amíg ez a bekötés meg nem történik.
+- A `reconnect` Edge Function (F1-ből, változatlan) továbbra is beállítja a `connected: true`-t, amikor egy player saját maga reconnectál — ez a `set_presence`-t nem helyettesíti teljesen (a host proaktív módon, MÁS játékosokra is be tudja állítani `false`-ra, amit a player saját reconnect-hívása nem tud megelőzni/kiváltani).
+
+### 11.9 `start_game` — apró változás: explicit token-reset
+
+A `start_game` mostantól a Start pillanatában explicit `UPDATE players SET tokens = 2`-t futtat minden játékosra (AC20.1) — ez a kliens szempontjából láthatatlan (a válasz shape-je nem változott), csak azért említem, mert ha a Frontend valamiért a lobby alatt tokent akarna megjeleníteni/módosítani, tudja, hogy Start után mindenki egyenlege garantáltan 2-re áll vissza.
+
+### 11.10 Új adatbázis-objektum: `adjust_tokens` RPC
+
+Csak Backend-belső, de dokumentálva a teljesség kedvéért: `adjust_tokens(p_player_id uuid, p_delta int) returns int`, `security definer`, csak `service_role` futtathatja (a Frontendnek soha nem kell/szabad ezt közvetlenül hívnia). Minden token-mutáció (steal-levonás, bemondás-jutalom, dispute-visszatérítés, skip/draw3-levonás) ezen keresztül megy, atomikusan — a `players.tokens` mező a kliens felé (RLS-en át) ugyanúgy olvasható, mint eddig, csak az írás lett szigorúbb.
+
+### 11.11 Realtime broadcast-események — összefoglaló (kliensoldali felelősség, kivéve ahol jelölve)
+
+| Event | Ki küldi | Payload | Megjegyzés |
+|---|---|---|---|
+| `steal_registered` | kliens (`register_steal` után) | `{ roundId, stealCount }` | csak darabszám, nincs pozíció/helyesség |
+| `steal_window_closed` | kliens (`resolve_round` után) VAGY **szerver** (`auto_resolve_expired_rounds`, ha a cron zárta a stealing-ablakot) | `{ roundId }` | |
+| `round_disputed` | kliens (`dispute_round` után) | `{ roundId }` | |
+| `turn_auto_skipped` | kliens (`next_turn` után, ha `skipped` nem üres) | `{ skipped: [...] }` | |
+| `round_revealed` | kliens (`resolve_round` után) VAGY szerver (cron) — változatlan F1-ből | `{ roundId, auto?: true }` | |
+
+### 11.12 Amit ELLENŐRIZNI érdemes anti-leak szempontból (QA-nak is releváns)
+
+A `stealing`-reveal közötti forgalomban a nem-aktív játékosok kliensén SOHA nem szabad megjelennie: a helyes cím/előadó/év, a `name_guess.correct` értéke, a `steals[].correct` értéke, vagy bármilyen `card_id`. A token-egyenleg (`players.tokens`) sem változhat a reveal előtt (a bemondás-jutalom csak reveal-ben íródik). Ez mind a `round_public` nézet + a fázis-függő `revealed_card` projekció miatt automatikusan garantált, de érdemes egy hálózati forgalom-ellenőrzést végezni a `stealing` fázis alatt, mielőtt ez élesedik.

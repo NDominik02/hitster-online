@@ -213,6 +213,122 @@ Ez a PRD az MVP-t a PLAN.md **F1 fázisával** azonosítja (játszható core loo
 
 ---
 
+## 5b. F2 — A teljes játék (Acceptance Criteria)
+
+> Ez a szakasz az F2 story-kat (S20–S25) bontja mérhető követelménnyé, ugyanolyan mélységben, mint az 5. szakasz az F1-et. **Az F1 tartalmat nem módosítja.** Forrás: PLAN.md 2. szakasz (végleges játékszabályok), DESIGN.md (fenntartott F2 UI-elemek), DECISIONS.md (D1–D13, A1–A4). Ahol a források nem döntenek egyértelműen, a kritériumban *jelölve* van, és a 7. szakasz Nyitott kérdései közt (F2-Q…) szerepel — nem találgatok.
+>
+> **Változatlan alapelvek F2-ben is:** a szerver az igazság forrása; minden token-/steal-/guess-mutáció kizárólag Edge Function-ben történik, a kliens sosem írja közvetlenül a játéktáblákat (CLAUDE.md, PLAN.md 5. szakasz). A fel nem fedett kártya adata (cím/előadó/év/URI) a reveal pillanatáig **nem kerülhet** a kliens felé menő forgalomba (anti-leak, D7) — ez a bemondás-ellenőrzésre és a steal-kiértékelésre is vonatkozik: mindkettő szerveroldalon dől el.
+
+### 5b.0 Fázisbontási javaslat: F2.1 + F2.2 (PM-ajánlás)
+
+**Javaslat:** az F2-t bontsuk **két, egymás után szállítható alfázisra**, ugyanazzal a logikával, amiért az F1-et leválasztottuk az F2-ről (a kockázat és a scope kézben tartása):
+
+| Alfázis | Tartalom | Story-k | Prio | Miért itt |
+|---|---|---|---|---|
+| **F2.1 — Játékmenet-kritikus** | Tokenek (gazdálkodás), bemondás (fuzzy matching), steal (15 mp-es ablak) | S20, S21, S22 | **P1** | Ez a hármas adja a „teljes Hitster" taktikai magját. Együtt működnek (a token a steal/guess valutája), külön értelmetlenek — egy koherens, szerver-nehéz csomag: token-könyvelés, steal-ablak timer, optimista zár, szerveroldali fuzzy matching. Ez az F2 **kockázatos** része, ezt kell először stabilizálni. |
+| **F2.2 — Polish** | Reveal-show (animáció/hang/haptika), vitagomb (kör-érvénytelenítés), auto-skip (lecsatlakozott soron lévő) | S23, S24, S25 | **P1 (S25), P2 (S23, S24)** | Ezek **nem blokkolják** a taktikai játékmenetet: az F2.1 után a játék token/steal/bemondással teljes és játszható. A reveal-show és a vitagomb élmény-/adathiba-kezelés; az auto-skip robusztusság. Külön szállítva kevesebb a regressziós kockázat a frissen bevezetett token-logikán. |
+
+**Indoklás (miért így):**
+1. **Kockázat-izoláció.** Az F2.1 mélyen belenyúl a kör-életciklusba (új `stealing` fázis-viselkedés, token-tranzakciók, `resolve_round` átírás). Ha ezt előbb élesítjük és playtesteljük, a hibák nem keverednek a polish-változtatásokkal.
+2. **Korai érték.** A tulaj + barátok az F2.1 után már a „valódi" Hitstert játsszák (bemondás +1 tokenért, lopás) — a reveal-show csillogása nélkül is. Gyors visszajelzési ciklus a legfontosabb részre.
+3. **Az F1-mintát követi.** Az F1-nél is a token-mentes core loopot választottuk le, hogy előbb legyen valami játszható. Ugyanez az elv: előbb a mechanika, aztán a máz.
+4. **S25 kivétel a prioritásban.** Az auto-skip (S25) bár az F2.2-ben van, **P1**, mert egy lecsatlakozott soron lévő játékos az F2 token-körben is meg tudja akasztani a partit; a többi F2.2 elem (S23, S24) P2.
+
+> **Scope-figyelmeztetés (PM):** az F2.1 három story-ja együtt kb. akkora szerver-oldali munka, mint a teljes F1 core loop volt. Ne csússzon bele „menet közben" F3-elem (pl. Premium-mód a reveal-show-hoz, vagy pakli-könyvtár a token-statisztikákhoz). Az F2 kizárólag a PLAN.md 2. szakaszában rögzített szabályokat implementálja — új szabály nem születik.
+
+**F2 story-k prioritása és alfázisa (összefoglaló):**
+
+| ID | Story | Prio | Alfázis |
+|----|-------|------|---------|
+| S20 | Tokenek (szerzés/költés) | P1 | **F2.1** |
+| S21 | Bemondás (fuzzy matching) | P1 | **F2.1** |
+| S22 | Steal (15 mp-es ablak) | P1 | **F2.1** |
+| S23 | Reveal-show (animáció/hang/haptika) | P2 | F2.2 |
+| S24 | Vitagomb (kör-érvénytelenítés) | P2 | F2.2 |
+| S25 | Auto-skip (lecsatlakozott soron lévő) | P1 | F2.2 |
+
+---
+
+### S20 — Tokenek (szerzés és költés) · P1 · F2.1
+
+> Alap (PLAN.md 2. szakasz): induláskor **2 token/fő**; szerzés bemondással (+1); költés: 1 token = steal, 1 token = szám átugrása, 3 token = azonnali +1 kártya. A token a `players.tokens INT` mezőben él (PLAN.md adatmodell); minden token-mozgás Edge Function-ben, szerveroldali tranzakcióban.
+
+- **AC20.1 (kezdő készlet)** Játékkezdéskor minden játékos egyenlege **pontosan 2 token** (`players.tokens = 2` a Start pillanatában). A host-eszköz (nem játékos, D5) nem kap tokent.
+- **AC20.2 (megjelenítés)** A token-egyenleg valós időben látszik: a host H4 nézetén minden játékos sorában (`PlayerTimelineRow` fenntartott `tokens` propja, DESIGN 5.1) és a `PlayerBadge`-en; a saját telefonon a játékos a saját egyenlegét mindig látja. Változáskor **1 s-on belül** frissül minden kliensen.
+- **AC20.3 (szerzés — bemondás)** Sikeres előadó+cím bemondásért (S21) a soron lévő játékos egyenlege **+1 token**. Ez az **egyetlen** token-szerzési forrás F2-ben (PLAN.md); más módon token nem keletkezik.
+- **AC20.4 (költés — steal)** Egy steal-fogadás (S22) leadása **1 tokent** von le a fogadó játékostól a fogadás pillanatában. Akinek **0 tokenje** van, a steal-gombja letiltott, nem indíthat steal-t.
+- **AC20.5 (költés — szám átugrása)** A soron lévő játékos a saját körében, **még a lerakás előtt**, elkölthet **1 tokent** a szám átugrására: a jelenlegi kártya kikerül (nem kerül senki idővonalára), a rendszer **új kártyát húz** a pakli tetejéről, és ugyanez a játékos folytatja vele a kört (új preview indul a hoston). Az átugrás **nem** ad és nem von tokent a +1 esetén túl (nettó −1). *(Nyitott: átugrás közben megmarad-e a steal-ablak a következő kártyára, és korlátozott-e az átugrások száma egy körön belül — lásd F2-Q3.)*
+- **AC20.6 (költés — azonnali +1 kártya)** A játékos **bármely** játékfázisban, amikor ő van soron a döntéssel, elkölthet **3 tokent** egy azonnali extra kártyáért: a pakli tetejéről **felfedve** kap egy kártyát, amit be kell illesztenie az idővonalába. Ha a behelyezés **helyes**, a kártya beépül (idővonal +1); ha **helytelen**, a kártya **elveszik** és a 3 token **nem jár vissza**. *(Nyitott: pontosan mikor hívható — csak a saját kör elején, vagy más köre alatt is; és számít-e külön körnek — lásd F2-Q4.)*
+- **AC20.7 (fedezet-ellenőrzés szerveroldalon)** Minden költést az Edge Function ellenőriz: ha a játékos egyenlege a művelet költsége alá esne, a művelet **elutasításra kerül** (a kliens nem tudja megkerülni). Nincs negatív egyenleg.
+- **AC20.8 (atomicitás / verseny-helyzet)** Egyidejű token-műveletek (pl. két gyors steal ugyanattól a játékostól, vagy steal + azonnali-kártya) **atomikusan**, `round_id + phase` optimista zárral dőlnek el (PLAN.md 5. szakasz, A2); a token-egyenleg sosem kerül inkonzisztens állapotba (nincs dupla-levonás, nincs „elveszett" token).
+- **AC20.9 (győzelem tie-break aktiválás)** F2-től a kifogyó-pakli döntetlennél (azonos idővonal-hossz) a **több token** dönt (PLAN.md 2. szakasz; ez felváltja az F1 D3 megosztott-győzelmét). Ha token-egyenleg is egyenlő, **megosztott győzelem** marad. *(Ez az F1 D3 explicit F2-felülírása — lásd F2-Q6, hogy a tulaj megerősítse a token-tie-break bevezetését.)*
+
+### S21 — Bemondás (fuzzy matching) · P1 · F2.1
+
+> Alap (PLAN.md 2. szakasz): a lerakás **előtt** a soron lévő játékos megjelölheti, hogy tudja az előadót ÉS a címet → begépeli; fuzzy matching, ékezet/kisbetű-toleráns; találat esetén +1 token. UI: `GuessInput` a „Bemondom!" kapcsoló alatt (DESIGN 5.4, P3 wireframe).
+
+- **AC21.1 (mikor ajánlható fel)** A „Bemondom!" kapcsoló és a beviteli mezők **csak a soron lévő játékosnak**, **csak a saját körében**, **kizárólag a lerakás (LERAKOM) előtt** érhetők el. A LERAKOM megnyomása vagy az időlimit lejárta után bemondás nem adható le.
+- **AC21.2 (opcionális, nem blokkoló)** A bemondás **opcionális**: a játékos bemondás nélkül is lerakhat. A bemondás nem hosszabbítja meg az időlimitet (a `CountdownTimer` ugyanúgy fut, D6 érvényes).
+- **AC21.3 (mindkét mező kell a jutalomhoz)** A jutalomhoz **az előadó ÉS a cím is** helyes kell legyen. Ha csak az egyik helyes → **nincs token** (nincs részleges jutalom). *(A „csak az egyik helyes" eset következménye: F2-ben nincs részjutalom; ha a tulaj félsikert akar jutalmazni, az F2-Q1.)*
+- **AC21.4 (fuzzy küszöb — konkrét)** Az egyezést a rendszer **normalizálás után** értékeli: kisbetűsítés, ékezet-eltávolítás (Unicode NFD + diakritika-törlés), a felesleges whitespace összevonása, és a zárójeles/„feat.” utótagok levágása (pl. „(Remastered 2011)”, „- Live”, „feat. X”). A normalizált sztringek közt **Levenshtein-alapú hasonlóság** dönt: az egyezés akkor **elfogadott**, ha a normalized-similarity `1 − levenshtein(a,b)/max(len)` **≥ 0.85** mind az előadóra, mind a címre külön. *(A 0.85-ös küszöb PM-javaslat, F0-mintán hangolandó — lásd F2-Q2.)*
+- **AC21.5 (több előadó / és-jelek)** Ha az eredeti előadó több névből áll (pl. „Tom Jones & The Cardigans”), elfogadott, ha a játékos **a fő előadót** eltalálja a 0.85 küszöb felett; a rendszer a több-előadós mezőt tokenizálja és a legjobb rész-egyezést veszi. *(A „fő előadó” pontos definíciója — első listázott vs. bármelyik — F2-Q2 alá tartozik.)*
+- **AC21.6 (szerveroldali kiértékelés, anti-leak)** A bemondás egyezését **kizárólag az Edge Function** dönti el; a helyes cím/előadó a reveal előtt **nem kerül ki** a kliensre (a kliens a beírt sztringet küldi, a szerver hasonlítja a rejtett kártyához). A találat/nem-találat ténye csak a reveal fázisban jelenik meg.
+- **AC21.7 (token jóváírás időzítése)** Sikeres bemondás **+1 tokenje** a **reveal fázisban** íródik jóvá és jelenik meg (nem a bemondás pillanatában, mert az elárulná a helyességet a reveal előtt — anti-leak).
+- **AC21.8 (visszajelzés)** A reveal képernyőn (host H5 + player P5) egyértelműen látszik, hogy volt-e sikeres bemondás és ki kapott érte tokent (ikon + szöveg, nem csak szín — DESIGN accessibility).
+
+### S22 — Steal (15 mp-es ablak) · P1 · F2.1
+
+> Alap (PLAN.md 2. szakasz): a lerakás után, még a reveal előtt, **bármelyik másik játékos** költhet 1 tokent, hogy fogadjon: a lerakás rossz, és megjelöli a saját idővonalán a szerinte helyes pozíciót. Rossz lerakásnál a sikeres stealer kapja a kártyát; több sikeres stealernél a **körsorrendben következő**; sikertelen steal = a token elveszett. Új fázis: `rounds.phase = stealing` (PLAN.md adatmodell). UI: `StealButton` a P4 steal-képernyőn (DESIGN 5.4).
+
+- **AC22.1 (ablak megnyílása és hossza)** A LERAKOM (`place_card`) után a kör `phase = stealing`-re vált, és **pontosan 15 mp-es** steal-ablak indul (`CountdownTimer`, DESIGN). Az ablak lejártakor vagy amikor minden jogosult játékos döntött (leadott vagy kihagyott), a szerver `resolve_round`-ra lép — amelyik előbb.
+- **AC22.2 (ki fogadhat)** Steal-t **csak a nem soron lévő** játékosok adhatnak le (a soron lévő nem lophatja meg magát). A host-eszköz (nem játékos, D5) nem fogadhat.
+- **AC22.3 (token-feltétel)** Steal leadásához a fogadónak **≥ 1 token** kell; a leadás pillanatában levonódik 1 token (AC20.4). 0 tokennél a `StealButton` letiltott.
+- **AC22.4 (pozíció-jelölés kötelező)** A steal-fogadás **csak akkor érvényes**, ha a fogadó a **saját idővonalán** megjelöl egy konkrét rést („szerintem ide való”). Pozíció-jelölés nélküli steal nem adható le (a gomb a jelölésig letiltott).
+- **AC22.5 (egy steal / játékos / kör)** Egy játékos körönként **legfeljebb egy** steal-t adhat le (nem halmozható több tokennel egy körben). *(Megerősítendő: engedjünk-e több párhuzamos steal-t egy játékostól — a PLAN.md „1 token”-t ír fogadásonként, ezért az alap egy/kör; lásd F2-Q5.)*
+- **AC22.6 (kiértékelés — a lerakás helyes volt)** Ha a soron lévő játékos lerakása **helyes** volt, **minden** steal sikertelen: a fogadók elvesztik a levont 1-1 tokenjüket (AC20.4 véglegesül), a kártya a soron lévő idővonalába épül.
+- **AC22.7 (kiértékelés — a lerakás rossz volt)** Ha a lerakás **rossz** volt, a kártya **elszáll a soron lévőtől**, és a **sikeres stealer** kapja meg (a saját jelölt résébe épül, ha az helyes). Sikeres stealer az, akinek a jelölt pozíciója a kártyára nézve helyes (ugyanaz a helyesség-szabály, mint a lerakásnál, S12–S13 azonos-évszám élsimítással).
+- **AC22.8 (több sikeres stealer — körsorrend)** Ha **több** stealer is helyesen jelölt, a kártyát a **körsorrendben (`players.seat_order`) a soron lévő után következő** sikeres stealer kapja (PLAN.md: „a körsorrendben következő”). A többi sikeres stealer **nem** kapja meg a kártyát, de **visszakapja** a tokenjét? → **Nem:** a token elköltése a fogadás ténye, csak a *sikertelen* (rosszul jelölt) steal veszít explicit módon; a helyesen jelölt, de kártyát nem nyerő stealerek token-sorsa a PLAN.md-ből nem egyértelmű — **lásd F2-Q5** (alapértelmezett PM-javaslat: a helyesen jelölő, de nem nyerő stealer visszakapja a tokenjét, mert „igaza volt”).
+- **AC22.9 (token-visszavonás sikertelen steal esetén)** A **rosszul jelölt** (sikertelen) steal esetén a levont token **véglegesen elveszik** (PLAN.md: „sikertelen steal = a token elveszett”) — nincs visszatérítés.
+- **AC22.10 (szerveroldali, atomikus, anti-leak)** A steal-kiértékelés **kizárólag** `resolve_round` Edge Function-ben, atomikusan (AC20.8 optimista zár). A steal-ablak alatt a kártya kiléte **nem** kerül ki a kliensekre (a fogadó csak pozíciót jelöl a rejtett kártyához, nem látja, mi az) — anti-leak (D7).
+- **AC22.11 (megjelenítés)** A host H5 reveal panelján megjelennek a **steal-eredmények** (DESIGN H5 fenntartott „steal-eredmények ide” hely): ki stealt, sikeres volt-e, ki kapta a kártyát. Player oldalon a stealer P5-ön látja a saját eredményét.
+
+### S23 — Reveal-show (animáció / hangeffekt / haptika) · P2 · F2.2
+
+> Alap (PLAN.md 2. szakasz + DESIGN 6.5): F1 reveal = egyszerű flip; F2 hozza a látványos reveal-show-t. Komponens: `RevealCard variant='show'` már tervezve (DESIGN 5.1), F1-ben csak a `simple` variáns aktív.
+
+- **AC23.1 (host — animáció + hang)** A **host képernyőn** (H5) a reveal `variant='show'`: az albumborító látványos animációval (pl. flip + skálázás/„pop”), **és hangeffekt** kíséri a helyes/hibás kimenetet (külön hang sikerre és kudarcra). A hang a host eszközön szól (a host a közös hang-forrás, DESIGN 4.4).
+- **AC23.2 (player — csak haptika)** A **player telefonon** (P5) a visszajelzés **haptikus** (vibráció), a DESIGN 4.3 szerint: **siker = rövid dupla** rezgés, **kudarc = egy hosszú** rezgés. A telefon **nem** játszik le hangeffektet (a hang a hoston szól — DESIGN 4.4), és nem futtat host-szintű animációt.
+- **AC23.3 (Vibration API feltételes)** A vibráció a `navigator.vibrate` API-n keresztül, **feature-detection-nel**: ahol nem támogatott (pl. iOS Safari) vagy a felhasználó letiltotta, a hiánya **nem** okoz hibát; a vizuális P5 visszajelzés (ikon + szöveg) mindig megjelenik fallbackként.
+- **AC23.4 (`prefers-reduced-motion`)** Ha a felhasználó `prefers-reduced-motion`-t jelez, a host reveal-show **visszafogott**: pörgés/flip/„pop”/konfetti kikapcsol, marad egy egyszerű **cross-fade** (DESIGN 6.5). A hangeffekt megmaradhat (a reduced-motion a mozgásra vonatkozik), de a vibráció a reduced-motion beállítást is tiszteletben tartja. *(Megerősítendő: reduced-motion mellett a hang is halkuljon/maradjon-e el — lásd F2-Q7.)*
+- **AC23.5 (időzítés nem lassít)** A reveal-show **nem** nyújtja meg a kör-ciklust az F1-hez képest érzékelhetően: a `next_turn` továbbra is a reveal után ~5 mp-cel indul (PLAN.md Realtime folyam); a show ezen belül fér el.
+- **AC23.6 (nincs anti-leak sérülés)** A reveal-show a kártya adatait csak a reveal fázisban jeleníti meg; a hang/animáció előtöltése sem szivárogtathatja ki a kártya kilétét a reveal előtt (pl. a hangeffekt generikus, nem a számhoz kötött).
+
+### S24 — Vitagomb (kör-érvénytelenítés) · P2 · F2.2
+
+> Alap (PLAN.md 2. szakasz): a reveal képernyőn „Rossz az évszám!” gomb → a host érvénytelenítheti a kört; a kártya **kikerül a pakliból**, **senki nem veszít semmit**.
+
+- **AC24.1 (ki nyomhatja)** A vitagombot **kizárólag a host** nyomhatja meg, a **host reveal képernyőjén** (H5). A player klienseken nincs vitagomb.
+- **AC24.2 (időablak)** A vitagomb **csak a `reveal` fázisban** aktív, a `next_turn` **előtt** (azaz a reveal utáni ~5 mp-es auto-tovább ablakban, PLAN.md Realtime folyam). A `next_turn` megtörténte után a kör már nem érvényteleníthető. *(Megerősítendő: az érvénytelenítés meghosszabbítsa-e / megállítsa-e az 5 mp-es auto-tovább visszaszámlálót, hogy a hostnak legyen ideje dönteni — lásd F2-Q8.)*
+- **AC24.3 (hatás — kártya kikerül)** Érvénytelenítéskor a kör kártyája **kikerül a pakliból** (nem húzható újra ebben a partiban), és **semmilyen állapotváltozás nem marad**: a soron lévő idővonala **nem** kap kártyát, a stealek **nem** dőlnek el, a bemondás-token **nem** kerül jóváírásra — mintha a kör meg sem történt volna.
+- **AC24.4 (token-semlegesség)** Érvénytelenítéskor **minden elköltött token visszajár**: a steal-fogadásokra levont tokenek visszaíródnak, a szám-átugrásra/azonnali-kártyára költött tokenek is (ha a körben volt ilyen). Nettó token-változás a körből: **0** minden játékosnál (PLAN.md: „senki nem veszít semmit”).
+- **AC24.5 (a kör után)** Érvénytelenítés után a **következő** kör indul: a rendszer **új kártyát** húz, és **ugyanaz a játékos** jön újra (mivel az ő köre érvénytelenült, nem kapott kártyát). *(Megerősítendő: ugyanaz a játékos ismételjen-e, vagy lépjünk a következőre — a „senki nem veszít semmit” a PM-értelmezés szerint az ismétlést támogatja, de tisztázandó — lásd F2-Q8.)*
+- **AC24.6 (szerveroldali, atomikus)** Az érvénytelenítést Edge Function hajtja végre, atomikusan (token-visszaírás + kártya-kivétel + fázisléptetés egy tranzakcióban). A host kliens csak jelzést küld, nem ír közvetlenül.
+- **AC24.7 (visszajelzés)** Érvénytelenítéskor minden kliensen egyértelmű jelzés jelenik meg (pl. „A hostt érvénytelenítette a kört — rossz évszám”), hogy a társaság értse, miért nem épült be a kártya.
+
+### S25 — Auto-skip (lecsatlakozott soron lévő) · P1 · F2.2
+
+> Alap (PLAN.md 5. szakasz, Hibatűrés): „Játékos lecsatlakozik: presence jelzi; köre **max 1× kihagyható**, utána auto-skip; visszatérve folytatja.” Az F1 D6 (időlimit-lejárat = kártya elveszik) ehhez kapcsolódik, de nem ugyanaz — lásd AC25.5 az F2-új-elemről.
+
+- **AC25.1 (lecsatlakozás definíciója)** Egy játékos **„lecsatlakozott”**, ha a Supabase Realtime **presence** timeoutja lejár rá: a `players.connected = false`-ra vált, miután a presence heartbeat **N mp-ig** kimarad. *(Az N pontos értéke — pl. 10–15 mp — a Realtime presence timeout-hangolásától függ, Architect-döntés; a PM-javaslat 15 mp, hogy egy rövid alagút/képernyőzár ne triggereljen skip-et — lásd F2-Q9.)*
+- **AC25.2 (a köre lejár, nem ő maga esik ki)** Ha a lecsatlakozott játékosra **rákerül a sor**, és a `placing_deadline`-ig (időlimit, alap 90 mp, D6/A2) **nem reagál** (nem rak le), a köre a D6 szerint lezárul: **a kártya elveszik** (rossz tipp), és a rendszer a **következő** játékosra lép. A lecsatlakozott játékos **bent marad** a játékban (nem törlődik), az idővonala megmarad.
+- **AC25.3 („max 1× kihagyható” — pontos jelentés)** Egy lecsatlakozott játékos köre így **legfeljebb egyszer** hagyható ki a **teljes körfordulóban** *timeout-tal*: ha a **következő** ráeső körre is offline és megint nem reagál, a rendszer **rövidített auto-skippel** (nem várja ki a teljes 90 mp-et) lépteti tovább, hogy a parti ne akadjon 90 mp-ekre offline játékosnál. *(A „max 1×” pontos szemantikája — körfordulónként 1 teljes-timeout, utána rövidített skip; vagy összesen 1 kihagyás, utána a játékos „passzívvá” válik — a PLAN.md nem részletezi, ezért F2-Q10.)*
+- **AC25.4 (visszatérés)** Ha a lecsatlakozott játékos **visszatér** (reconnect, S15/D-alap: localStorage identitás), a `connected = true` visszaáll, és a **következő** ráeső körben normál módon (teljes időlimittel) játszik tovább. A visszatérés a „max 1×” számlálót **nullázza**.
+- **AC25.5 (mi az ÚJ F2-elem az F1-hez képest)** **F1-ben már megvan** (D6): ha a soron lévő nem rak le a deadline-ig, a kártya elveszik és a kör tovább lép — ez **időlimit-alapú**, nem presence-alapú, és nem „preventív”. **Az F2 új eleme (S25):** a rendszer **presence-alapon proaktívan** felismeri, hogy a soron lévő **offline**, és (a) a host/player UI **jelzi** („⚠ offline — várunk rá / kihagyjuk”), (b) a **második** egymást követő offline-körnél **rövidített** auto-skippel gyorsít (nem kell kivárni a teljes 90 mp-et), (c) a „max 1×” számlálót vezeti. Vagyis F1 = passzív időlimit-lejárat; **F2 = aktív, presence-vezérelt, gyorsított kihagyás offline soron lévőre.**
+- **AC25.6 (host-lecsatlakozás külön eset)** Az S25 a **játékos** auto-skipjéről szól. A **host** lecsatlakozása változatlanul a PLAN.md/DESIGN 4.3 szerinti **PAUSE + 2 perc türelmi idő** (nem auto-skip) — ez nem része az S25-nek, itt csak a határ tisztázása kedvéért említve.
+- **AC25.7 (szerveroldali léptetés)** Az auto-skip fázisléptetést Edge Function hajtja (a `placing_deadline` szerver-validált, A2); a kliens presence-jelzése inputot ad, de a skip-döntést a szerver hozza (nem bízik egyetlen kliens jelzésében sem).
+
+---
+
 ## 6. Success metrics
 
 A projekt hobbi/baráti, ezért a metrikák **kvalitatívak és megfigyelés-alapúak**, nem üzleti KPI-k. Fő mérce: *egy társaság gond nélkül végigjátszik egy jó hangulatú partit.*
@@ -240,6 +356,21 @@ Az alábbiakat a PLAN.md nem dönti el egyértelműen; nem találgatok, hanem a 
 - **KÉRDÉS A TULAJHOZ (Q5):** A Start gomb aktiválásához szükséges **min. 2 játékos**-ba a host (ha ő is játszik) beleszámít-e? És kötelező-e a hostnak játszania, vagy lehet „csak host" (dedikált képernyő)?
 - **KÉRDÉS A TULAJHOZ (Q6):** Az időlimit **lejáratakor** mi a default viselkedés, ha a soron lévő játékos még nem választott rést? (Pl. automatikus „legrosszabb" pozíció / kör kihagyása / a legutóbb hover-elt rés.) Ez befolyásolja az AC9.2-t.
 - **KÉRDÉS A TULAJHOZ (Q7):** Az „Anti-leak" ingyenes módban a PLAN.md szerint **opaque proxy-URL**-t igényel (Edge Function streameli a preview-t). Ez az MVP-be tartozzon-e teljes formájában, vagy F1-ben elég egy egyszerűbb megoldás (pl. a preview URL csak a host-kliensnek kerül átadásra, RLS-sel védve), és a teljes proxy F2? (Kihat az S8/AC8.3 komplexitására és a 0 Ft költség-célra, mert a proxy-forgalom sávszélt/Edge-hívást fogyaszt.)
+
+### F2-specifikus nyitott kérdések (a 5b. szakasz AC-jeihez)
+
+> Ezek az F2 tervezését finomítják; egyik sem blokkolja az F2.1 indulását, de a jelölt AC-k véglegesítéséhez kellenek. A PLAN.md 2. szakasza a szabályok alapját megadja, de az alábbi részleteket nem dönti el egyértelműen.
+
+- **KÉRDÉS A TULAJHOZ (F2-Q1):** Bemondásnál, ha **csak az egyik** (cím VAGY előadó) helyes — legyen-e **részjutalom** (pl. +0 token, de „félsiker" jelzés, vagy akár +1 csak az egyik helyeséért), vagy marad a jelenlegi „mindkettő kell, különben 0 token" (AC21.3)? A PLAN.md a „tudja az előadót ÉS a címet" megfogalmazást használja → alapból mindkettő kell.
+- **KÉRDÉS A TULAJHOZ (F2-Q2):** A fuzzy matching **0.85-ös hasonlósági küszöbe** (AC21.4) jó kiindulás-e, vagy szigorúbb/lazább legyen? És a több-előadós számoknál (AC21.5) a **„fő előadó"** az első listázott legyen, vagy bármelyik közreműködő elfogadható? (Ezt érdemes az F0-mintán / valós teszt-playlisteken hangolni.)
+- **KÉRDÉS A TULAJHOZ (F2-Q3):** A **szám átugrása** (1 token, AC20.5) után a **steal-ablak** vonatkozik-e az új, húzott kártyára is, és **korlátozzuk-e**, hányszor lehet egy körön belül átugrani (pl. max 1×), hogy egy sok tokenes játékos ne „ugráljon" a jó kártyáig?
+- **KÉRDÉS A TULAJHOZ (F2-Q4):** Az **azonnali +1 kártya** (3 token, AC20.6) pontosan **mikor** hívható — csak a saját kör elején, vagy más köre alatt / bármikor? És **külön körnek** számít-e (megszakítja-e a normál körsorrendet), vagy csak a saját idővonalat bővíti a soron kívül?
+- **KÉRDÉS A TULAJHOZ (F2-Q5):** Steal-nél (a) engedjünk-e **több párhuzamos steal-t egy játékostól** egy körben (több token = több fogadás), vagy marad az **egy/kör** (AC22.5)? (b) Több sikeres stealernél (AC22.8) a **kártyát nem nyerő, de helyesen jelölő** stealer **visszakapja-e a tokenjét** (PM-javaslat: igen, „igaza volt"), vagy elveszik?
+- **KÉRDÉS A TULAJHOZ (F2-Q6):** Megerősíted-e, hogy F2-től a kifogyó-pakli döntetlen tie-breakje **több token** legyen (AC20.9), felülírva az F1 D3 megosztott-győzelmét (token-egyenlőségnél marad a megosztott győzelem)?
+- **KÉRDÉS A TULAJHOZ (F2-Q7):** A reveal-show `prefers-reduced-motion` esetén (AC23.4): a **hangeffekt** is halkuljon/maradjon el, vagy a reduced-motion csak a **mozgásra** vonatkozzon (a hang megmaradjon)?
+- **KÉRDÉS A TULAJHOZ (F2-Q8):** A **vitagomb** (S24): (a) az érvénytelenítés **megállítsa/hosszabbítsa-e** az 5 mp-es auto-tovább visszaszámlálót, hogy a hostnak legyen ideje dönteni (AC24.2)? (b) Érvénytelenítés után **ugyanaz a játékos ismételjen** új kártyával, vagy lépjünk a következőre (AC24.5 — PM-javaslat: ugyanaz ismételjen, mert „senki nem veszít semmit")?
+- **KÉRDÉS A TULAJHOZ (F2-Q9):** A **presence timeout** (AC25.1), ami után egy játékos „lecsatlakozottnak" számít — **hány mp** legyen? (PM-javaslat: ~15 mp, hogy egy rövid alagút/képernyőzár ne triggereljen skip-et; ez részben Architect-hangolás.)
+- **KÉRDÉS A TULAJHOZ (F2-Q10):** A **„max 1× kihagyható"** (AC25.3) pontos szemantikája: **körfordulónként** 1 teljes-timeout, utána rövidített auto-skip; **vagy** összesen 1 kihagyás, utána a játékos „passzívvá" válik a visszatéréséig? A PLAN.md csak annyit ír, „max 1× kihagyható, utána auto-skip".
 
 ---
 

@@ -11,11 +11,12 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import clsx from "clsx";
-import type { PlayerColorId, TimelineCardPublic } from "@/lib/game/types";
+import type { NameGuessInput, PlayerColorId, TimelineCardPublic } from "@/lib/game/types";
 import { playerColorValue } from "@/lib/game/colors";
 import { MysteryCard } from "./MysteryCard";
 import { Timeline } from "./Timeline";
 import { CountdownTimer } from "./CountdownTimer";
+import { GuessInput } from "./GuessInput";
 import { AppButton } from "../system/AppButton";
 
 export interface TippingScreenProps {
@@ -25,7 +26,8 @@ export interface TippingScreenProps {
   timeLimitSec?: number;
   /** Szerver oldali abszolút deadline (round.placingDeadline) — ha van, ez az irányadó. */
   deadlineIso?: string | null;
-  onConfirm: (slotIndex: number) => void;
+  /** F2 (S21) — a lerakással EGYÜTT küldött opcionális bemondás; a szülő olvassa ki a LERAKOM-nál. */
+  onConfirm: (slotIndex: number, nameGuess?: NameGuessInput | null) => void;
   onExpire: () => void;
 }
 
@@ -44,6 +46,7 @@ export function TippingScreen({
 }: TippingScreenProps) {
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const [expired, setExpired] = useState(false);
+  const [nameGuess, setNameGuess] = useState<NameGuessInput | null>(null);
 
   // Aktivációs késleltetés/távolság (DESIGN 4.1a): a drag csak akkor induljon, ha az ujj
   // elmozdul, hogy a görgetés (pan) ne keveredjen a húzással.
@@ -100,6 +103,8 @@ export function TippingScreen({
               onTapSelectSlot={setSelectedSlot}
             />
           </div>
+
+          <GuessInput value={nameGuess} onChange={setNameGuess} disabled={expired} />
         </div>
       </DndContext>
 
@@ -108,7 +113,7 @@ export function TippingScreen({
           size="lg"
           fullWidth
           disabled={selectedSlot === null}
-          onClick={() => selectedSlot !== null && onConfirm(selectedSlot)}
+          onClick={() => selectedSlot !== null && onConfirm(selectedSlot, nameGuess)}
         >
           {selectedSlot === null ? "Húzd egy résbe" : "LERAKOM ✓"}
         </AppButton>

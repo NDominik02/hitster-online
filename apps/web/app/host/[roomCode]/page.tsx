@@ -14,6 +14,7 @@ import { RevealCard } from "@/components/game/RevealCard";
 import { OutcomeBanner } from "@/components/game/OutcomeBanner";
 import { PlayerBadge } from "@/components/lobby/PlayerBadge";
 import { TimelineCard } from "@/components/game/TimelineCard";
+import { CountdownTimer } from "@/components/game/CountdownTimer";
 import { ConnectionOverlay } from "@/components/system/ConnectionOverlay";
 import { ensureAnonymousSession } from "@/lib/supabase/client";
 import {
@@ -21,6 +22,9 @@ import {
   startGame,
   drawCard,
   resolveRound,
+  disputeRound,
+  overrideGuess,
+  setPresence,
   nextTurn,
   fetchPlayers,
   fetchRoundPublic,
@@ -55,6 +59,40 @@ export default function HostRoomPage() {
   const [audioLocked, setAudioLocked] = useState(false);
   const [dragGhostIndex, setDragGhostIndex] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // F2 (S22, ARCHITECTURE 11.8) — élő steal-számláló a `steal_registered` broadcastból
+  // (H5 mintájára, D8: a host lát élő tükrözést, a payload csak darabszám, anti-leak).
+  const [stealCount, setStealCount] = useState(0);
+
+  // F2-D12 (2026-07-04, ÚJRATERVEZVE — ld. supabase/functions/dispute_round/index.ts jsdoc): a
+  // vitagomb már NEM nukolja a kört és NEM lép tovább automatikusan — a host beírja a szám
+  // tényleges évét, a szerver újraértékeli ez ellen a kört (kié legyen a kártya), és a kör MARAD
+  // reveal fázisban, a host a megszokott "Következő kör" gombbal halad tovább. `disputeOpen` az
+  // évszám-beviteli mező nyitva van-e; `disputeSaving` a hívás alatt tiltja a gombot.
+  const [disputeOpen, setDisputeOpen] = useState(false);
+  const [disputeYearInput, setDisputeYearInput] = useState("");
+  const [disputeSaving, setDisputeSaving] = useState(false);
+
+  // A tulaj kérésére: a bemondás automatikus talált/nem-talált eredménye a vitagomb mellett,
+  // külön is felülbírálható (a csapat közösen dönthet úgy, hogy a beírt cím/előadó elfogadható,
+  // vagy éppen visszavonandó) — a kör egészét (évszám/lerakás) ez nem érinti.
+  const [guessOverrideSaving, setGuessOverrideSaving] = useState(false);
+
+  // F2 (S25, AC25.5) — "Anna kimaradt, mert lecsatlakozott" toast a turn_auto_skipped eventből.
+  const [autoSkipNames, setAutoSkipNames] = useState<string[] | null>(null);
+
+  // F2 (S25, F2-D9/F2-D10) — presence-alapú auto-skip bekötése. A `players` state-et ref-ben is
+  // tartjuk (a setInterval closure elavulna a puszta state-re hivatkozva — ugyanaz a minta, mint
+  // a korábbi stale-closure javításoknál). A `presentIdsRef` a legutóbbi Realtime Presence
+  // pillanatképet tárolja, a `missingSinceRef` pedig azt, mióta hiányzik folyamatosan egy adott
+  // játékos — csak a 15 mp-es küszöb (F2-D9) átlépésekor hívjuk a `set_presence`-t, hogy egy
+  // pillanatnyi hálózati akadozás ne jelezzen azonnal lecsatlakozást.
+  const playersRef = useRef<Player[]>([]);
+  useEffect(() => {
+    playersRef.current = players;
+  }, [players]);
+  const presentIdsRef = useRef<Set<string>>(new Set());
+  const missingSinceRef = useRef<Map<string, number>>(new Map());
 
   // A QR-kódhoz a valódi, kliensről elérhető origin kell — window.location.origin
   // félrevezető, ha a host localhost-on nyitja meg (a telefonon scannelve a
@@ -141,6 +179,9 @@ export default function HostRoomPage() {
         if (rid) await refreshRound(rid);
         else if (round) await refreshRound(round.id);
         setDragGhostIndex(null);
+        setStealCount(0);
+        setDisputeOpen(false);
+        setDisputeYearInput("");
       } else if (event === "card_placed") {
         // Defensive: elsődlegesen a broadcast payload roundId-jét használjuk, ne a
         // closure-ből olvasott `round` state-et (lásd useRoomChannel stale closure fix).
@@ -158,6 +199,20 @@ export default function HostRoomPage() {
         const ids = (payload as { winnerPlayerIds?: string[] })?.winnerPlayerIds ?? [];
         setWinnerPlayerIds(ids);
         await refreshTimelines(roomId);
+      } else if (event === "steal_registered") {
+        const count = (payload as { stealCount?: number })?.stealCount;
+        if (typeof count === "number") setStealCount(count);
+      } else if (event === "round_disputed") {
+        // F2-D12: a kör NEM vált, csak az évszám/kimenet frissül ugyanazon a körön — pontosan
+        // úgy frissítünk, mint a round_revealed-nél (round + timeline-ok, a kártya új helye miatt).
+        const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
+        if (rid) await refreshRound(rid);
+        await refreshTimelines(roomId);
+      } else if (event === "turn_auto_skipped") {
+        const skipped = (payload as { skipped?: string[] })?.skipped ?? [];
+        if (skipped.length > 0) {
+          setAutoSkipNames(skipped.map((id) => players.find((p) => p.id === id)?.name ?? "Valaki"));
+        }
       }
     },
     onDragUpdate: (payload) => {
@@ -165,7 +220,61 @@ export default function HostRoomPage() {
         setDragGhostIndex(payload.slotIndex);
       }
     },
+    onPresenceChange: (state) => {
+      // BUGFIX: a Supabase Realtime Presence a channel() saját, VÉLETLEN kapcsolat-kulcsaival
+      // csoportosít (`presenceState()` felső szintű kulcsai NEM a track()-nek átadott `key`
+      // mezőt használják, hacsak a csatorna létrehozásakor explicit `config.presence.key`-t nem
+      // adunk meg — ezt a useRoomChannel jelenleg nem teszi). A korábbi implementáció
+      // `Object.keys(state)`-et nézte, ami ezért SOHA nem egyezett egyetlen player.id-vel sem —
+      // minden játékos mindig "hiányzónak" tűnt, 15 mp múlva mindenkit lecsatlakozottnak
+      // jelentett (ez okozta az élesben látott hamis "mindenki offline → szünetel" leállást).
+      // A helyes megoldás: a track()-kel elküldött payload (benne a `key: presenceKey` mezővel)
+      // a presence ÉRTÉKEK között van, nem a kulcsok között — azokat kell kiolvasni.
+      const ids = new Set<string>();
+      for (const entries of Object.values(state)) {
+        for (const entry of entries as Array<{ key?: string }>) {
+          if (entry?.key && entry.key !== "host") ids.add(entry.key);
+        }
+      }
+      presentIdsRef.current = ids;
+    },
   });
+
+  // F2 (S25, F2-D9/F2-D10) — periodikus ellenőrzés: ha egy regisztrált játékos folyamatosan
+  // hiányzik a Presence-ből legalább 15 mp-ig, a host jelenti a szervernek (set_presence,
+  // connected:false) — a next_turn ez alapján ugorja át automatikusan a köreit (a szerver,
+  // nem egyetlen kliens pillanatnyi jelzése dönt, AC25.7). Visszatéréskor connected:true.
+  useEffect(() => {
+    if (!roomId) return;
+    const CHECK_INTERVAL_MS = 5000;
+    const DISCONNECT_THRESHOLD_MS = 15000;
+
+    const interval = setInterval(() => {
+      const present = presentIdsRef.current;
+      const now = Date.now();
+      for (const p of playersRef.current) {
+        if (present.has(p.id)) {
+          missingSinceRef.current.delete(p.id);
+          if (p.connected === false) {
+            setPresence(roomId, p.id, true)
+              .then(() => refreshPlayers(roomId))
+              .catch(() => {});
+          }
+          continue;
+        }
+        const missingSince = missingSinceRef.current.get(p.id);
+        if (missingSince === undefined) {
+          missingSinceRef.current.set(p.id, now);
+        } else if (now - missingSince >= DISCONNECT_THRESHOLD_MS && p.connected !== false) {
+          setPresence(roomId, p.id, false)
+            .then(() => refreshPlayers(roomId))
+            .catch(() => {});
+        }
+      }
+    }, CHECK_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [roomId, refreshPlayers]);
 
   async function handleStart() {
     if (!roomId) return;
@@ -200,9 +309,61 @@ export default function HostRoomPage() {
       await resolveRound(round.id);
       await refreshRound(round.id);
       await refreshTimelines(roomId!);
+      // F2 (ARCHITECTURE 11.8): a steal-ablak lezárásának jelzése — a round_revealed a
+      // meglévő F1 refetch-triggert adja, a steal_window_closed a jövőbeli finomabb
+      // steal-specifikus UI-reakciókhoz (jelenleg a kliensek a round_revealed-re is
+      // ugyanúgy refetchelnek, tehát ez ma redundáns, de a szerződést előkészíti).
       await broadcastEvent("round_revealed", { roundId: round.id });
+      await broadcastEvent("steal_window_closed", { roundId: round.id });
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Nem sikerült kiértékelni a kört.");
+    }
+  }
+
+  /**
+   * F2-D12 (2026-07-04) — a host beírja a szám tényleges évét, a szerver újraértékeli ez ellen
+   * a kört (kié legyen a kártya), a kör MARAD reveal fázisban. A "Következő kör" gomb ezután a
+   * megszokott úton (handleNextTurn/beginRound) lép tovább — nincs itt semmilyen auto-advance.
+   */
+  async function handleDisputeSubmit() {
+    if (!round) return;
+    const year = Number.parseInt(disputeYearInput, 10);
+    if (!Number.isFinite(year)) {
+      setLoadError("Adj meg egy érvényes évszámot.");
+      return;
+    }
+    setDisputeSaving(true);
+    try {
+      await disputeRound(round.id, year);
+      await refreshRound(round.id);
+      await refreshTimelines(roomId!);
+      await broadcastEvent("round_disputed", { roundId: round.id });
+      setDisputeOpen(false);
+      setDisputeYearInput("");
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Nem sikerült javítani az évszámot.");
+    } finally {
+      setDisputeSaving(false);
+    }
+  }
+
+  /**
+   * A tulaj kérésére: a bemondás elismerésének manuális felülbírálása, a vitagomb mellett, attól
+   * függetlenül. Ugyanabban az ablakban hívható (reveal fázis, next_turn előtt). A szerver a
+   * token-egyenleget is módosítja a váltásnak megfelelően (idempotens, ha már a kért állapotban
+   * van — nincs dupla token-jóváírás/-levonás, ha véletlenül kétszer kattintanak ugyanarra).
+   */
+  async function handleOverrideGuess(correct: boolean) {
+    if (!round) return;
+    setGuessOverrideSaving(true);
+    try {
+      await overrideGuess(round.id, correct);
+      await refreshRound(round.id);
+      await refreshPlayers(roomId!);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Nem sikerült módosítani a bemondás eredményét.");
+    } finally {
+      setGuessOverrideSaving(false);
     }
   }
 
@@ -215,7 +376,20 @@ export default function HostRoomPage() {
         setWinnerPlayerIds(res.winnerPlayerIds);
         await refreshTimelines(roomId);
         await broadcastEvent("game_finished", { winnerPlayerIds: res.winnerPlayerIds });
+      } else if (res.next === "paused") {
+        // F2-D10: mindenki offline-nak tűnt a szerver szerint — a szoba szünetel, amíg valaki
+        // vissza nem tér (vagy a host újra nem próbálja, miután a jelenlét-figyelés frissült).
+        // A backend-javítás óta (2026-07-03) ez a state ÚJRAPRÓBÁLHATÓ, nem zsákutca.
+        setRoomStatus("paused");
       } else {
+        // F2 (S25, AC25.5) — ha a szerver átugrott lecsatlakozott játékosokat, jelezzük
+        // közvetlenül itt is (a broadcast a saját magunknak küldött eseményt jellemzően nem
+        // adja vissza), hogy a host maga is lássa a toast-ot, nem csak a többi kliens.
+        if (res.skipped && res.skipped.length > 0) {
+          const names = res.skipped.map((id) => playersRef.current.find((p) => p.id === id)?.name ?? "Valaki");
+          setAutoSkipNames(names);
+          await broadcastEvent("turn_auto_skipped", { skipped: res.skipped });
+        }
         await broadcastEvent("turn_advanced", { roundId: res.roundId });
         setAudioUrl(null);
         setDragGhostIndex(null);
@@ -335,15 +509,52 @@ export default function HostRoomPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, roundIdForHostPolling, roundPhaseForHostPolling]);
 
-  // Amikor a lerakás megtörtént (placement !== null) reveal előtt, azonnal kiértékelünk —
-  // nem kell megvárni a deadline-t (D6: "ha van épp kijelölt rés, az számít lerakásnak").
+  // F1: amikor a lerakás megtörtént (placement !== null) `playing` fázisban, azonnal
+  // kiértékelünk — nem kell megvárni a deadline-t (D6: "ha van épp kijelölt rés, az számít
+  // lerakásnak"). EZ CSAK a `playing` fázisra vonatkozik (a `place_card` már `stealing`-re
+  // állítja a fázist a UPDATE-ben, tehát ez az ág valójában sosem futna `stealing`-nél —
+  // a régi kód mégis explicit belevette a `stealing`-et is a feltételbe, ami az F1 "0 mp
+  // pass-through" mintát tükrözte).
+  //
+  // F2-VÁLTÁS (ARCHITECTURE 11.3.2, KRITIKUS): a `stealing` fázis F2-ben TÉNYLEGESEN 15 mp-ig
+  // tart — a lerakás UTÁN nem szabad azonnal resolve-olni, a steal-ablaknak valóban nyitva
+  // kell maradnia, amíg a `steal_deadline` le nem jár. Ezt egy KÜLÖN effekt kezeli lent
+  // ("F2 — steal-ablak deadline figyelése"), ami a `round.stealDeadline`-ra vár.
+  //
+  // Visszafelé-kompatibilitás: amíg a Backend `place_card`-ja nem ír `steal_deadline`-t (a
+  // jelenlegi, 2026-07-03-i élő Function még nem — ld. functions.ts placeCard jsdoc), a
+  // `round.stealDeadline` mindig null lesz. Ilyenkor ez az ág az F1-es azonnali resolve-ot
+  // futtatja `stealing` fázisban IS (a régi mintát megtartva), hogy a UI ne ragadjon be egy
+  // sosem-lejáró ablakban. Amint a Backend bővíti a `place_card`-ot és tényleges
+  // `steal_deadline`-t kezd írni, ez az ág automatikusan átadja a vezérlést a lenti F2 effektnek.
   useEffect(() => {
-    if (round && round.placement !== null && (round.phase === "playing" || round.phase === "stealing")) {
+    if (!round || round.placement === null) return;
+    if (round.phase === "playing") {
+      const t = setTimeout(() => handleResolve(), 0);
+      return () => clearTimeout(t);
+    }
+    if (round.phase === "stealing" && !round.stealDeadline) {
+      // Backend még nem F2-kompatibilis (nincs steal_deadline) — F1-fallback: azonnali resolve.
       const t = setTimeout(() => handleResolve(), 0);
       return () => clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [round?.placement, round?.phase]);
+  }, [round?.placement, round?.phase, round?.stealDeadline]);
+
+  // F2 — steal-ablak deadline figyelése (ARCHITECTURE 11.3.2/11.7): amíg a `stealing` fázis
+  // aktív ÉS van valós `steal_deadline`, a host megvárja a lejáratot, mielőtt resolve-ol —
+  // ezalatt a `steal_registered` broadcastok élőben növelik a `stealCount`-ot (fent). A
+  // pg_cron biztonsági háló (BACKEND-NOTES 9., ARCHITECTURE 11.7) ugyanígy lezárná, ha a host
+  // tabja közben eltűnne — ez a kliensoldali timer csak UX-gyorsítás, nem biztonsági kérdés
+  // (a resolve_round maga ellenőrzi szerveroldalon, hogy a steal_deadline tényleg lejárt-e).
+  useEffect(() => {
+    if (!round || round.phase !== "stealing" || !round.stealDeadline) return;
+    const deadline = new Date(round.stealDeadline).getTime();
+    const msLeft = Math.max(0, deadline - Date.now());
+    const t = setTimeout(() => handleResolve(), msLeft + 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round?.id, round?.phase, round?.stealDeadline]);
 
   // Audio elindítása amikor új audioUrl érkezik.
   //
@@ -456,22 +667,64 @@ export default function HostRoomPage() {
           </section>
         )}
 
+        {autoSkipNames && autoSkipNames.length > 0 && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="bg-warning/10 border border-warning text-warning text-sm rounded-[var(--radius-card)] px-4 py-3 flex items-center justify-between gap-3"
+          >
+            <span>⚠ {autoSkipNames.join(", ")} kimaradt, mert lecsatlakozott</span>
+            <button
+              type="button"
+              onClick={() => setAutoSkipNames(null)}
+              className="text-warning/80 hover:text-warning font-bold px-2"
+              aria-label="Bezár"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {roomStatus === "playing" && round && !(round.phase === "reveal" && round.revealedCard) && (
           <section className="space-y-8">
             <div className="flex justify-between text-text-muted text-sm">
-              <span>🔊 Most szól…</span>
+              <span>{round.phase === "stealing" ? "🕵️ Lopás folyamatban…" : "🔊 Most szól…"}</span>
               <span>Kör {round.roundNo}</span>
             </div>
 
-            <div className="flex flex-col items-center gap-6">
-              <MysteryCard spinning size="lg" />
-              <AudioProgressBar current={0} duration={30} playing={Boolean(audioUrl) && !audioLocked} />
-            </div>
+            {round.phase === "stealing" ? (
+              // F2 (S22, ARCHITECTURE 11.3.2/11.8) — a lerakás megtörtént, a 15 mp-es
+              // steal-ablak fut. A host élőben mutatja, hányan próbálnak lopni (darabszám
+              // csak, anti-leak — 11.9/5.) és a visszaszámlálót a szerver steal_deadline-jából.
+              <div className="flex flex-col items-center gap-4">
+                {round.stealDeadline ? (
+                  <CountdownTimer deadlineIso={round.stealDeadline} size="lg" warningAt={5} />
+                ) : (
+                  <p className="text-text-muted text-sm">«kiértékelés…»</p>
+                )}
+                <p className="text-lg">
+                  {stealCount > 0 ? `🕵️ ${stealCount} játékos próbál lopni…` : "Bárki ellophatja 1 tokenért…"}
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-6">
+                <MysteryCard spinning size="lg" />
+                <AudioProgressBar current={0} duration={30} playing={Boolean(audioUrl) && !audioLocked} />
+              </div>
+            )}
 
             {activePlayer && (
               <div className="bg-surface-2 rounded-[var(--radius-card)] px-6 py-4 text-center">
-                <PlayerBadge name={activePlayer.name} color={activePlayer.color} state="active" size="lg" />
-                <p className="text-text-muted mt-2">«húzza a kártyát…»</p>
+                <PlayerBadge
+                  name={activePlayer.name}
+                  color={activePlayer.color}
+                  state="active"
+                  size="lg"
+                  tokens={activePlayer.tokens}
+                />
+                <p className="text-text-muted mt-2">
+                  {round.phase === "stealing" ? "«lerakta a kártyát»" : "«húzza a kártyát…»"}
+                </p>
               </div>
             )}
 
@@ -519,10 +772,115 @@ export default function HostRoomPage() {
               outcome={round.outcome === "timeout" ? "timeout" : round.outcome === "correct" ? "correct" : "wrong"}
               playerName={activePlayer?.name}
             />
+
+            {/* F2 (S21/S22, AC21.8/AC22.11, ARCHITECTURE 11.5) — bemondás/steal publikus eredmény.
+                Hiányzik (undefined), amíg a Backend nem bővíti a resolve_round-ot (11.6.3) —
+                ilyenkor ez az egész blokk egyszerűen nem renderel semmit. */}
+            {(() => {
+              const guess = round.revealedCard?.guess;
+              const steals = round.revealedCard?.steals ?? [];
+              if (!guess && steals.length === 0) return null;
+              return (
+                <div className="text-center space-y-1 text-sm">
+                  {guess && (
+                    <div className="flex flex-col items-center gap-1">
+                      <p className={guess.correct ? "text-success" : "text-text-muted"}>
+                        🎤 {players.find((p) => p.id === guess.byPlayerId)?.name ?? "Valaki"} bemondása{" "}
+                        {guess.correct ? "talált (+1 🪙)" : "nem talált"}
+                      </p>
+                      {/* A tulaj kérésére: a bemondás elismerése a vitagombtól függetlenül is
+                          felülbírálható, ha közösen úgy döntötök, hogy a beírtat elfogadjátok
+                          (vagy visszavonjátok) — ez a döntés függetlenül él az évszám-javítástól. */}
+                      <button
+                        type="button"
+                        className="text-xs text-text-muted underline hover:text-text disabled:opacity-50"
+                        disabled={guessOverrideSaving}
+                        onClick={() => handleOverrideGuess(!guess.correct)}
+                      >
+                        {guessOverrideSaving
+                          ? "Mentés…"
+                          : guess.correct
+                            ? "Mégsem talált (−1 🪙)"
+                            : "Elfogadjuk, mégis talált (+1 🪙)"}
+                      </button>
+                    </div>
+                  )}
+                  {steals.map((s) => (
+                    <p key={s.playerId} className={s.won ? "text-success" : "text-text-muted"}>
+                      🕵️ {players.find((p) => p.id === s.playerId)?.name ?? "Valaki"}{" "}
+                      {s.won ? "sikeresen ellopta a kártyát!" : s.correct ? "jól jelölt, de nem ő nyert" : "nem talált"}
+                    </p>
+                  ))}
+                </div>
+              );
+            })()}
+
             <p className="text-text-muted text-sm" aria-live="polite">
-              «következő kör 5 mp múlva…»
+              «következő kör…»
             </p>
-            <AppButton onClick={handleNextTurn}>Következő kör ▶</AppButton>
+
+            {/* F2-D12 (2026-07-04) — évszám-javítás: a host beírja a szám tényleges évét, a
+                szerver újraértékeli ez ellen a kört (kié legyen a kártya), a kör MARAD reveal
+                fázisban — a "Következő kör" gomb utána a megszokott úton lép tovább. */}
+            {disputeOpen ? (
+              <div className="flex items-center gap-2">
+                <label htmlFor="dispute-year" className="text-sm text-text-muted">
+                  Valódi évszám:
+                </label>
+                <input
+                  id="dispute-year"
+                  type="number"
+                  inputMode="numeric"
+                  value={disputeYearInput}
+                  onChange={(e) => setDisputeYearInput(e.target.value)}
+                  placeholder={String(round.revealedCard.year)}
+                  className="w-24 min-h-11 rounded-[var(--radius-button)] bg-surface-2 border-2 border-border focus-visible:border-accent px-3 py-2 text-base"
+                />
+                <AppButton
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleDisputeSubmit}
+                  disabled={disputeSaving || !disputeYearInput}
+                >
+                  {disputeSaving ? "Mentés…" : "Frissítés"}
+                </AppButton>
+                <button
+                  type="button"
+                  className="text-text-muted text-sm underline"
+                  onClick={() => {
+                    setDisputeOpen(false);
+                    setDisputeYearInput("");
+                  }}
+                >
+                  Mégse
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-3">
+                <AppButton
+                  variant="secondary"
+                  onClick={() => {
+                    setDisputeOpen(true);
+                    setDisputeYearInput(String(round.revealedCard?.year ?? ""));
+                  }}
+                >
+                  ⚠ Vitatom (rossz évszám)
+                </AppButton>
+                <AppButton onClick={handleNextTurn}>Következő kör ▶</AppButton>
+              </div>
+            )}
+          </section>
+        )}
+
+        {roomStatus === "paused" && (
+          <section className="flex flex-col items-center gap-6 py-12 text-center">
+            <h2 className="text-2xl font-bold">⏸ A parti szünetel</h2>
+            <p className="text-text-muted max-w-md">
+              A szerver úgy látja, senki nincs jelen épp — várd meg, amíg a játékosok
+              visszatérnek (a jelzés magától frissül néhány másodperc múlva), vagy próbáld
+              újra most.
+            </p>
+            <AppButton onClick={handleNextTurn}>Újrapróbálom ▶</AppButton>
           </section>
         )}
 
