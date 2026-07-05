@@ -475,9 +475,23 @@ export default function PlayRoomPage() {
             {round.revealedCard.artist} – {round.revealedCard.year}
           </p>
           {myGuessResult && (
-            <p className={myGuessResult.correct ? "text-success font-semibold" : "text-text-muted"}>
-              {myGuessResult.correct ? "🎤 Bemondás sikeres — +1 🪙" : "🎤 Bemondás nem talált"}
-            </p>
+            <div className="flex flex-col gap-1">
+              {myGuessResult.titleCorrect !== null && (
+                <p className={myGuessResult.titleCorrect ? "text-success font-semibold" : "text-text-muted"}>
+                  {myGuessResult.titleCorrect ? "🎤 Cím eltalálva — +1 🪙" : "🎤 Cím nem talált"}
+                </p>
+              )}
+              {myGuessResult.artistCorrect !== null && (
+                <p className={myGuessResult.artistCorrect ? "text-success font-semibold" : "text-text-muted"}>
+                  {myGuessResult.artistCorrect ? "🎤 Előadó eltalálva — +1 🪙" : "🎤 Előadó nem talált"}
+                </p>
+              )}
+              {myGuessResult.yearCorrect !== null && (
+                <p className={myGuessResult.yearCorrect ? "text-success font-semibold" : "text-text-muted"}>
+                  {myGuessResult.yearCorrect ? "🎤 Évszám eltalálva — +1 🪙" : "🎤 Évszám nem talált"}
+                </p>
+              )}
+            </div>
           )}
           {myStealResult && (
             <p className={myStealResult.won ? "text-success font-semibold" : "text-text-muted"}>

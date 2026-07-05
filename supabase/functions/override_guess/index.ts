@@ -2,25 +2,36 @@
 // (name-guess) evaluation. Requested by the tulaj: alongside the existing
 // dispute_round "wrong year" override, the host+players may mutually agree
 // that a guess the automatic fuzzy-matcher (evaluateGuess, GUESS_THRESHOLD
-// 0.85) marked wrong should actually count (or, symmetrically, that a guess
-// it accepted was too lenient) — this lets the host flip that single call
-// either direction without invalidating the whole round.
+// 0.85, or the exact-match year check) marked wrong should actually count
+// (or, symmetrically, that a guess it accepted was too lenient) — this lets
+// the host flip that single field's call either direction without
+// invalidating the whole round.
+//
+// REDESIGN (2026-07-06, playtest feedback): title/artist/year now score
+// INDEPENDENTLY (see _shared/steal.ts GuessEvaluation), so this endpoint no
+// longer flips one flat `correct` boolean — it takes a `field` selector and
+// only touches that one field's correctness + token.
 //
 // Caller: host ONLY, and only while the round is still in 'reveal' phase
 // (same window as dispute_round — before next_turn moves on).
 //
-// Effect: sets round.name_guess.correct AND the player-visible
-// revealed_card.guess.correct to the requested value, and adjusts the
-// active player's token balance by the delta (+1 if flipping to correct,
-// -1 if flipping to incorrect, 0/no-op if already at the requested value).
-// dispute_round (F2-D12, the year-correction re-evaluation) never reads or
-// touches name_guess/its token — bemondás correctness is about title/artist
-// matching, independent of the song's year — so calling this before or
-// after a dispute_round call on the same round never interacts with it.
+// Effect: sets round.name_guess.${field}Correct AND the player-visible
+// revealed_card.guess.${field}Correct to the requested value, and adjusts
+// the active player's token balance by the delta (+1 if flipping to
+// correct, -1 if flipping to incorrect, 0/no-op if already at the requested
+// value). dispute_round's year-correction re-evaluation already updates
+// yearCorrect itself — calling this on the `year` field afterward simply
+// re-applies the host's own explicit call on top of that.
 
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
 import type { NameGuess } from '../_shared/steal.ts';
+
+type GuessField = 'title' | 'artist' | 'year';
+
+function fieldKey(field: GuessField): 'titleCorrect' | 'artistCorrect' | 'yearCorrect' {
+  return `${field}Correct` as const;
+}
 
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
@@ -30,15 +41,21 @@ Deno.serve(async (req: Request) => {
   const callerUid = await getCallerUid(req);
   if (!callerUid) return errorResponse('unauthorized', 'Be kell jelentkezni.', 401);
 
-  let body: { roundId?: string; correct?: boolean };
+  let body: { roundId?: string; field?: string; correct?: boolean };
   try {
     body = await req.json();
   } catch {
     return errorResponse('invalid_body', 'Érvénytelen kérés.', 400);
   }
-  if (!body.roundId || typeof body.correct !== 'boolean') {
-    return errorResponse('invalid_request', 'Hiányzó kör vagy döntés.', 400);
+  if (
+    !body.roundId ||
+    (body.field !== 'title' && body.field !== 'artist' && body.field !== 'year') ||
+    typeof body.correct !== 'boolean'
+  ) {
+    return errorResponse('invalid_request', 'Hiányzó kör, mező vagy döntés.', 400);
   }
+  const field = body.field as GuessField;
+  const key = fieldKey(field);
 
   const supabase = adminClient();
 
@@ -64,19 +81,20 @@ Deno.serve(async (req: Request) => {
     return errorResponse('no_guess', 'Ebben a körben nem volt bemondás.', 409);
   }
 
-  const previousCorrect = nameGuess.correct === true;
+  const previousCorrect = nameGuess[key] === true;
   const nextCorrect = body.correct;
 
   if (previousCorrect === nextCorrect) {
     // Already at the requested state — idempotent no-op, no token change.
-    return jsonResponse({ ok: true, correct: nextCorrect, tokensChanged: false });
+    return jsonResponse({ ok: true, field, correct: nextCorrect, tokensChanged: false });
   }
 
-  const updatedNameGuess: NameGuess = { ...nameGuess, correct: nextCorrect };
+  const updatedNameGuess: NameGuess = { ...nameGuess, [key]: nextCorrect };
   const revealedCard = (round.revealed_card ?? {}) as Record<string, unknown>;
+  const oldGuess = (revealedCard.guess ?? null) as Record<string, unknown> | null;
   const updatedRevealedCard = {
     ...revealedCard,
-    guess: { correct: nextCorrect, byPlayerId: round.active_player_id },
+    guess: oldGuess ? { ...oldGuess, [key]: nextCorrect } : { byPlayerId: round.active_player_id, [key]: nextCorrect },
   };
 
   // Optimistic lock: only while still in 'reveal' — a race with next_turn
@@ -117,5 +135,5 @@ Deno.serve(async (req: Request) => {
     return errorResponse('insufficient_tokens', 'A játékosnak már nincs elég tokenje a visszavonáshoz.', 409);
   }
 
-  return jsonResponse({ ok: true, correct: nextCorrect, tokensChanged: true, tokensLeft: newBalance });
+  return jsonResponse({ ok: true, field, correct: nextCorrect, tokensChanged: true, tokensLeft: newBalance });
 });

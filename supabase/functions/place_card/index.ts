@@ -16,6 +16,11 @@
 // It is NEVER evaluated here: evaluateGuess() only ever runs inside
 // resolveRound (anti-leak, 11.9 #1) — place_card doesn't even read
 // deck_cards, so it has no way to check correctness even if it wanted to.
+//
+// REDESIGN (2026-07-06, playtest feedback): yearGuess is a third, fully
+// optional field alongside artistGuess/titleGuess — the player may guess the
+// track's release year for an extra +1 token (up to 3/round total), scored
+// independently of the other two fields (see _shared/steal.ts evaluateGuess).
 
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
@@ -25,6 +30,7 @@ const STEAL_WINDOW_SEC = 15; // AC22.1
 interface NameGuessInput {
   artistGuess?: string;
   titleGuess?: string;
+  yearGuess?: string;
 }
 
 Deno.serve(async (req: Request) => {
@@ -65,14 +71,25 @@ Deno.serve(async (req: Request) => {
     return errorResponse('not_your_turn', 'Nem te vagy soron.', 403);
   }
 
-  // AC21.2: nameGuess is optional. If present, stash it raw — correct is
-  // filled in later by resolveRound, never here.
-  let nameGuessRow: { artistGuess: string; titleGuess: string; correct: null; createdAt: string } | null = null;
-  if (body.nameGuess && (body.nameGuess.artistGuess || body.nameGuess.titleGuess)) {
+  // AC21.2: nameGuess is optional. If present, stash it raw — the three
+  // *Correct fields are filled in later by resolveRound, never here.
+  let nameGuessRow: {
+    artistGuess: string;
+    titleGuess: string;
+    yearGuess?: string;
+    titleCorrect: null;
+    artistCorrect: null;
+    yearCorrect: null;
+    createdAt: string;
+  } | null = null;
+  if (body.nameGuess && (body.nameGuess.artistGuess || body.nameGuess.titleGuess || body.nameGuess.yearGuess)) {
     nameGuessRow = {
       artistGuess: body.nameGuess.artistGuess ?? '',
       titleGuess: body.nameGuess.titleGuess ?? '',
-      correct: null,
+      ...(body.nameGuess.yearGuess ? { yearGuess: body.nameGuess.yearGuess } : {}),
+      titleCorrect: null,
+      artistCorrect: null,
+      yearCorrect: null,
       createdAt: new Date().toISOString(),
     };
   }

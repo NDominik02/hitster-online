@@ -235,7 +235,19 @@ export interface ResolveRoundResult {
     artist: string;
     year: number;
     artworkUrl: string | null;
-    guess: { correct: boolean; byPlayerId: string } | null;
+    // REDESIGN (2026-07-06): exposes the player's actual guessed text/year
+    // alongside per-field correctness — safe at reveal time since the true
+    // answer is already public here, and the host needs to SEE what was
+    // guessed to judge borderline cases (ld. GuessInput/override_guess).
+    guess: {
+      byPlayerId: string;
+      titleGuess: string;
+      artistGuess: string;
+      yearGuess: string | null;
+      titleCorrect: boolean | null;
+      artistCorrect: boolean | null;
+      yearCorrect: boolean | null;
+    } | null;
     steals: Array<{ playerId: string; correct: boolean; won: boolean }>;
   };
 }
@@ -424,14 +436,14 @@ export async function resolveRound(
   }
 
   // Step 7 (11.4.1): bemondás (name guess) evaluation — server-only,
-  // anti-leak (11.9 #1). AC21.7: the correct-flag and the token reward are
-  // only ever written/credited HERE, in the reveal transaction — never at
-  // place_card time, or the token balance would leak the answer early.
+  // anti-leak (11.9 #1). AC21.7: the per-field correct-flags and the token
+  // reward are only ever written/credited HERE, in the reveal transaction —
+  // never at place_card time, or the token balance would leak the answer
+  // early. REDESIGN (2026-07-06): title/artist/year now score
+  // INDEPENDENTLY (replaces the old F2-D1 all-or-nothing rule) — up to 3
+  // tokens per round instead of 1.
   const nameGuess: NameGuess | null = (round.name_guess ?? null) as NameGuess | null;
-  let guessCorrect: boolean | null = null;
-  if (nameGuess) {
-    guessCorrect = evaluateGuess(nameGuess, card);
-  }
+  const guessEval = nameGuess ? evaluateGuess(nameGuess, card) : null;
 
   const revealedCard = {
     title: card.title,
@@ -439,12 +451,33 @@ export async function resolveRound(
     year: card.year,
     artworkUrl: card.artwork_url,
     // 11.5: publicly visible reveal-time result, gated by round_public's
-    // phase-based projection — safe to include here unconditionally.
-    guess: nameGuess && guessCorrect !== null ? { correct: guessCorrect, byPlayerId: round.active_player_id } : null,
+    // phase-based projection — safe to include here unconditionally. Also
+    // exposes the RAW guessed text/year (not just correctness) so the host
+    // can review borderline calls — safe because the true answer is already
+    // revealed alongside it here, nothing early leaks.
+    guess:
+      nameGuess && guessEval
+        ? {
+            byPlayerId: round.active_player_id,
+            titleGuess: nameGuess.titleGuess,
+            artistGuess: nameGuess.artistGuess,
+            yearGuess: nameGuess.yearGuess ?? null,
+            titleCorrect: guessEval.titleCorrect,
+            artistCorrect: guessEval.artistCorrect,
+            yearCorrect: guessEval.yearCorrect,
+          }
+        : null,
     steals: evaluatedSteals.map((s) => ({ playerId: s.playerId, correct: !!s.correct, won: !!s.won })),
   };
 
-  const updatedNameGuess = nameGuess ? { ...nameGuess, correct: guessCorrect } : null;
+  const updatedNameGuess = nameGuess
+    ? {
+        ...nameGuess,
+        titleCorrect: guessEval!.titleCorrect,
+        artistCorrect: guessEval!.artistCorrect,
+        yearCorrect: guessEval!.yearCorrect,
+      }
+    : null;
 
   // Step 9 (11.4.1): the single reveal UPDATE — phase + outcome +
   // revealed_card + steals + name_guess together, optimistic-locked on
@@ -471,9 +504,15 @@ export async function resolveRound(
   // mutations. Never before the UPDATE above, or a losing racer could
   // double-apply these.
 
-  // 10a — bemondás reward (AC20.3/AC21.7): +1 token to the active player.
-  if (guessCorrect) {
-    await supabase.rpc('adjust_tokens', { p_player_id: round.active_player_id, p_delta: 1 });
+  // 10a — bemondás reward (AC20.3/AC21.7, REDESIGN 2026-07-06): +1 token PER
+  // correct field (title/artist/year), up to 3 total — replaces the old
+  // all-or-nothing +1.
+  if (guessEval) {
+    const guessTokens =
+      (guessEval.titleCorrect ? 1 : 0) + (guessEval.artistCorrect ? 1 : 0) + (guessEval.yearCorrect ? 1 : 0);
+    if (guessTokens > 0) {
+      await supabase.rpc('adjust_tokens', { p_player_id: round.active_player_id, p_delta: guessTokens });
+    }
   }
 
   // 10b — card placement into a timeline.
