@@ -121,6 +121,13 @@ export interface CoverageExcludedTrack {
   title: string;
   artist: string;
   reason: "no_preview" | "no_year";
+  /** Playtest feedback (2026-07-06) — a track eredeti indexe a playlistben, ez azonosítja
+   *  a rescue-hívásnál (add_manual_year_card). Csak a 'no_year' kizárásoknál van jelen. */
+  index?: number;
+  /** Van-e egyáltalán elérhető audio-forrás (Spotify preview vagy iTunes) erre a trackre —
+   *  ha nincs, a manuális évszám-mentés sem tudna kártyát csinálni belőle (a UI ilyenkor
+   *  nem ajánlja fel a mentést). */
+  hasSource?: boolean;
 }
 
 export interface DeckReport {
@@ -165,6 +172,10 @@ export interface DrawCardResponse {
    *  esik vissza. A tényleges access token sosem jut el ide — a spotify_playback_command proxy
    *  szerveroldalon kéri le, amikor a kliens ezzel az URI-vel lejátszást indít. */
   spotifyUri?: string;
+  /** Playtest feedback (2026-07-06) — a track valós hossza ms-ben, a deck_cards.duration_ms-ből.
+   *  Null, ha az embed-scrape sosem adott meg hosszt erre a kártyára (ritka). Az
+   *  AudioProgressBar ezt használja a korábban hardcoded 30 mp helyett. */
+  durationMs?: number | null;
   placingDeadline: string;
 }
 

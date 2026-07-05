@@ -21,6 +21,13 @@ export interface DrawResult {
   // kéri le szerveroldalon), és csak hiba esetén esik vissza az audioUrl
   // (preview) útra — sosem a szerver hibázik emiatt.
   spotifyUri?: string;
+  /** Playtest feedback (2026-07-06): a host oldal AudioProgressBar-ja korábban
+   * hardcoded 30 mp-et írt ki, mert a valódi lejátszási hossz sosem ért el a
+   * klienshez — a deck_cards.duration_ms-t nem sértő biztonsági szempontból
+   * (nem a kártya tartalma, csak a track hossza), ezért ez a player kliensnek
+   * IS visszaadható lenne, de jelenleg csak a host-only draw_card útvonalon
+   * folyik át (a UI ma csak ott használja). */
+  durationMs?: number | null;
   placingDeadline?: string;
   error?: string;
 }
@@ -37,10 +44,10 @@ export async function resolveCardPlayback(
   supabase: SupabaseClient,
   room: { host_uid: string; spotify_playback_mode?: string | null },
   cardId: string
-): Promise<{ audioUrl?: string; spotifyUri?: string }> {
+): Promise<{ audioUrl?: string; spotifyUri?: string; durationMs?: number | null }> {
   const { data: fullCard } = await supabase
     .from('deck_cards')
-    .select('audio_url, spotify_uri')
+    .select('audio_url, spotify_uri, duration_ms')
     .eq('id', cardId)
     .single();
 
@@ -60,7 +67,7 @@ export async function resolveCardPlayback(
     if (token) spotifyUri = fullCard.spotify_uri;
   }
 
-  return { audioUrl, spotifyUri };
+  return { audioUrl, spotifyUri, durationMs: fullCard?.duration_ms ?? null };
 }
 
 // Draws the next card for a room and creates a new `rounds` row.

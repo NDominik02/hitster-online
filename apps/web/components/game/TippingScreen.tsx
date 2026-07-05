@@ -29,6 +29,8 @@ export interface TippingScreenProps {
   /** F2 (S21) — a lerakással EGYÜTT küldött opcionális bemondás; a szülő olvassa ki a LERAKOM-nál. */
   onConfirm: (slotIndex: number, nameGuess?: NameGuessInput | null) => void;
   onExpire: () => void;
+  /** A place_card hívás folyamatban van-e — loading-visszajelzés + dupla-submit védelem. */
+  submitting?: boolean;
 }
 
 /**
@@ -43,6 +45,7 @@ export function TippingScreen({
   deadlineIso,
   onConfirm,
   onExpire,
+  submitting,
 }: TippingScreenProps) {
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const [expired, setExpired] = useState(false);
@@ -104,7 +107,7 @@ export function TippingScreen({
             />
           </div>
 
-          <GuessInput value={nameGuess} onChange={setNameGuess} disabled={expired} />
+          <GuessInput value={nameGuess} onChange={setNameGuess} disabled={expired || submitting} />
         </div>
       </DndContext>
 
@@ -112,10 +115,10 @@ export function TippingScreen({
         <AppButton
           size="lg"
           fullWidth
-          disabled={selectedSlot === null}
-          onClick={() => selectedSlot !== null && onConfirm(selectedSlot, nameGuess)}
+          disabled={selectedSlot === null || submitting}
+          onClick={() => selectedSlot !== null && !submitting && onConfirm(selectedSlot, nameGuess)}
         >
-          {selectedSlot === null ? "Húzd egy résbe" : "LERAKOM ✓"}
+          {submitting ? "Lerakás folyamatban…" : selectedSlot === null ? "Húzd egy résbe" : "LERAKOM ✓"}
         </AppButton>
       </footer>
 

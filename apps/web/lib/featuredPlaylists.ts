@@ -15,4 +15,6 @@ export interface FeaturedPlaylist {
   url: string;
 }
 
-export const FEATURED_PLAYLISTS: FeaturedPlaylist[] = [];
+export const FEATURED_PLAYLISTS: FeaturedPlaylist[] = [
+  { name: "Hitster#1", url: "https://open.spotify.com/playlist/310mLKsO1dHAaIePY4NpLy" },
+];

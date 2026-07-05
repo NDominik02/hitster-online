@@ -154,11 +154,13 @@ export default function DevPreviewPage() {
 
       <Section title="CoverageReport">
         <CoverageReport
+          deckId={mockDeck.id}
           usable={mockDeck.report.usable}
           total={mockDeck.report.total}
           pct={mockDeck.report.coveragePct}
           excluded={mockDeck.report.excluded}
           meetsMinimum={mockDeck.report.meetsMinimum}
+          onRescued={() => {}}
         />
       </Section>
 

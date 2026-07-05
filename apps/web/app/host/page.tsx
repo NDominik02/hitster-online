@@ -7,6 +7,7 @@ import { SegmentedControl } from "@/components/system/SegmentedControl";
 import { GenerationProgress } from "@/components/game/GenerationProgress";
 import { CoverageReport } from "@/components/game/CoverageReport";
 import { ModeCard } from "@/components/lobby/ModeCard";
+import { HelpModal } from "@/components/system/HelpModal";
 import { DeckLibrary } from "@/components/lobby/DeckLibrary";
 import { RosterBuilder, type RosterEntry } from "@/components/pass-and-play/RosterBuilder";
 import { ensureAnonymousSession, getSupabaseClient } from "@/lib/supabase/client";
@@ -45,6 +46,7 @@ export default function HostCreatePage() {
   // jelezzük, hogy a kapcsoló ne legyen félrevezető.
   const [stealEnabled, setStealEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const [phase, setPhase] = useState<"mode" | "form" | "generating" | "report">("mode");
   const [progress, setProgress] = useState<{ processed: number; total: number; step: string }>({
@@ -260,8 +262,16 @@ export default function HostCreatePage() {
           <h1 className="text-xl font-bold flex items-center gap-2">
             <span aria-hidden>🎵</span> HITSTER ONLINE
           </h1>
-          <button className="text-text-muted text-sm hover:text-text">? Súgó</button>
+          <button
+            type="button"
+            className="text-text-muted text-sm hover:text-text"
+            onClick={() => setHelpOpen(true)}
+          >
+            ? Súgó
+          </button>
         </header>
+
+        {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
 
         {phase === "mode" && (
           <div className="space-y-4">
@@ -279,7 +289,6 @@ export default function HostCreatePage() {
               icon="📱"
               title="Add tovább!"
               description="Egyetlen telefon, körbeadva — nincs szükség másik eszközre. 2–6 fő ajánlott."
-              highlighted
               onClick={() => {
                 setMode("pass_and_play");
                 setPhase("form");
@@ -463,11 +472,30 @@ export default function HostCreatePage() {
           <div className="space-y-6">
             <h2 className="text-2xl font-bold">PAKLI ELŐKÉSZÍTÉSE</h2>
             <CoverageReport
+              deckId={deck.id}
               usable={deck.report.usable}
               total={deck.report.total}
               pct={deck.report.coveragePct}
               excluded={deck.report.excluded}
               meetsMinimum={deck.report.meetsMinimum}
+              onRescued={(result) =>
+                setDeck((d) =>
+                  d
+                    ? {
+                        ...d,
+                        usableCount: result.usableCount,
+                        coveragePct: result.coveragePct,
+                        report: {
+                          ...d.report,
+                          usable: result.usableCount,
+                          coveragePct: result.coveragePct,
+                          meetsMinimum: result.meetsMinimum,
+                          excluded: result.excluded,
+                        },
+                      }
+                    : d
+                )
+              }
             />
             {error && (
               <p role="alert" className="text-sm text-danger">

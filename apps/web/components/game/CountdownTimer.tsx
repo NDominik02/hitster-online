@@ -36,12 +36,21 @@ export function CountdownTimer({
   const expiredRef = useRef(false);
 
   useEffect(() => {
-    if (deadlineRef.current === null) {
-      deadlineRef.current = deadlineIso ? new Date(deadlineIso).getTime() : Date.now() + seconds * 1000;
-      if (deadlineIso) {
-        setTotal(Math.max(1, Math.round((deadlineRef.current - Date.now()) / 1000)));
-      }
-    }
+    // BUGFIX (2026-07-06): korábban a deadline csak az ELSŐ renderen íródott be
+    // (`if (deadlineRef.current === null)`), utána soha többé nem frissült — még
+    // akkor sem, ha a `deadlineIso` prop később megváltozott. Mivel a valós
+    // `steal_deadline`/`placing_deadline` néha egy pillanattal KÉSŐBB érkezik meg
+    // a klienshez, mint a fázisváltás broadcastja (race a round refetch és a DB-írás
+    // között), a komponens ilyenkor egy null deadline-ra a `seconds` fallbackkel
+    // (pl. 90 mp) állt be, és ez soha nem korrigálódott a később megérkező valódi
+    // (pl. 15 mp-es steal-ablakos) deadline-ra — ez okozta, hogy játékosonként
+    // teljesen eltérő, "random" hátralévő időt láttunk ugyanabban a körben.
+    // Most a deadline MINDEN alkalommal újraszámolódik, amikor a `deadlineIso`
+    // prop ténylegesen megváltozik (a hatás-függőséglistában szerepel).
+    deadlineRef.current = deadlineIso ? new Date(deadlineIso).getTime() : Date.now() + seconds * 1000;
+    expiredRef.current = false;
+    setTotal(deadlineIso ? Math.max(1, Math.round((deadlineRef.current - Date.now()) / 1000)) : seconds);
+
     if (paused) return;
 
     const tick = () => {
@@ -57,7 +66,7 @@ export function CountdownTimer({
     const id = setInterval(tick, 250);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paused, onExpire]);
+  }, [deadlineIso, paused, onExpire]);
 
   const urgent = remaining <= warningAt;
   const mm = Math.floor(remaining / 60);

@@ -158,5 +158,16 @@ Deno.serve(async (req: Request) => {
   if (updateError) return errorResponse('db_error', 'Nem sikerült az évszám javítása.', 500);
   if (!updated) return errorResponse('already_advanced', 'A kör már továbblépett, nem javítható.', 409);
 
+  // Playtest feedback (2026-07-06): a korrekció korábban csak ERRE a körre vonatkozott — a
+  // deck_cards.year (a forrás, amiből minden JÖVŐBELI kör/parti a kártyát húzza) változatlan
+  // maradt, tehát ugyanaz a pakli újrajátszva megint ugyanazt a hibás évet mutatta volna. Most
+  // a host által megerősített évet visszaírjuk a kártyára is — 'host_corrected' forrással (a
+  // legmagasabb bizalmi szint, nem bizonytalan), hogy a jövőben ne forduljon elő újra. Best-effort:
+  // ha ez a mellékhatás hibázna, a fő (kör-szintű) javítás már úgyis sikeresen lezajlott.
+  await supabase
+    .from('deck_cards')
+    .update({ year: correctedYear, year_source: 'host_corrected', year_uncertain: false })
+    .eq('id', round.card_id);
+
   return jsonResponse({ ok: true, outcome, revealedCard: updatedRevealedCard });
 });
