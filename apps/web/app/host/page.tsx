@@ -19,8 +19,9 @@ import {
   spotifyRefreshToken,
   listDecks,
   findReadyDeckByPlaylistUrl,
+  findReadyDeckBySourceKey,
 } from "@/lib/supabase/functions";
-import { FEATURED_PLAYLISTS } from "@/lib/featuredPlaylists";
+import { FEATURED_PLAYLISTS, type FeaturedPlaylist } from "@/lib/featuredPlaylists";
 import { startSpotifyLogin } from "@/lib/spotify/pkce";
 import type { Deck } from "@/lib/game/types";
 
@@ -126,19 +127,28 @@ export default function HostCreatePage() {
    * generálás (playlistUrl state-et is beállítjuk, hogy a "form" fázis
    * visszatérésekor a mező ne legyen üres).
    */
-  async function handleSelectFeatured(pl: { name: string; url: string }) {
+  async function handleSelectFeatured(pl: FeaturedPlaylist) {
+    const urls = pl.urls ?? (pl.url ? [pl.url] : []);
+    const primaryUrl = urls[0] ?? "";
+    const sourceKey = pl.sourceKey ?? primaryUrl;
+    if (!primaryUrl) return;
+
     setError(null);
-    setPlaylistUrl(pl.url);
-    setFeaturedLoadingUrl(pl.url);
+    setPlaylistUrl(primaryUrl);
+    setFeaturedLoadingUrl(sourceKey);
     try {
       await ensureAnonymousSession();
-      const cached = await findReadyDeckByPlaylistUrl(pl.url);
+      const cached = pl.sourceKey ? await findReadyDeckBySourceKey(pl.sourceKey) : await findReadyDeckByPlaylistUrl(primaryUrl);
       if (cached) {
         setDeck(cached);
         setPhase("report");
         return;
       }
-      await handleGenerate(pl.url);
+      await handleGenerate(primaryUrl, {
+        playlistUrls: urls.length > 1 ? urls : undefined,
+        sourceKey: pl.sourceKey,
+        deckName: pl.name,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nem sikerült betölteni az ajánlott playlistet.");
     } finally {
@@ -165,7 +175,10 @@ export default function HostCreatePage() {
    * frissítés aszinkron/batch-elt, tehát egy közvetlenül utána hívott
    * handleGenerate() még a RÉGI playlistUrl-t olvasná a state-ből.
    */
-  async function handleGenerate(urlOverride?: string) {
+  async function handleGenerate(
+    urlOverride?: string,
+    options?: { playlistUrls?: string[]; sourceKey?: string; deckName?: string }
+  ) {
     const url = (urlOverride ?? playlistUrl).trim();
     if (!urlOverride && !urlLooksValid) {
       setError("Érvénytelen Spotify playlist link. Ellenőrizd, és próbáld újra.");
@@ -179,7 +192,7 @@ export default function HostCreatePage() {
       await ensureAnonymousSession();
 
       // A HTTP hívás azonnal visszatér a deckId-vel, a feldolgozás a szerveren fut tovább.
-      const { deckId } = await generateDeck(url);
+      const { deckId } = await generateDeck(url, options);
 
       // Pollingozzuk a decks táblát ~2 mp-enként, amíg ready/failed nem lesz (BACKEND-NOTES 4.).
       const result = await pollDeckUntilReady(deckId, (partial) => {
@@ -343,20 +356,23 @@ export default function HostCreatePage() {
                   {FEATURED_PLAYLISTS.length === 0 ? (
                     <p className="text-text-muted text-sm">Még nincs ajánlott playlist beállítva.</p>
                   ) : (
-                    FEATURED_PLAYLISTS.map((pl) => (
-                      <button
-                        key={pl.url}
-                        type="button"
-                        disabled={featuredLoadingUrl !== null}
-                        onClick={() => handleSelectFeatured(pl)}
-                        className="w-full min-h-11 rounded-[var(--radius-button)] bg-surface-2 border-2 border-border hover:border-accent px-4 py-3 text-left disabled:opacity-50"
-                      >
-                        <span className="font-semibold">{pl.name}</span>
-                        {featuredLoadingUrl === pl.url && (
-                          <span className="text-text-muted text-sm ml-2">betöltés…</span>
-                        )}
-                      </button>
-                    ))
+                    FEATURED_PLAYLISTS.map((pl) => {
+                      const key = pl.sourceKey ?? pl.url ?? pl.name;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          disabled={featuredLoadingUrl !== null}
+                          onClick={() => handleSelectFeatured(pl)}
+                          className="w-full min-h-11 rounded-[var(--radius-button)] bg-surface-2 border-2 border-border hover:border-accent px-4 py-3 text-left disabled:opacity-50"
+                        >
+                          <span className="font-semibold">{pl.name}</span>
+                          {featuredLoadingUrl === key && (
+                            <span className="text-text-muted text-sm ml-2">betöltés…</span>
+                          )}
+                        </button>
+                      );
+                    })
                   )}
                 </div>
               )}

@@ -49,8 +49,16 @@ async function invoke<T>(name: string, body: Record<string, unknown>): Promise<T
  * percekig tarthat (60-100 track-es playlisteknél 1-4 perc). A hívó oldalnak a `pollDeckUntilReady`
  * segédfüggvényt kell használnia a `generateDeck` visszatérése UTÁN, NEM szabad szinkron várni.
  */
-export async function generateDeck(playlistUrl: string): Promise<{ deckId: string }> {
-  return invoke<{ deckId: string; status: string; message?: string }>("generate_deck", { playlistUrl });
+export async function generateDeck(
+  playlistUrl: string,
+  options?: { playlistUrls?: string[]; sourceKey?: string; deckName?: string }
+): Promise<{ deckId: string }> {
+  return invoke<{ deckId: string; status: string; message?: string }>("generate_deck", {
+    playlistUrl,
+    ...(options?.playlistUrls ? { playlistUrls: options.playlistUrls } : {}),
+    ...(options?.sourceKey ? { sourceKey: options.sourceKey } : {}),
+    ...(options?.deckName ? { deckName: options.deckName } : {}),
+  });
 }
 
 /** Egyszeri lekérdezés a decks tábláról (RLS: owner_id = auth.uid() vagy is_public). */
@@ -98,12 +106,15 @@ function parsePlaylistIdFromUrl(urlOrId: string): string | null {
 export async function findReadyDeckByPlaylistUrl(url: string): Promise<Deck | null> {
   const playlistId = parsePlaylistIdFromUrl(url);
   if (!playlistId) return null;
+  return findReadyDeckBySourceKey(playlistId);
+}
 
+export async function findReadyDeckBySourceKey(sourceKey: string): Promise<Deck | null> {
   const client = getSupabaseClient();
   const { data, error } = await client
     .from("decks")
     .select("*")
-    .eq("source_playlist_id", playlistId)
+    .eq("source_playlist_id", sourceKey)
     .eq("status", "ready")
     .order("created_at", { ascending: false })
     .limit(1)

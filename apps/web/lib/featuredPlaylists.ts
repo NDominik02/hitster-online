@@ -12,9 +12,21 @@
  */
 export interface FeaturedPlaylist {
   name: string;
-  url: string;
+  url?: string;
+  urls?: string[];
+  sourceKey?: string;
 }
 
 export const FEATURED_PLAYLISTS: FeaturedPlaylist[] = [
+  {
+    name: "Hitster Mega Mix #1",
+    sourceKey: "hitster-mega-mix-1",
+    urls: [
+      "https://open.spotify.com/playlist/09C8ZGUepJGErYZcI7s2Ns",
+      "https://open.spotify.com/playlist/310mLKsO1dHAaIePY4NpLy",
+      "https://open.spotify.com/playlist/7MDSR4KsIFAnKWCZWCe1Kn",
+      "https://open.spotify.com/playlist/4vDWKlJ6Qkh5vhkc4qYT0b",
+    ],
+  },
   { name: "Hitster#1", url: "https://open.spotify.com/playlist/310mLKsO1dHAaIePY4NpLy" },
 ];

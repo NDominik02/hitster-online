@@ -212,6 +212,20 @@ async function fetchPlaylistTracksAuthenticated(
   }
 }
 
+function dedupeRawTracks(tracks: RawTrack[]): RawTrack[] {
+  const seen = new Set<string>();
+  const deduped: RawTrack[] = [];
+
+  for (const track of tracks) {
+    const key = track.uri ?? `${normalize(track.title)}|${normalize(track.artist)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push({ ...track, index: deduped.length });
+  }
+
+  return deduped;
+}
+
 // ---------------------------------------------------------------------------
 // Step 2: MusicBrainz year resolution (ported from 02-resolve-years.js),
 // using the global mb_year_cache table instead of a local JSON file.
@@ -446,7 +460,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
   const startedAt = Date.now();
 
   try {
-    const { data: deckRow } = await supabase.from('decks').select('report').eq('id', deckId).single();
+    const { data: deckRow } = await supabase.from('decks').select('owner_id, report').eq('id', deckId).single();
     let tracks: RawTrack[];
     let playlistName: string;
     let possiblyTruncatedAt100 = false;
@@ -459,6 +473,107 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
       playlistName = existingReport.playlistName ?? playlistId;
       possiblyTruncatedAt100 = existingReport.possiblyTruncatedAt100 ?? false;
     } else {
+      const sourcePlaylistIds =
+        Array.isArray(existingReport.sourcePlaylistIds) && existingReport.sourcePlaylistIds.length > 0
+          ? (existingReport.sourcePlaylistIds as string[])
+          : [playlistId];
+
+      if (sourcePlaylistIds.length > 1) {
+        const ownerId = deckRow?.owner_id as string | undefined;
+        const sourceNames: string[] = [];
+        const sourceReports: Array<{ playlistId: string; name: string; trackCount: number; possiblyTruncatedAt100: boolean }> = [];
+        const mergedTracks: RawTrack[] = [];
+
+        for (const sourcePlaylistId of sourcePlaylistIds) {
+          const step1 = await fetchPlaylistViaEmbed(sourcePlaylistId);
+          if (!step1.ok || !step1.tracks) {
+            const isPrivate = (step1.reason || '').includes('private');
+            await supabase
+              .from('decks')
+              .update({
+                status: 'failed',
+                report: {
+                  step: 'failed',
+                  reason: step1.reason,
+                  errorCode: isPrivate ? 'playlist_not_public' : 'playlist_fetch_failed',
+                  sourcePlaylistId,
+                },
+              })
+              .eq('id', deckId);
+            return;
+          }
+
+          let sourceTracks = step1.tracks;
+          let sourcePossiblyTruncatedAt100 = step1.possiblyTruncatedAt100 ?? false;
+          const sourceName = step1.playlistName ?? sourcePlaylistId;
+
+          if (sourcePossiblyTruncatedAt100) {
+            console.log(`[premium-widen] deck=${deckId} source=${sourcePlaylistId} ownerId=${ownerId ?? 'MISSING'}`);
+            if (ownerId) {
+              const { data: connection } = await supabase
+                .from('spotify_connections')
+                .select('product')
+                .eq('host_uid', ownerId)
+                .maybeSingle();
+              console.log(`[premium-widen] connection product=${connection?.product ?? 'NONE'}`);
+              if (connection?.product === 'premium') {
+                const token = await getValidSpotifyAccessToken(supabase, ownerId);
+                console.log(`[premium-widen] token=${token ? 'valid' : 'MISSING/invalid'}`);
+                if (token) {
+                  const full = await fetchPlaylistTracksAuthenticated(sourcePlaylistId, token.accessToken, MAX_TRACKS_PREMIUM);
+                  console.log(
+                    `[premium-widen] fetch ok=${full.ok} reason=${full.reason ?? 'n/a'} fetchedTracks=${full.tracks?.length ?? 0} embedTracks=${sourceTracks.length}`
+                  );
+                  if (full.ok && full.tracks && full.tracks.length > sourceTracks.length) {
+                    const previewByUri = new Map(
+                      sourceTracks.filter((t) => t.uri).map((t) => [t.uri as string, t.spotifyPreviewUrl])
+                    );
+                    sourceTracks = full.tracks.map((t) => ({
+                      ...t,
+                      spotifyPreviewUrl: t.uri ? (previewByUri.get(t.uri) ?? t.spotifyPreviewUrl) : t.spotifyPreviewUrl,
+                    }));
+                    sourcePossiblyTruncatedAt100 = full.tracks.length >= MAX_TRACKS_PREMIUM;
+                    console.log(`[premium-widen] widened source=${sourcePlaylistId} to ${sourceTracks.length} tracks`);
+                  }
+                }
+              }
+            }
+          }
+
+          sourceNames.push(sourceName);
+          sourceReports.push({
+            playlistId: sourcePlaylistId,
+            name: sourceName,
+            trackCount: sourceTracks.length,
+            possiblyTruncatedAt100: sourcePossiblyTruncatedAt100,
+          });
+          mergedTracks.push(...sourceTracks);
+        }
+
+        tracks = dedupeRawTracks(mergedTracks);
+        playlistName = existingReport.deckName ?? sourceNames.join(' + ');
+        possiblyTruncatedAt100 = sourceReports.some((source) => source.possiblyTruncatedAt100);
+
+        await supabase
+          .from('decks')
+          .update({
+            name: playlistName,
+            total_tracks: tracks.length,
+            report: {
+              processed: 0,
+              total: tracks.length,
+              step: 'resolving_years',
+              tracksCache: tracks,
+              playlistName,
+              possiblyTruncatedAt100,
+              sourcePlaylistIds,
+              sourceReports,
+              mergedTrackCountBeforeDedupe: mergedTracks.length,
+              processedTracks: [],
+            },
+          })
+          .eq('id', deckId);
+      } else {
       const step1 = await fetchPlaylistViaEmbed(playlistId);
       if (!step1.ok || !step1.tracks) {
         const isPrivate = (step1.reason || '').includes('private');
@@ -532,6 +647,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
           },
         })
         .eq('id', deckId);
+      }
     }
 
     const total = tracks.length;
@@ -915,16 +1031,25 @@ Deno.serve(async (req: Request) => {
   }
   const callerUid = userData.user.id;
 
-  if (!body.playlistUrl) {
+  const playlistUrls = Array.isArray(body.playlistUrls) && body.playlistUrls.length > 0 ? body.playlistUrls : [body.playlistUrl];
+  if (!playlistUrls[0]) {
     return errorResponse('invalid_url', 'Adj meg egy Spotify playlist URL-t.', 400);
   }
 
-  let playlistId: string;
+  let playlistIds: string[];
   try {
-    playlistId = parsePlaylistId(body.playlistUrl);
+    playlistIds = playlistUrls.map((url: string) => parsePlaylistId(url));
   } catch {
     return errorResponse('invalid_url', 'Nem sikerült felismerni a Spotify playlist URL-t.', 400);
   }
+  const sourceKey =
+    typeof body.sourceKey === 'string' && /^[a-zA-Z0-9_-]{3,80}$/.test(body.sourceKey)
+      ? body.sourceKey
+      : playlistIds[0];
+  const deckName =
+    typeof body.deckName === 'string' && body.deckName.trim().length > 0
+      ? body.deckName.trim().slice(0, 120)
+      : sourceKey;
 
   const supabase = adminClient();
 
@@ -934,12 +1059,12 @@ Deno.serve(async (req: Request) => {
   const { data: deckRow, error: insertError } = await supabase
     .from('decks')
     .insert({
-      name: playlistId,
-      source_playlist_id: playlistId,
-      source_playlist_url: body.playlistUrl,
+      name: deckName,
+      source_playlist_id: sourceKey,
+      source_playlist_url: playlistUrls.join('\n'),
       owner_id: callerUid,
       status: 'generating',
-      report: { processed: 0, total: 0, step: 'fetching_playlist' },
+      report: { processed: 0, total: 0, step: 'fetching_playlist', sourcePlaylistIds: playlistIds, deckName },
     })
     .select()
     .single();
@@ -953,7 +1078,7 @@ Deno.serve(async (req: Request) => {
   // Kick off the background work AFTER we've prepared the response, and do
   // not await it — this is what makes the HTTP response return immediately.
   // @ts-ignore Deno global — EdgeRuntime is provided by the Supabase Edge Runtime
-  EdgeRuntime.waitUntil(runGenerationWork(deckId, playlistId, 0));
+  EdgeRuntime.waitUntil(runGenerationWork(deckId, sourceKey, 0));
 
   // Respond immediately with the deckId; the client polls decks.report.
   return jsonResponse({
