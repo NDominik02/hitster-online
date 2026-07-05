@@ -47,6 +47,9 @@ const ITUNES_INTERVAL_MS = 1500; // kept as tight as the F0 prototype allows
 const ITUNES_MIN_MATCH_SCORE = 0.55;
 const MIN_USABLE_CARDS = 60; // D4
 const YEAR_DISAGREEMENT_THRESHOLD = 3; // F0-REPORT 4.: |MB - iTunes| >= 3 -> uncertain flag
+// Spotify's playlist item pagination max is 50. Asking for 100 makes the
+// authenticated widen fetch fail and silently leaves us with the 100-item embed.
+const SPOTIFY_PLAYLIST_PAGE_LIMIT = 50;
 // S20-bővítés (F3): a Premium-kapcsolattal rendelkező hostoknál a hitelesített
 // Web API-val a 100-as embed-korlát fölé is lapozunk, de van egy józan felső
 // határ — a MusicBrainz 1 req/s throttle miatt 300 track már ~5-8 perc
@@ -165,24 +168,30 @@ async function fetchPlaylistTracksAuthenticated(
     const metaRes = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}?fields=name`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!metaRes.ok) return { ok: false, reason: `playlist meta fetch failed (${metaRes.status})` };
+    if (!metaRes.ok) {
+      const text = await metaRes.text().catch(() => '');
+      return { ok: false, reason: `playlist meta fetch failed (${metaRes.status}) ${text}`.trim() };
+    }
     const meta = await metaRes.json();
 
     const tracks: RawTrack[] = [];
     let url: string | null =
       `https://api.spotify.com/v1/playlists/${playlistId}/tracks` +
-      `?fields=items(track(uri,name,artists(name),duration_ms,is_playable,preview_url)),next&limit=100`;
+      `?fields=items(track(uri,name,artists(name),duration_ms,is_playable,preview_url)),next,total&limit=${SPOTIFY_PLAYLIST_PAGE_LIMIT}`;
 
     while (url && tracks.length < maxTracks) {
       const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
       if (!res.ok) {
-        console.log(`[premium-widen] page fetch failed status=${res.status} afterTracks=${tracks.length} url=${url}`);
+        const text = await res.text().catch(() => '');
+        console.log(
+          `[premium-widen] page fetch failed status=${res.status} afterTracks=${tracks.length} url=${url} body=${text}`
+        );
         break; // a partial list is still more useful than bailing entirely
       }
       const page = await res.json();
       for (const item of page.items ?? []) {
-        const t = item.track;
-        if (!t) continue;
+        const t = item.track ?? item.item;
+        if (!t || t.type === 'episode') continue;
         tracks.push({
           index: tracks.length,
           uri: t.uri ?? null,
