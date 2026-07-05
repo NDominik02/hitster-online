@@ -98,7 +98,14 @@ export function useRoomChannel({
     const roomChannel = client
       .channel(`room:${roomId}`)
       .on("broadcast", { event: "*" }, ({ event, payload }) => {
-        onEventRef.current?.(event as RoomChannelEvent, payload);
+        // Védőháló: az onEvent handlerek async függvények (refetch-eket await-olnak) — ha egy
+        // malformed/váratlan payload vagy egy közbeeső hálózati hiba miatt eldobnak egy hibát,
+        // enélkül csendes "unhandled promise rejection" lenne (a hívó itt nem await-eli), ami
+        // félbehagyott state-frissítést eredményezhetne anélkül, hogy bárhol látszódna. Egy
+        // rossz broadcast emiatt sosem szabad, hogy megszakítsa a csatorna további működését.
+        Promise.resolve(onEventRef.current?.(event as RoomChannelEvent, payload)).catch((err) => {
+          console.warn(`[useRoomChannel] onEvent handler failed for "${event}"`, err);
+        });
       })
       .on("presence", { event: "sync" }, () => {
         onPresenceChangeRef.current?.(roomChannel.presenceState());

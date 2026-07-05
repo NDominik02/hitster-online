@@ -107,16 +107,25 @@ export async function findReadyDeckByPlaylistUrl(url: string): Promise<Deck | nu
  * Pollingozza a decks táblát ~2 mp-enként (BACKEND-NOTES 4. javaslat), amíg status 'ready' vagy
  * 'failed' nem lesz. Az onProgress callback minden pollingnál meghívódik a friss állapottal, hogy a
  * GenerationProgress komponens élőben frissülhessen.
+ *
+ * `maxWaitMs` — védőháló, ha a decks sor valamiért sosem érné el a ready/failed állapotot (pl. a
+ * self-chaining batch-lánc megszakadt — ld. generate_deck invokeNextBatch jsdoc). 25 perc bőven
+ * a legrosszabb eset (Premium-módú, 300 track-es, teljesen újragenerált pakli) fölött van.
  */
 export async function pollDeckUntilReady(
   deckId: string,
   onProgress?: (deck: Deck) => void,
-  intervalMs = 2000
+  intervalMs = 2000,
+  maxWaitMs = 25 * 60 * 1000
 ): Promise<Deck> {
+  const deadline = Date.now() + maxWaitMs;
   while (true) {
     const deck = await pollDeckProgress(deckId);
     onProgress?.(deck);
     if (deck.status === "ready" || deck.status === "failed") return deck;
+    if (Date.now() >= deadline) {
+      throw new Error("A pakli generálása túl sokáig tartott (időtúllépés). Próbáld újra.");
+    }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }
@@ -162,14 +171,9 @@ export async function drawCard(roomId: string): Promise<DrawCardResponse> {
  * place_card (ARCHITECTURE 3.6 / 11.3.3) — csak az aktív játékos hívhatja.
  *
  * F2-bővítés (ARCHITECTURE 11.3.3): opcionális `nameGuess` — a "Bemondom!" kapcsoló alatt
- * gyűjtött előadó/cím a LERAKOM gombbal együtt megy fel egy hívásban (F2-D1). A Backend
- * `place_card` Edge Function-je a jelen (2026-07-03-i) állapotában MÉG NEM fogadja el ezt a
- * mezőt és MÉG NEM ír `steal_deadline`-t (ld. supabase/functions/place_card/index.ts — a UPDATE
- * csak `placement`/`phase`-t állít). A hívás emiatt jelenleg ártalmatlanul figyelmen kívül
- * hagyja a nameGuess-t (a Function egyszerűen nem olvassa a mezőt), és a válasz
- * `stealDeadline: null` lesz — a hívó oldal (host steal-ablak logika) ezt defenzíven kezeli:
- * null deadline esetén F1-szerűen azonnal resolve-ol. Amint a Backend bővíti a Function-t
- * (ARCHITECTURE 11.3.3 szerint), ez a wrapper módosítás nélkül helyesen fog működni.
+ * gyűjtött előadó/cím a LERAKOM gombbal együtt megy fel egy hívásban (F2-D1). A place_card
+ * Edge Function eltárolja a nameGuess-t (kiértékelés nélkül — az csak resolveRound-ban történik,
+ * anti-leak) és ír egy valós `steal_deadline`-t (now()+15s) — ld. supabase/functions/place_card/index.ts.
  */
 export async function placeCard(
   roundId: string,
@@ -184,15 +188,11 @@ export async function placeCard(
 }
 
 /**
- * register_steal (ARCHITECTURE 11.6.1) — TODO F2: a szerveroldali Edge Function még nem
- * létezik (nincs supabase/functions/register_steal/ mappa a Backend agent munkája
- * befejezéséig). Ez a wrapper a végleges I/O-szerződést követi (ARCHITECTURE 11.6.1), hogy a
- * StealButton komponens és a host steal-ablak UI a szerződés ellen épülhessen már most —
- * amint a Backend deployolja a Function-t, ez a hívás módosítás nélkül működni fog.
- *
- * Bemenet: a stealer SAJÁT idővonalán megjelölt rés (position). Kimenet sikeres levonás után
- * a hátralévő tokenek + a kör aktuális steal-darabszáma (host UI "X-en lopnak" számlálóhoz —
- * de ezt jelenleg a `steal_registered` broadcast payload-ja adja, nem ez a válasz feltétlenül).
+ * register_steal (ARCHITECTURE 11.6.1) — a REDESIGN (2026-07-03) óta `position` az AKTÍV
+ * JÁTÉKOS idővonalán megjelölt rés, nem a stealer sajátján (ld. supabase/functions/register_steal
+ * jsdoc-ja a teljes indoklásért). Kimenet sikeres levonás után a hátralévő tokenek + a kör
+ * aktuális steal-darabszáma (a host UI élő "X-en lopnak" számlálója ehelyett a
+ * `steal_registered` broadcast payload-jából dolgozik, nem ebből a válaszból).
  */
 export async function registerSteal(
   roundId: string,
@@ -202,9 +202,9 @@ export async function registerSteal(
 }
 
 /**
- * use_token (ARCHITECTURE 11.6.4) — TODO F2: a szerveroldali Edge Function még nem létezik.
- * Két akció: `skip` (1 token, F2-D3 — szám átugrása lerakás előtt) és `draw3` (3 token,
- * F2-D4 — azonnali felfedett +1 kártya, a `position` a bemenetben kötelező ehhez az ághoz).
+ * use_token (ARCHITECTURE 11.6.4). Két akció: `skip` (1 token, F2-D3 — szám átugrása lerakás
+ * előtt) és `draw3` (3 token, F2-D4 — azonnali felfedett +1 kártya, a `position` a bemenetben
+ * kötelező ehhez az ághoz).
  */
 export async function useToken(
   roundId: string,
