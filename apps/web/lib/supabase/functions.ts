@@ -12,7 +12,16 @@
 import { FunctionsHttpError } from "@supabase/supabase-js";
 import { getSupabaseClient } from "./client";
 import { adaptDeck, adaptPlayer, adaptRoom, adaptTimelineCard } from "./adapters";
-import type { Deck, DrawCardResponse, Player, PlayerGameStats, Room, RoomSettings, TimelineCardPublic } from "../game/types";
+import type {
+  CoverageExcludedTrack,
+  Deck,
+  DrawCardResponse,
+  Player,
+  PlayerGameStats,
+  Room,
+  RoomSettings,
+  TimelineCardPublic,
+} from "../game/types";
 
 async function invoke<T>(name: string, body: Record<string, unknown>): Promise<T> {
   const client = getSupabaseClient();
@@ -420,11 +429,28 @@ export async function spotifyListDevices(): Promise<{
   return invoke("spotify_list_devices", {});
 }
 
-/** spotify_playback_command (S20) — play/pause a megadott Spotify Connect device-on. */
+/**
+ * spotify_playback_command (S20) — play/pause/resume a megadott Spotify Connect
+ * device-on. "play" mindig a kör elejéről indít (position_ms:0); "resume" a
+ * korábban megállított pozíciótól folytat (playtest feedback, 2026-07-06).
+ */
 export async function spotifyPlaybackCommand(
-  action: "play" | "pause",
+  action: "play" | "pause" | "resume",
   deviceId: string,
   spotifyUri?: string
 ): Promise<{ ok: true }> {
   return invoke("spotify_playback_command", { action, deviceId, spotifyUri });
+}
+
+/**
+ * add_manual_year_card (playtest feedback, 2026-07-06) — a "nincs évszám" miatt kimaradt,
+ * de audio-forrással rendelkező trackhez a host utólag megadja a helyes évet a riport
+ * képernyőn; a szerver ekkor letölti/feltölti a hangot és kártyaként hozzáadja a paklihoz.
+ */
+export async function addManualYearCard(
+  deckId: string,
+  trackIndex: number,
+  year: number
+): Promise<{ ok: true; usableCount: number; coveragePct: number; meetsMinimum: boolean; excluded: CoverageExcludedTrack[] }> {
+  return invoke("add_manual_year_card", { deckId, trackIndex, year });
 }

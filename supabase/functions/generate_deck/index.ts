@@ -304,6 +304,7 @@ interface ItunesMatch {
   previewUrl: string | null;
   matchScore: number;
   releaseYear: number | null;
+  artworkUrl: string | null;
 }
 
 let itunesLastRequestAt = 0;
@@ -333,16 +334,21 @@ async function searchItunes(title: string, artist: string): Promise<ItunesMatch>
       }
     }
     if (!best || bestScore < ITUNES_MIN_MATCH_SCORE) {
-      return { previewUrl: null, matchScore: Math.round(bestScore * 100) / 100, releaseYear: null };
+      return { previewUrl: null, matchScore: Math.round(bestScore * 100) / 100, releaseYear: null, artworkUrl: null };
     }
     const releaseYear = best.releaseDate ? parseInt(String(best.releaseDate).slice(0, 4), 10) : null;
+    // iTunes csak 100x100-as thumbnailt ad vissza alapból (`artworkUrl100`) — a
+    // méret a fájlnévben van kódolva, a "100x100bb" cserével nagyobb (600x600)
+    // változatot kapunk anélkül, hogy külön kérést kellene indítani érte.
+    const artworkUrl = best.artworkUrl100 ? String(best.artworkUrl100).replace('100x100bb', '600x600bb') : null;
     return {
       previewUrl: best.previewUrl ?? null,
       matchScore: Math.round(bestScore * 100) / 100,
       releaseYear: !isNaN(releaseYear as number) ? releaseYear : null,
+      artworkUrl,
     };
   } catch {
-    return { previewUrl: null, matchScore: 0, releaseYear: null };
+    return { previewUrl: null, matchScore: 0, releaseYear: null, artworkUrl: null };
   }
 }
 
@@ -356,6 +362,7 @@ interface ProcessedTrack {
   finalYearSource: string;
   yearUncertain: boolean;
   itunesPreviewUrl: string | null;
+  itunesArtworkUrl: string | null;
   excludeReason: 'no_preview' | 'no_year' | null;
   newCacheEntry?: { norm_key: string; year: number | null; year_source: string; match_score: number | null };
 }
@@ -409,6 +416,7 @@ async function processTrack(track: RawTrack, mbCacheMap: Map<string, YearResolut
     finalYearSource,
     yearUncertain,
     itunesPreviewUrl: itunesRes.previewUrl,
+    itunesArtworkUrl: itunesRes.artworkUrl,
     excludeReason,
     newCacheEntry,
   };
@@ -610,6 +618,24 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
   }
 }
 
+// Borítókép-fallback: a Spotify NYILVÁNOS oembed végpontja (nem igényel OAuth-ot,
+// se Premium-kapcsolatot) egy track URI-ra visszaad egy `thumbnail_url`-t — ez
+// csak akkor kell, ha az iTunes-keresés (ami amúgy is lefut minden trackre,
+// ld. searchItunes) nem talált artworkot (alacsony match score vagy nincs találat).
+async function fetchSpotifyOembedArtwork(spotifyUri: string | null): Promise<string | null> {
+  if (!spotifyUri) return null;
+  const trackId = spotifyUri.split(':').pop();
+  if (!trackId) return null;
+  try {
+    const res = await fetch(`https://open.spotify.com/oembed?url=https://open.spotify.com/track/${trackId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.thumbnail_url ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // Audio upload phase — also time-boxed and self-chaining for large decks,
 // since fetching+uploading ~360KB per track for 100 tracks is itself
 // non-trivial wall-clock time.
@@ -621,9 +647,33 @@ async function runAudioUploadPhase(
   startedAt: number
 ): Promise<void> {
   const usableTracks = processed.filter((t) => !t.excludeReason);
+  // Playtest feedback (2026-07-06): a 'no_year' miatt kimaradt trackekhez most eltároljuk
+  // az esetleges audio-forrást (Spotify preview / iTunes) és a borítóképet is, hogy a host
+  // utólag, a riport képernyőn beírhassa a helyes évet, és a track kártyaként bekerülhessen
+  // a pakliba (ld. add_manual_year_card) — anélkül ez az adat elveszne, mert a normál
+  // audio-upload fázis csak a MÁR feloldott évű trackeken fut végig.
   const excluded = processed
     .filter((t) => t.excludeReason)
-    .map((t) => ({ title: t.raw.title, artist: t.raw.artist, reason: t.excludeReason }));
+    .map((t) => {
+      const sourceUrl = t.raw.spotifyPreviewUrl ?? t.itunesPreviewUrl;
+      return {
+        title: t.raw.title,
+        artist: t.raw.artist,
+        reason: t.excludeReason,
+        index: t.raw.index,
+        hasSource: t.excludeReason === 'no_year' && !!sourceUrl,
+        ...(t.excludeReason === 'no_year' && sourceUrl
+          ? {
+              spotifyPreviewUrl: t.raw.spotifyPreviewUrl,
+              itunesPreviewUrl: t.itunesPreviewUrl,
+              spotifyUri: t.raw.uri,
+              durationMs: t.raw.durationMs,
+              itunesArtworkUrl: t.itunesArtworkUrl,
+              audioSource: t.raw.spotifyPreviewUrl ? 'spotify_embed' : 'itunes',
+            }
+          : {}),
+      };
+    });
 
   const { data: deckRow } = await supabase.from('decks').select('report').eq('id', deckId).single();
   const report = (deckRow?.report ?? {}) as any;
@@ -655,7 +705,14 @@ async function runAudioUploadPhase(
     const audioSource = t.raw.spotifyPreviewUrl ? 'spotify_embed' : 'itunes';
 
     try {
-      const audioRes = await fetch(sourceUrl);
+      // Borítókép: elsődlegesen az iTunes-keresésből (ami amúgy is lefutott minden
+      // trackre, ld. processTrack) — ha onnan nincs (alacsony match score), a
+      // Spotify nyilvános oembed végpontja a fallback (nem igényel authot). A két
+      // kérés párhuzamosan fut az audio letöltésével, nem növeli a wall-clock időt.
+      const [audioRes, artworkUrl] = await Promise.all([
+        fetch(sourceUrl),
+        t.itunesArtworkUrl ? Promise.resolve(t.itunesArtworkUrl) : fetchSpotifyOembedArtwork(t.raw.uri),
+      ]);
       if (!audioRes.ok) throw new Error(`audio fetch failed: ${audioRes.status}`);
       const audioBuf = await audioRes.arrayBuffer();
       const path = `${deckId}/${cardId}.mp3`;
@@ -674,7 +731,7 @@ async function runAudioUploadPhase(
         year_uncertain: t.yearUncertain,
         audio_url: path,
         audio_source: audioSource,
-        artwork_url: null,
+        artwork_url: artworkUrl,
         spotify_uri: t.raw.uri,
         duration_ms: t.raw.durationMs,
       });

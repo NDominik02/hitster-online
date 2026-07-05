@@ -274,6 +274,7 @@ export default function PassAndPlaySoloPage() {
           cards={activeTimeline}
           ownerColor={activePlayer.color}
           deadlineIso={round.placingDeadline}
+          submitting={placing}
           onConfirm={handlePlaceCard}
           onExpire={() => {
             /* a szerver a placing_deadline lejártát önmaga kezeli (D6) */

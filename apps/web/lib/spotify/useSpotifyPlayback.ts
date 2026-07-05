@@ -72,6 +72,17 @@ export function useSpotifyPlayback(enabled: boolean) {
     }
   }
 
+  /** Playtest feedback (2026-07-06) — a host manuálisan folytathatja a
+   *  lejátszást a megállított pozíciótól (nem az elejéről, mint a play()). */
+  async function resume(): Promise<void> {
+    if (!activeDeviceId) return;
+    try {
+      await spotifyPlaybackCommand("resume", activeDeviceId);
+    } catch {
+      // Néma hiba, ugyanazon okból, mint pause().
+    }
+  }
+
   return {
     sdkStatus,
     needsDevicePicker: enabled && sdkStatus === "unavailable" && !selectedConnectDeviceId,
@@ -81,5 +92,6 @@ export function useSpotifyPlayback(enabled: boolean) {
     activeDeviceId,
     play,
     pause,
+    resume,
   };
 }

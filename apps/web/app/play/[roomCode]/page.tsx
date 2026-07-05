@@ -96,6 +96,11 @@ export default function PlayRoomPage() {
   const [joining, setJoining] = useState(false);
 
   const [placedOutcome, setPlacedOutcome] = useState<"correct" | "wrong" | "timeout" | null>(null);
+  // Loading-visszajelzés + dupla-submit védelem a LERAKOM gombhoz (playtest feedback,
+  // 2026-07-06): korábban a gomb rögtön újra kattinthatóvá vált, semmi jelzés nem
+  // mutatta, hogy a place_card hívás még folyamatban van — türelmetlen tapogatás
+  // esetén ez több egymást követő hívást is elküldött ugyanarra a körre.
+  const [placingSubmitting, setPlacingSubmitting] = useState(false);
 
   // S23 (reveal-show) — a SAJÁT eredményhez kötött haptika (nem a globális round.outcome-hoz),
   // körönként egyszer, a reveal-belépés pillanatában.
@@ -187,6 +192,7 @@ export default function PlayRoomPage() {
         if (rid) {
           const r = await refreshRound(rid);
           setPlacedOutcome(null);
+          setPlacingSubmitting(false);
           setStealCount(0);
           setStealSubmittedForRound(null);
           setStealError(null);
@@ -306,7 +312,8 @@ export default function PlayRoomPage() {
   }
 
   async function handlePlaceCard(slotIndex: number, nameGuess?: NameGuessInput | null) {
-    if (!round) return;
+    if (!round || placingSubmitting) return;
+    setPlacingSubmitting(true);
     try {
       await placeCard(round.id, slotIndex, nameGuess);
       await refreshRound(round.id);
@@ -315,7 +322,12 @@ export default function PlayRoomPage() {
       await broadcastEvent("card_placed", { roundId: round.id });
     } catch (err) {
       setJoinError(err instanceof Error ? err.message : "Nem sikerült lerakni a kártyát.");
+      setPlacingSubmitting(false);
     }
+    // Sikeres lerakás után a `placingSubmitting`-et szándékosan NEM nullázzuk itt —
+    // a round.phase úgyis elmozdul (stealing/reveal), a TippingScreen unmountol, a
+    // state a következő körnél frissen inicializálódik. Ha nullázzuk, egy lassú
+    // hálózat mellett még a régi fázisban újra megnyomható lenne a gomb.
   }
 
   /**
@@ -428,6 +440,11 @@ export default function PlayRoomPage() {
 
   // P5 — reveal-visszajelzés (bármelyik player, saját eredmény).
   if (round && round.phase === "reveal" && round.revealedCard) {
+    // BUGFIX (2026-07-06): a `success` korábban a KÖR globális kimenetelét tükrözte,
+    // ezért a "Eltaláltad!"/"Nem talált" szöveg MINDENKINEK ugyanaz volt, függetlenül
+    // attól, hogy ő rakta-e le a kártyát — most a soron lévőhöz (isMyTurn) képest
+    // személyre szabott: a soron lévő "Eltaláltad/Nem találtad el" második személyben
+    // olvassa, mindenki más a soron lévő nevével, harmadik személyben.
     const success = placedOutcome === "correct";
     // F2 (AC21.8, AC22.11, ARCHITECTURE 11.5) — a saját bemondás/steal eredménye, ha volt.
     // Csak reveal fázisban érkezik (anti-leak), a revealedCard.guess/.steals mezőkből —
@@ -445,7 +462,15 @@ export default function PlayRoomPage() {
               placedOutcome ?? (round.outcome === "disputed" ? "wrong" : round.outcome) ?? "wrong"
             }
           />
-          <p className="text-lg">{success ? "Eltaláltad! 🎉" : "Nem talált 😅"}</p>
+          <p className="text-lg">
+            {isMyTurn
+              ? success
+                ? "Eltaláltad! 🎉"
+                : "Nem találtad el 😅"
+              : success
+                ? `${activePlayer?.name ?? "Ő"} eltalálta! 🎉`
+                : `${activePlayer?.name ?? "Ő"} nem találta el 😅`}
+          </p>
           <p className="font-semibold">
             {round.revealedCard.artist} – {round.revealedCard.year}
           </p>
@@ -481,6 +506,7 @@ export default function PlayRoomPage() {
         cards={myTimeline}
         ownerColor={me.color}
         deadlineIso={round.placingDeadline}
+        submitting={placingSubmitting}
         onConfirm={(slotIndex, nameGuess) => {
           sendDragUpdate({ playerId: me.id, slotIndex });
           handlePlaceCard(slotIndex, nameGuess);

@@ -28,7 +28,7 @@ Deno.serve(async (req: Request) => {
     return errorResponse('invalid_body', 'Érvénytelen kérés.', 400);
   }
 
-  if (body.action !== 'play' && body.action !== 'pause') {
+  if (body.action !== 'play' && body.action !== 'pause' && body.action !== 'resume') {
     return errorResponse('invalid_action', 'Érvénytelen művelet.', 400);
   }
   if (!body.deviceId) return errorResponse('invalid_device', 'Hiányzó eszköz azonosító.', 400);
@@ -41,10 +41,14 @@ Deno.serve(async (req: Request) => {
   if (!token) return errorResponse('no_spotify_connection', 'Nincs csatlakoztatott Spotify-fiók.', 404);
 
   const url =
-    body.action === 'play'
-      ? `https://api.spotify.com/v1/me/player/play?device_id=${encodeURIComponent(body.deviceId)}`
-      : `https://api.spotify.com/v1/me/player/pause?device_id=${encodeURIComponent(body.deviceId)}`;
+    body.action === 'pause'
+      ? `https://api.spotify.com/v1/me/player/pause?device_id=${encodeURIComponent(body.deviceId)}`
+      : `https://api.spotify.com/v1/me/player/play?device_id=${encodeURIComponent(body.deviceId)}`;
 
+  // Playtest feedback (2026-07-06) — 'resume' hívja UGYANEZT a play végpontot,
+  // de body NÉLKÜL: a Spotify API ilyenkor a korábban megállított pozíciótól
+  // folytatja a lejátszást ahelyett, hogy position_ms:0-ról újraindítaná (amit
+  // a 'play' action explicit body-ja tesz, körönként az elejéről indulva).
   const res = await fetch(url, {
     method: 'PUT',
     headers: {

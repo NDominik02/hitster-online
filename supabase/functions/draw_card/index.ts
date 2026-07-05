@@ -83,6 +83,7 @@ Deno.serve(async (req: Request) => {
     activePlayerId: draw.activePlayerId,
     audioUrl: draw.audioUrl,
     spotifyUri: draw.spotifyUri,
+    durationMs: draw.durationMs,
     placingDeadline: draw.placingDeadline,
   });
 });

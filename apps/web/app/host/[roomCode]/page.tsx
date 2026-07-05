@@ -62,11 +62,22 @@ export default function HostRoomPage() {
   const [gameStats, setGameStats] = useState<PlayerGameStats[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Loading-visszajelzés + dupla-submit védelem a START/Következő kör gombokhoz (playtest
+  // feedback, 2026-07-06) — korábban semmi nem jelezte, hogy a hívás folyamatban van, és a
+  // gomb türelmetlen többszöri kattintásra több egymást követő hívást is elküldött.
+  const [starting, setStarting] = useState(false);
+  const [advancingTurn, setAdvancingTurn] = useState(false);
 
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioLocked, setAudioLocked] = useState(false);
   const [dragGhostIndex, setDragGhostIndex] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Playtest feedback (2026-07-06) — az AudioProgressBar korábban hardcoded 30 mp-et írt ki
+  // és sosem haladt előre; most a draw_card durationMs mezőjéből jövő valódi hosszt és a
+  // <audio> elem tényleges lejátszási pozícióját mutatja, plusz kézi megállítás/folytatás.
+  const [trackDurationSec, setTrackDurationSec] = useState(30);
+  const [currentPlaybackSec, setCurrentPlaybackSec] = useState(0);
+  const [manuallyPaused, setManuallyPaused] = useState(false);
 
   // S20 (F3, Spotify Premium) — a rooms.spotify_playback_mode oszlop (NEM a settings JSON
   // része, ld. lib/game/types.ts Room.spotifyPlaybackMode jsdoc) — csak 'premium'-nál
@@ -317,11 +328,12 @@ export default function HostRoomPage() {
   }, [roomId, refreshPlayers]);
 
   async function handleStart() {
-    if (!roomId) return;
+    if (!roomId || starting) return;
     // S23: a START gomb egy garantált user-gesture — itt oldjuk fel a hangeffekt
     // AudioContext-jét is (Chrome/Safari "suspended" állapotban tartaná az első
     // reveal-ig enélkül), ugyanúgy, ahogy az <audio> elemet is user-gesture oldja fel.
     primeSoundContext();
+    setStarting(true);
     try {
       const res = await startGame(roomId);
       setRoomStatus("playing");
@@ -330,6 +342,7 @@ export default function HostRoomPage() {
       await beginRound(res.roundId);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Nem sikerült elindítani a játékot.");
+      setStarting(false);
     }
   }
 
@@ -340,6 +353,9 @@ export default function HostRoomPage() {
       // S20 (F3) — 'premium' módban ELSŐKÉNT a Spotify-lejátszást próbáljuk (SDK vagy a host
       // által kiválasztott Connect-eszköz); csak sikertelenség esetén (nincs eszköz, hiba a
       // parancsnál) esünk vissza a megszokott preview <audio> útra — a játék emiatt sosem törik.
+      setTrackDurationSec(draw.durationMs ? draw.durationMs / 1000 : 30);
+      setCurrentPlaybackSec(0);
+      setManuallyPaused(false);
       if (draw.spotifyUri) {
         const played = await spotify.play(draw.spotifyUri);
         setSpotifyPlaying(played);
@@ -355,6 +371,27 @@ export default function HostRoomPage() {
       await refreshRound(roundId);
       console.warn("[draw_card]", err);
     }
+  }
+
+  /** Playtest feedback (2026-07-06) — kézi megállítás/folytatás gomb az AudioProgressBar mellett. */
+  async function handleTogglePlayback() {
+    if (spotifyPlaying) {
+      if (manuallyPaused) {
+        await spotify.resume();
+      } else {
+        await spotify.pause();
+      }
+      setManuallyPaused((p) => !p);
+      return;
+    }
+    const el = audioRef.current;
+    if (!el) return;
+    if (manuallyPaused) {
+      el.play().catch(() => {});
+    } else {
+      el.pause();
+    }
+    setManuallyPaused((p) => !p);
   }
 
   async function handleResolve() {
@@ -422,7 +459,8 @@ export default function HostRoomPage() {
   }
 
   async function handleNextTurn() {
-    if (!roomId) return;
+    if (!roomId || advancingTurn) return;
+    setAdvancingTurn(true);
     try {
       const res = await nextTurn(roomId);
       if (res.next === "finished") {
@@ -460,6 +498,8 @@ export default function HostRoomPage() {
       }
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Nem sikerült léptetni a kört.");
+    } finally {
+      setAdvancingTurn(false);
     }
   }
 
@@ -639,6 +679,18 @@ export default function HostRoomPage() {
     }
   }, [audioUrl]);
 
+  // Playtest feedback (2026-07-06) — valós lejátszási pozíció az AudioProgressBar-hoz
+  // (korábban ez sosem haladt, mindig 0:00-t mutatott). Az <audio> elem élettartama a
+  // komponens gyökeréhez kötött (ld. fenti AUDIO-HOTFIX jsdoc), tehát ez az effect csak
+  // egyszer, mountoláskor csatolja a listenert.
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    const onTimeUpdate = () => setCurrentPlaybackSec(el.currentTime);
+    el.addEventListener("timeupdate", onTimeUpdate);
+    return () => el.removeEventListener("timeupdate", onTimeUpdate);
+  }, []);
+
   // S23 (reveal-show) — a hangeffekt a reveal fázisba lépés PILLANATÁBAN szól egyszer,
   // körönként (a `round?.id` dependency zárja ki, hogy re-render újra elsüsse).
   useEffect(() => {
@@ -731,8 +783,8 @@ export default function HostRoomPage() {
             </div>
 
             <div>
-              <AppButton size="lg" disabled={players.length < 2} onClick={handleStart}>
-                START ▶
+              <AppButton size="lg" disabled={players.length < 2 || starting} onClick={handleStart}>
+                {starting ? "Indítás…" : "START ▶"}
               </AppButton>
               <p className="text-text-muted text-sm mt-2">Legalább 2 játékos kell az induláshoz.</p>
             </div>
@@ -785,11 +837,20 @@ export default function HostRoomPage() {
                 <div className="flex justify-center">
                   <MysteryCard spinning size="lg" />
                 </div>
-                <AudioProgressBar
-                  current={0}
-                  duration={30}
-                  playing={spotifyPlaying || (Boolean(audioUrl) && !audioLocked)}
-                />
+                <div className="flex flex-col items-center gap-2 w-full">
+                  <AudioProgressBar
+                    current={currentPlaybackSec}
+                    duration={trackDurationSec}
+                    playing={!manuallyPaused && (spotifyPlaying || (Boolean(audioUrl) && !audioLocked))}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleTogglePlayback}
+                    className="text-sm text-text-muted hover:text-text underline"
+                  >
+                    {manuallyPaused ? "▶ Folytatás" : "⏸ Megállítás"}
+                  </button>
+                </div>
                 {activePlayer && (
                   <div className="text-center md:pl-6 md:border-l border-border">
                     <p className="eyebrow mb-2">soron</p>
@@ -954,6 +1015,7 @@ export default function HostRoomPage() {
               <div className="flex gap-3">
                 <AppButton
                   variant="secondary"
+                  disabled={advancingTurn}
                   onClick={() => {
                     setDisputeOpen(true);
                     setDisputeYearInput(String(round.revealedCard?.year ?? ""));
@@ -961,7 +1023,9 @@ export default function HostRoomPage() {
                 >
                   ⚠ Vitatom (rossz évszám)
                 </AppButton>
-                <AppButton onClick={handleNextTurn}>Következő kör ▶</AppButton>
+                <AppButton disabled={advancingTurn} onClick={handleNextTurn}>
+                  {advancingTurn ? "Léptetés…" : "Következő kör ▶"}
+                </AppButton>
               </div>
             )}
           </section>
@@ -975,7 +1039,9 @@ export default function HostRoomPage() {
               visszatérnek (a jelzés magától frissül néhány másodperc múlva), vagy próbáld
               újra most.
             </p>
-            <AppButton onClick={handleNextTurn}>Újrapróbálom ▶</AppButton>
+            <AppButton disabled={advancingTurn} onClick={handleNextTurn}>
+              {advancingTurn ? "Próbálkozás…" : "Újrapróbálom ▶"}
+            </AppButton>
           </section>
         )}
 
