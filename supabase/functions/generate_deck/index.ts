@@ -175,7 +175,10 @@ async function fetchPlaylistTracksAuthenticated(
 
     while (url && tracks.length < maxTracks) {
       const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-      if (!res.ok) break; // a partial list is still more useful than bailing entirely
+      if (!res.ok) {
+        console.log(`[premium-widen] page fetch failed status=${res.status} afterTracks=${tracks.length} url=${url}`);
+        break; // a partial list is still more useful than bailing entirely
+      }
       const page = await res.json();
       for (const item of page.items ?? []) {
         const t = item.track;
@@ -472,16 +475,22 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
       if (possiblyTruncatedAt100) {
         const { data: deckOwnerRow } = await supabase.from('decks').select('owner_id').eq('id', deckId).single();
         const ownerId = deckOwnerRow?.owner_id as string | undefined;
+        console.log(`[premium-widen] deck=${deckId} ownerId=${ownerId ?? 'MISSING'}`);
         if (ownerId) {
           const { data: connection } = await supabase
             .from('spotify_connections')
             .select('product')
             .eq('host_uid', ownerId)
             .maybeSingle();
+          console.log(`[premium-widen] connection product=${connection?.product ?? 'NONE'}`);
           if (connection?.product === 'premium') {
             const token = await getValidSpotifyAccessToken(supabase, ownerId);
+            console.log(`[premium-widen] token=${token ? 'valid' : 'MISSING/invalid'}`);
             if (token) {
               const full = await fetchPlaylistTracksAuthenticated(playlistId, token.accessToken, MAX_TRACKS_PREMIUM);
+              console.log(
+                `[premium-widen] fetch ok=${full.ok} reason=${full.reason ?? 'n/a'} fetchedTracks=${full.tracks?.length ?? 0} embedTracks=${tracks.length}`
+              );
               if (full.ok && full.tracks && full.tracks.length > tracks.length) {
                 const previewByUri = new Map(
                   tracks.filter((t) => t.uri).map((t) => [t.uri as string, t.spotifyPreviewUrl])
@@ -491,6 +500,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
                   spotifyPreviewUrl: t.uri ? (previewByUri.get(t.uri) ?? t.spotifyPreviewUrl) : t.spotifyPreviewUrl,
                 }));
                 possiblyTruncatedAt100 = full.tracks.length >= MAX_TRACKS_PREMIUM;
+                console.log(`[premium-widen] widened to ${tracks.length} tracks`);
               }
             }
           }
