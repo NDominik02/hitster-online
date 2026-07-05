@@ -510,31 +510,23 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
           if (sourcePossiblyTruncatedAt100) {
             console.log(`[premium-widen] deck=${deckId} source=${sourcePlaylistId} ownerId=${ownerId ?? 'MISSING'}`);
             if (ownerId) {
-              const { data: connection } = await supabase
-                .from('spotify_connections')
-                .select('product')
-                .eq('host_uid', ownerId)
-                .maybeSingle();
-              console.log(`[premium-widen] connection product=${connection?.product ?? 'NONE'}`);
-              if (connection?.product === 'premium') {
-                const token = await getValidSpotifyAccessToken(supabase, ownerId);
-                console.log(`[premium-widen] token=${token ? 'valid' : 'MISSING/invalid'}`);
-                if (token) {
-                  const full = await fetchPlaylistTracksAuthenticated(sourcePlaylistId, token.accessToken, MAX_TRACKS_PREMIUM);
-                  console.log(
-                    `[premium-widen] fetch ok=${full.ok} reason=${full.reason ?? 'n/a'} fetchedTracks=${full.tracks?.length ?? 0} embedTracks=${sourceTracks.length}`
+              const token = await getValidSpotifyAccessToken(supabase, ownerId);
+              console.log(`[premium-widen] token=${token ? 'valid' : 'MISSING/invalid'}`);
+              if (token) {
+                const full = await fetchPlaylistTracksAuthenticated(sourcePlaylistId, token.accessToken, MAX_TRACKS_PREMIUM);
+                console.log(
+                  `[premium-widen] fetch ok=${full.ok} reason=${full.reason ?? 'n/a'} fetchedTracks=${full.tracks?.length ?? 0} embedTracks=${sourceTracks.length}`
+                );
+                if (full.ok && full.tracks && full.tracks.length > sourceTracks.length) {
+                  const previewByUri = new Map(
+                    sourceTracks.filter((t) => t.uri).map((t) => [t.uri as string, t.spotifyPreviewUrl])
                   );
-                  if (full.ok && full.tracks && full.tracks.length > sourceTracks.length) {
-                    const previewByUri = new Map(
-                      sourceTracks.filter((t) => t.uri).map((t) => [t.uri as string, t.spotifyPreviewUrl])
-                    );
-                    sourceTracks = full.tracks.map((t) => ({
-                      ...t,
-                      spotifyPreviewUrl: t.uri ? (previewByUri.get(t.uri) ?? t.spotifyPreviewUrl) : t.spotifyPreviewUrl,
-                    }));
-                    sourcePossiblyTruncatedAt100 = full.tracks.length >= MAX_TRACKS_PREMIUM;
-                    console.log(`[premium-widen] widened source=${sourcePlaylistId} to ${sourceTracks.length} tracks`);
-                  }
+                  sourceTracks = full.tracks.map((t) => ({
+                    ...t,
+                    spotifyPreviewUrl: t.uri ? (previewByUri.get(t.uri) ?? t.spotifyPreviewUrl) : t.spotifyPreviewUrl,
+                  }));
+                  sourcePossiblyTruncatedAt100 = full.tracks.length >= MAX_TRACKS_PREMIUM;
+                  console.log(`[premium-widen] widened source=${sourcePlaylistId} to ${sourceTracks.length} tracks`);
                 }
               }
             }
@@ -601,31 +593,23 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
         const ownerId = deckOwnerRow?.owner_id as string | undefined;
         console.log(`[premium-widen] deck=${deckId} ownerId=${ownerId ?? 'MISSING'}`);
         if (ownerId) {
-          const { data: connection } = await supabase
-            .from('spotify_connections')
-            .select('product')
-            .eq('host_uid', ownerId)
-            .maybeSingle();
-          console.log(`[premium-widen] connection product=${connection?.product ?? 'NONE'}`);
-          if (connection?.product === 'premium') {
-            const token = await getValidSpotifyAccessToken(supabase, ownerId);
-            console.log(`[premium-widen] token=${token ? 'valid' : 'MISSING/invalid'}`);
-            if (token) {
-              const full = await fetchPlaylistTracksAuthenticated(playlistId, token.accessToken, MAX_TRACKS_PREMIUM);
-              console.log(
-                `[premium-widen] fetch ok=${full.ok} reason=${full.reason ?? 'n/a'} fetchedTracks=${full.tracks?.length ?? 0} embedTracks=${tracks.length}`
+          const token = await getValidSpotifyAccessToken(supabase, ownerId);
+          console.log(`[premium-widen] token=${token ? 'valid' : 'MISSING/invalid'}`);
+          if (token) {
+            const full = await fetchPlaylistTracksAuthenticated(playlistId, token.accessToken, MAX_TRACKS_PREMIUM);
+            console.log(
+              `[premium-widen] fetch ok=${full.ok} reason=${full.reason ?? 'n/a'} fetchedTracks=${full.tracks?.length ?? 0} embedTracks=${tracks.length}`
+            );
+            if (full.ok && full.tracks && full.tracks.length > tracks.length) {
+              const previewByUri = new Map(
+                tracks.filter((t) => t.uri).map((t) => [t.uri as string, t.spotifyPreviewUrl])
               );
-              if (full.ok && full.tracks && full.tracks.length > tracks.length) {
-                const previewByUri = new Map(
-                  tracks.filter((t) => t.uri).map((t) => [t.uri as string, t.spotifyPreviewUrl])
-                );
-                tracks = full.tracks.map((t) => ({
-                  ...t,
-                  spotifyPreviewUrl: t.uri ? (previewByUri.get(t.uri) ?? t.spotifyPreviewUrl) : t.spotifyPreviewUrl,
-                }));
-                possiblyTruncatedAt100 = full.tracks.length >= MAX_TRACKS_PREMIUM;
-                console.log(`[premium-widen] widened to ${tracks.length} tracks`);
-              }
+              tracks = full.tracks.map((t) => ({
+                ...t,
+                spotifyPreviewUrl: t.uri ? (previewByUri.get(t.uri) ?? t.spotifyPreviewUrl) : t.spotifyPreviewUrl,
+              }));
+              possiblyTruncatedAt100 = full.tracks.length >= MAX_TRACKS_PREMIUM;
+              console.log(`[premium-widen] widened to ${tracks.length} tracks`);
             }
           }
         }
