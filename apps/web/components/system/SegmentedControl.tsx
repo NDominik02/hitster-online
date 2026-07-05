@@ -26,7 +26,7 @@ export function SegmentedControl<T extends string | number>({
 }: SegmentedControlProps<T>) {
   return (
     <div>
-      {label && <div className="text-sm text-text-muted mb-2">{label}</div>}
+      {label && <div className="eyebrow mb-2">{label}</div>}
       <div
         role="radiogroup"
         aria-label={ariaLabel ?? label}
@@ -42,8 +42,8 @@ export function SegmentedControl<T extends string | number>({
               aria-checked={active}
               onClick={() => onChange(opt.value)}
               className={clsx(
-                "min-h-11 px-4 rounded-[calc(var(--radius-button)-4px)] text-sm font-semibold transition-colors duration-150",
-                active ? "bg-accent text-white" : "text-text-muted hover:text-text"
+                "min-h-11 px-4 rounded-[calc(var(--radius-button)-4px)] text-sm font-bold font-code transition-colors duration-150",
+                active ? "bg-accent text-[var(--bg)]" : "text-text-muted hover:text-text"
               )}
             >
               {opt.label}

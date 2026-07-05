@@ -59,7 +59,11 @@ export function TimelineSlot({
       )}
       style={
         highlight
-          ? { borderColor: displayColor, backgroundColor: `color-mix(in srgb, ${displayColor} 18%, transparent)` }
+          ? {
+              borderColor: displayColor,
+              backgroundColor: `color-mix(in srgb, ${displayColor} 18%, transparent)`,
+              boxShadow: `0 0 26px -6px ${displayColor}`,
+            }
           : undefined
       }
     >

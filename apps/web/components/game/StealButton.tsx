@@ -85,11 +85,11 @@ export function StealButton({
       <AppButton
         size="lg"
         fullWidth
-        variant="secondary"
+        variant="danger"
         disabled={!canSteal || selectedSlot === null || submitting}
         onClick={() => selectedSlot !== null && onSteal(selectedSlot)}
       >
-        {submitting ? "Lopás folyamatban…" : "Ellopom! (1 🪙)"}
+        {submitting ? "Lopás folyamatban…" : "🕵️ Ellopom! (1 🪙)"}
       </AppButton>
     </div>
   );

@@ -724,7 +724,7 @@ export default function HostRoomPage() {
             )}
 
             <div className="text-left">
-              <h2 className="text-text-muted text-sm uppercase tracking-wide mb-3">
+              <h2 className="eyebrow mb-3">
                 Csatlakozott játékosok ({players.length})
               </h2>
               <PlayerList players={players} layout="grid" />
@@ -759,9 +759,11 @@ export default function HostRoomPage() {
 
         {roomStatus === "playing" && round && !(round.phase === "reveal" && round.revealedCard) && (
           <section className="space-y-8">
-            <div className="flex justify-between text-text-muted text-sm">
-              <span>{round.phase === "stealing" ? "🕵️ Lopás folyamatban…" : "🔊 Most szól…"}</span>
-              <span>Kör {round.roundNo}</span>
+            <div className="flex justify-between items-center">
+              <span className="eyebrow" style={{ color: round.phase === "stealing" ? "var(--danger)" : "var(--accent)" }}>
+                {round.phase === "stealing" ? "🕵️ lopás folyamatban" : "▶ most szól — ki tudod találni?"}
+              </span>
+              <span className="eyebrow">Kör {round.roundNo}</span>
             </div>
 
             {round.phase === "stealing" ? (
@@ -779,17 +781,26 @@ export default function HostRoomPage() {
                 </p>
               </div>
             ) : (
-              <div className="flex flex-col items-center gap-6">
-                <MysteryCard spinning size="lg" />
+              <div className="grid md:grid-cols-[auto_1fr_auto] gap-8 items-center pb-8 border-b border-border">
+                <div className="flex justify-center">
+                  <MysteryCard spinning size="lg" />
+                </div>
                 <AudioProgressBar
                   current={0}
                   duration={30}
                   playing={spotifyPlaying || (Boolean(audioUrl) && !audioLocked)}
                 />
+                {activePlayer && (
+                  <div className="text-center md:pl-6 md:border-l border-border">
+                    <p className="eyebrow mb-2">soron</p>
+                    <PlayerBadge name={activePlayer.name} color={activePlayer.color} state="active" size="lg" tokens={activePlayer.tokens} />
+                    <p className="text-text-muted mt-1 text-sm">tippel…</p>
+                  </div>
+                )}
               </div>
             )}
 
-            {activePlayer && (
+            {round.phase === "stealing" && activePlayer && (
               <div className="bg-surface-2 rounded-[var(--radius-card)] px-6 py-4 text-center">
                 <PlayerBadge
                   name={activePlayer.name}
@@ -798,14 +809,12 @@ export default function HostRoomPage() {
                   size="lg"
                   tokens={activePlayer.tokens}
                 />
-                <p className="text-text-muted mt-2">
-                  {round.phase === "stealing" ? "«lerakta a kártyát»" : "«húzza a kártyát…»"}
-                </p>
+                <p className="text-text-muted mt-2">«lerakta a kártyát»</p>
               </div>
             )}
 
             <div>
-              <h2 className="text-text-muted text-sm uppercase tracking-wide mb-3">Játékosok idővonalai</h2>
+              <h2 className="eyebrow mb-3">Játékosok idővonalai</h2>
               <div className="space-y-2">
                 {players.map((p) => (
                   <PlayerTimelineRow
@@ -980,7 +989,7 @@ export default function HostRoomPage() {
             ))}
 
             <div className="text-left w-full max-w-sm">
-              <h2 className="text-text-muted text-sm uppercase tracking-wide mb-3">Végeredmény</h2>
+              <h2 className="eyebrow mb-3">Végeredmény</h2>
               <ul className="space-y-2">
                 {players
                   .map((p) => ({ p, count: (timelines[p.id] ?? []).length }))
@@ -998,7 +1007,7 @@ export default function HostRoomPage() {
 
             {winners[0] && (
               <div>
-                <h2 className="text-text-muted text-sm uppercase tracking-wide mb-3">
+                <h2 className="eyebrow mb-3">
                   {winners[0].name} idővonala
                 </h2>
                 <div className="flex gap-2 flex-wrap justify-center">

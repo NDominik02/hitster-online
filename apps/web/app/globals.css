@@ -1,23 +1,30 @@
 @import "tailwindcss";
 
-/* Hitster Online — dark party theme (DESIGN.md 6. Style guide) */
+/* Hitster Online — redesign (Claude Design pass, 2026-07). Palette/tipográfia
+   forrása: docs/design/Hitster Online.dc.html + Hitster Prototype.html. */
 :root {
   /* Alap / felület (sötét) */
-  --bg: #0b0b14;
-  --surface: #16161f;
-  --surface-2: #22222e;
-  --border: #33333f;
-  --text: #f2f2f7;
-  --text-muted: #a0a0b0;
+  --bg: #0b0a0f;
+  --surface: #16151c; /* korábbi "panel" */
+  --surface-2: #100f15; /* korábbi "panel-2" */
+  --border: #232129; /* korábbi "line" */
+  --border-2: #2a2833; /* korábbi "line-2" — erősebb kontraszthoz (fókusz, kártyakeret) */
+  --border-3: #2f2c3a; /* korábbi "line-3" — kártyák/telefon-keret */
+  --text: #f3f1ec; /* korábbi "ink" */
+  --text-muted: #9c98a8; /* korábbi "muted" */
+  --text-faint: #6b6879; /* korábbi "faint" — eyebrow/label szürke */
 
-  /* Szemantikus */
-  --accent: #7c5cff; /* D9 */
-  --accent-hover: #9179ff;
-  --success: #2ecc71;
-  --danger: #ff4d5e;
+  /* Szemantikus — amber elsődleges accent, violet másodlagos (a végleges
+     design screenshotok szerint, a lejátszás-gradiensekhez/CTA-khoz). */
+  --accent: #f5b62e;
+  --accent-hover: #ffc857;
+  --accent-2: #8b7bf7;
+  --success: #34e0a1; /* korábbi "mint" */
+  --danger: #ff6b4a; /* korábbi "coral" */
   --warning: #ffb020;
 
-  /* 8 játékos-szín (DESIGN 6.2) */
+  /* 8 játékos-szín (DESIGN 6.2) — megtartva, a redesign nem érinti a
+     játékos-szín-paletta szemantikáját, csak az UI keretrendszerét. */
   --player-green: #2ecc71;
   --player-blue: #3b9dff;
   --player-purple: #b15cff;
@@ -37,9 +44,9 @@
   --space-12: 48px;
   --space-16: 64px;
 
-  /* Radius */
-  --radius-card: 16px;
-  --radius-button: 12px;
+  /* Radius — a redesign valamivel kerekebb kártyákat/gombokat használ */
+  --radius-card: 18px;
+  --radius-button: 13px;
   --radius-pill: 999px;
 }
 
@@ -48,10 +55,14 @@
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
   --color-border: var(--border);
+  --color-border-2: var(--border-2);
+  --color-border-3: var(--border-3);
   --color-text: var(--text);
   --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
+  --color-accent-2: var(--accent-2);
   --color-success: var(--success);
   --color-danger: var(--danger);
   --color-warning: var(--warning);
@@ -63,8 +74,9 @@
   --color-player-yellow: var(--player-yellow);
   --color-player-teal: var(--player-teal);
   --color-player-pink: var(--player-pink);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-body);
+  --font-heading: var(--font-heading);
+  --font-mono: var(--font-mono);
 }
 
 * {
@@ -77,10 +89,34 @@ body {
 }
 
 body {
-  background: var(--bg);
+  /* A finom radiális háttér-gradiens a redesign screenshotjaiból — a sima
+     --bg fölött, hogy a nagy felületek (host lobby, create-room) ne legyenek
+     laposak. */
+  background:
+    radial-gradient(1000px 600px at 12% -8%, #1a1622 0%, transparent 60%),
+    radial-gradient(1000px 700px at 100% 108%, #16121f 0%, transparent 55%),
+    var(--bg);
   color: var(--text);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-body), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-heading), var(--font-body), sans-serif;
+  letter-spacing: -0.03em;
+}
+
+/* Space Mono eyebrow/label minta (DESIGN redesign): kisbetűs tartalom
+   nagybetűsre + betűköz-nyújtásra alakítva, tompított színnel. */
+.eyebrow {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 /* Számokhoz (évszámok, szobakód, timer): tabular-nums a stabil szélességért (DESIGN 6.3) */
@@ -89,7 +125,7 @@ body {
 }
 
 .font-code {
-  font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+  font-family: var(--font-mono), ui-monospace, "SF Mono", "Cascadia Code", monospace;
   font-variant-numeric: tabular-nums;
 }
 
@@ -118,4 +154,37 @@ a:focus-visible,
 .scrollbar-thin {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
+}
+
+/* MysteryCard (bakelit-lemez motívum) + reveal-show EQ hullámsáv animációi */
+@keyframes mystery-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes eq-bar {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+@keyframes float-y {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(-2deg);
+  }
+}
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(245, 182, 46, 0.3);
+  }
+  100% {
+    box-shadow: 0 0 0 18px rgba(245, 182, 46, 0);
+  }
 }

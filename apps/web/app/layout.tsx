@@ -1,15 +1,24 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Bricolage_Grotesque, Instrument_Sans, Space_Mono } from "next/font/google";
 import { ServiceWorkerRegister } from "@/components/system/ServiceWorkerRegister";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Design redesign (Claude Design pass, 2026-07) — Bricolage Grotesque a
+// fejlécekhez, Instrument Sans a törzsszöveghez, Space Mono a
+// mono/label/kód-jellegű elemekhez (szobakód, évszám, timer, eyebrow-feliratok).
+const heading = Bricolage_Grotesque({
+  variable: "--font-heading",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const body = Instrument_Sans({
+  variable: "--font-body",
+  subsets: ["latin"],
+});
+
+const mono = Space_Mono({
+  variable: "--font-mono",
+  weight: ["400", "700"],
   subsets: ["latin"],
 });
 
@@ -25,7 +34,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#7C5CFF",
+  themeColor: "#F5B62E",
 };
 
 export default function RootLayout({
@@ -36,7 +45,7 @@ export default function RootLayout({
   return (
     <html
       lang="hu"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${heading.variable} ${body.variable} ${mono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-bg text-text">
         <ServiceWorkerRegister />

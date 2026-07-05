@@ -62,9 +62,7 @@ export function RosterBuilder({
 
       {players.length > 0 && (
         <div>
-          <h3 className="text-text-muted text-sm uppercase tracking-wide mb-2">
-            Hozzáadva ({players.length})
-          </h3>
+          <h3 className="eyebrow mb-2">Hozzáadva ({players.length})</h3>
           <ul className="space-y-2">
             {players.map((p, i) => (
               <li key={i} className="flex items-center justify-between bg-surface-2 rounded-[var(--radius-card)] px-3 py-2">

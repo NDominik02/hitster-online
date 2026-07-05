@@ -14,7 +14,7 @@ export function GameStats({ players, stats }: GameStatsProps) {
 
   return (
     <div className="w-full max-w-md text-left">
-      <h2 className="text-text-muted text-sm uppercase tracking-wide mb-3">Statisztikák</h2>
+      <h2 className="eyebrow mb-3">Statisztikák</h2>
       <ul className="space-y-2">
         {players.map((p) => {
           const s = byPlayerId.get(p.id);

@@ -10,9 +10,14 @@ export function RoomCodeBadge({ code, size = "xl" }: RoomCodeBadgeProps) {
   return (
     <div
       className={clsx(
-        "font-code font-bold tracking-[0.25em] bg-surface-2 border-2 border-border rounded-[var(--radius-card)] px-6 py-4 text-center",
+        "font-bold tracking-[0.1em] border rounded-[var(--radius-card)] px-6 py-4 text-center",
         size === "xl" ? "text-6xl md:text-8xl" : "text-4xl md:text-6xl"
       )}
+      style={{
+        fontFamily: "var(--font-heading)",
+        background: "linear-gradient(160deg, #1f1d28, #17161d)",
+        borderColor: "var(--border-3)",
+      }}
       aria-label={`Szobakód: ${code.split("").join(" ")}`}
     >
       {code}
