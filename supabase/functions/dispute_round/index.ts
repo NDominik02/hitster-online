@@ -23,8 +23,11 @@
 // turn_advanced/round_started broadcast + beginRound()/audioUrl utat használja. Ez strukturálisan
 // kizárja a fenti hibaosztályt: nincs többé "csendben létrejött, sosem broadcastolt új kör".
 //
-// A bemondás (name-guess) helyessége NEM változik — az előadó/cím egyezés a korrigált évtől
-// FÜGGETLEN, tehát a `name_guess`/guess-token itt érintetlen marad.
+// A bemondás (name-guess) cím/előadó helyessége NEM változik — az egyezés a korrigált évtől
+// FÜGGETLEN. A REDESIGN (2026-07-06, évszám-tippelés) miatt viszont az évszám-tipp
+// helyessége IGENIS a kártya évétől függ — ezért ezt itt újraértékeljük a korrigált év
+// ellen, és a token-egyenleget ennek megfelelően módosítjuk (±1, ha az évtipp helyessége
+// megváltozik a korrekció hatására).
 //
 // Ismételten hívható ugyanarra a körre (pl. a host elgépelte az évet): mindig a JELENLEGI
 // timeline-elhelyezést bontja vissza `card_id` alapján, mielőtt újra alkalmazná — idempotens
@@ -32,7 +35,7 @@
 
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
-import type { StealEntry } from '../_shared/steal.ts';
+import type { StealEntry, NameGuess } from '../_shared/steal.ts';
 import { evaluateSteals } from '../_shared/steal.ts';
 import {
   evaluatePlacement,
@@ -134,12 +137,35 @@ Deno.serve(async (req: Request) => {
   // else: sem a soron lévő, sem egyik lopó sem talált a korrigált év szerint — senki nem kapja
   // a kártyát, pontosan úgy, mint egy normál "wrong, nincs nyertes lopás" kimenetnél.
 
-  // 3. A revealed_card.year-t a korrigált értékre frissítjük (ezt látja mindenki ezután), a
-  // bemondást (guess) VÁLTOZATLANUL hagyjuk (év-független).
+  // 3. Az évszám-tipp (yearGuess) helyessége a korrigált évtől FÜGG — ezt itt újraértékeljük.
+  // A cím/előadó-tipp (titleCorrect/artistCorrect) érintetlen marad, hiszen azok sosem az évtől
+  // függtek. Ha a korrekció hatására az évtipp helyessége megváltozik (null/false → true, vagy
+  // true → false), a soron lévő játékos token-egyenlegét ennek megfelelően ±1-gyel módosítjuk.
+  const nameGuess: NameGuess | null = (round.name_guess ?? null) as NameGuess | null;
+  let updatedNameGuess: NameGuess | null = nameGuess;
+  let tokenDelta = 0;
+
+  if (nameGuess) {
+    const yearAttempted = !!nameGuess.yearGuess?.trim();
+    const newYearCorrect = yearAttempted
+      ? Number.parseInt(nameGuess.yearGuess as string, 10) === correctedYear
+      : null;
+    const previousYearCorrect = nameGuess.yearCorrect === true;
+    const nextYearCorrect = newYearCorrect === true;
+    if (previousYearCorrect !== nextYearCorrect) {
+      tokenDelta = nextYearCorrect ? 1 : -1;
+    }
+    updatedNameGuess = { ...nameGuess, yearCorrect: newYearCorrect };
+  }
+
+  // 4. A revealed_card.year-t a korrigált értékre frissítjük (ezt látja mindenki ezután), és a
+  // guess.yearCorrect mezőt is szinkronban tartjuk vele — a titleCorrect/artistCorrect változatlan.
   const oldRevealedCard = (round.revealed_card ?? {}) as Record<string, unknown>;
+  const oldGuess = (oldRevealedCard.guess ?? null) as Record<string, unknown> | null;
   const updatedRevealedCard = {
     ...oldRevealedCard,
     year: correctedYear,
+    guess: oldGuess ? { ...oldGuess, yearCorrect: updatedNameGuess?.yearCorrect ?? null } : null,
     steals: evaluatedSteals.map((s) => ({ playerId: s.playerId, correct: !!s.correct, won: !!s.won })),
   };
 
@@ -149,6 +175,7 @@ Deno.serve(async (req: Request) => {
       outcome,
       steals: evaluatedSteals,
       revealed_card: updatedRevealedCard,
+      name_guess: updatedNameGuess,
     })
     .eq('id', body.roundId)
     .eq('phase', 'reveal')
@@ -157,6 +184,13 @@ Deno.serve(async (req: Request) => {
 
   if (updateError) return errorResponse('db_error', 'Nem sikerült az évszám javítása.', 500);
   if (!updated) return errorResponse('already_advanced', 'A kör már továbblépett, nem javítható.', 409);
+
+  // Best-effort token-korrekció — a fő (kör-szintű) javítás már sikeresen lezajlott, tehát ha ez
+  // hibázna, nem görgetjük vissza a fentieket, csak jelezzük a válaszban (tokensChanged: false-t
+  // nem küldünk külön, a hívó a revealedCard.guess.yearCorrect-ből úgyis látja az új állapotot).
+  if (tokenDelta !== 0 && nameGuess) {
+    await supabase.rpc('adjust_tokens', { p_player_id: round.active_player_id, p_delta: tokenDelta });
+  }
 
   // Playtest feedback (2026-07-06): a korrekció korábban csak ERRE a körre vonatkozott — a
   // deck_cards.year (a forrás, amiből minden JÖVŐBELI kör/parti a kártyát húzza) változatlan

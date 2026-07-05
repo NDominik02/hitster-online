@@ -443,12 +443,15 @@ export default function HostRoomPage() {
    * függetlenül. Ugyanabban az ablakban hívható (reveal fázis, next_turn előtt). A szerver a
    * token-egyenleget is módosítja a váltásnak megfelelően (idempotens, ha már a kért állapotban
    * van — nincs dupla token-jóváírás/-levonás, ha véletlenül kétszer kattintanak ugyanarra).
+   *
+   * REDESIGN (2026-07-06): cím/előadó/évszám egymástól függetlenül pontozott, ezért itt is
+   * mezőnként (`field`) hívható a felülbírálás — mindegyik a saját +1/-1 tokenjét kezeli.
    */
-  async function handleOverrideGuess(correct: boolean) {
+  async function handleOverrideGuess(field: "title" | "artist" | "year", correct: boolean) {
     if (!round) return;
     setGuessOverrideSaving(true);
     try {
-      await overrideGuess(round.id, correct);
+      await overrideGuess(round.id, field, correct);
       await refreshRound(round.id);
       await refreshPlayers(roomId!);
     } catch (err) {
@@ -939,26 +942,38 @@ export default function HostRoomPage() {
               return (
                 <div className="text-center space-y-1 text-sm">
                   {guess && (
-                    <div className="flex flex-col items-center gap-1">
-                      <p className={guess.correct ? "text-success" : "text-text-muted"}>
-                        🎤 {players.find((p) => p.id === guess.byPlayerId)?.name ?? "Valaki"} bemondása{" "}
-                        {guess.correct ? "talált (+1 🪙)" : "nem talált"}
+                    <div className="flex flex-col items-center gap-2">
+                      <p className="text-text-muted">
+                        🎤 {players.find((p) => p.id === guess.byPlayerId)?.name ?? "Valaki"} bemondása
                       </p>
-                      {/* A tulaj kérésére: a bemondás elismerése a vitagombtól függetlenül is
-                          felülbírálható, ha közösen úgy döntötök, hogy a beírtat elfogadjátok
-                          (vagy visszavonjátok) — ez a döntés függetlenül él az évszám-javítástól. */}
-                      <button
-                        type="button"
-                        className="text-xs text-text-muted underline hover:text-text disabled:opacity-50"
-                        disabled={guessOverrideSaving}
-                        onClick={() => handleOverrideGuess(!guess.correct)}
-                      >
-                        {guessOverrideSaving
-                          ? "Mentés…"
-                          : guess.correct
-                            ? "Mégsem talált (−1 🪙)"
-                            : "Elfogadjuk, mégis talált (+1 🪙)"}
-                      </button>
+                      {/* REDESIGN (2026-07-06) — cím/előadó/évszám egymástól függetlenül pontozott,
+                          mindegyik a saját beírt értékét és felülbírálás-gombját kapja, hogy a host
+                          lássa, mit tippelt ténylegesen a játékos, és mezőnként dönthessen. */}
+                      {[
+                        { field: "title" as const, label: "Cím", guessed: guess.titleGuess, correct: guess.titleCorrect },
+                        { field: "artist" as const, label: "Előadó", guessed: guess.artistGuess, correct: guess.artistCorrect },
+                        { field: "year" as const, label: "Évszám", guessed: guess.yearGuess, correct: guess.yearCorrect },
+                      ]
+                        .filter((f) => f.correct !== null && !!f.guessed)
+                        .map((f) => (
+                          <div key={f.field} className="flex flex-col items-center gap-0.5">
+                            <p className={f.correct ? "text-success" : "text-text-muted"}>
+                              {f.label}: „{f.guessed}&rdquo; — {f.correct ? "talált (+1 🪙)" : "nem talált"}
+                            </p>
+                            <button
+                              type="button"
+                              className="text-xs text-text-muted underline hover:text-text disabled:opacity-50"
+                              disabled={guessOverrideSaving}
+                              onClick={() => handleOverrideGuess(f.field, !f.correct)}
+                            >
+                              {guessOverrideSaving
+                                ? "Mentés…"
+                                : f.correct
+                                  ? `${f.label}: mégsem talált (−1 🪙)`
+                                  : `${f.label}: elfogadjuk, mégis talált (+1 🪙)`}
+                            </button>
+                          </div>
+                        ))}
                     </div>
                   )}
                   {steals.map((s) => (

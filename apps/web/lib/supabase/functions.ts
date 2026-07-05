@@ -187,7 +187,7 @@ export async function drawCard(roomId: string): Promise<DrawCardResponse> {
 export async function placeCard(
   roundId: string,
   position: number,
-  nameGuess?: { artistGuess: string; titleGuess: string } | null
+  nameGuess?: { artistGuess: string; titleGuess: string; yearGuess?: string } | null
 ): Promise<{ phase: string; stealDeadline: string | null }> {
   return invoke("place_card", {
     roundId,
@@ -265,16 +265,19 @@ export async function disputeRound(
 
 /**
  * override_guess — HOST-ONLY, csak `phase='reveal'` alatt hívható (ugyanaz az ablak, mint a
- * vitagomb). A tulaj kérésére: a bemondás (S21) automatikus fuzzy-matching eredménye (helyes/
- * helytelen) manuálisan felülbírálható, ha a társaság közösen úgy dönt, hogy a beírt cím/előadó
- * elfogadható (vagy visszavonandó). A szerver a token-egyenleget is ennek megfelelően módosítja
- * (+1 ha helytelenből helyesre vált, -1 fordítva); ha már a kért állapotban van, nincs token-hatás.
+ * vitagomb). A tulaj kérésére: a bemondás (S21) automatikus kiértékelésének eredménye (helyes/
+ * helytelen) manuálisan felülbírálható, ha a társaság közösen úgy dönt, hogy egy beírt érték
+ * elfogadható (vagy visszavonandó). REDESIGN (2026-07-06): cím/előadó/évszám EGYMÁSTÓL FÜGGETLENÜL
+ * pontozott, ezért itt is mezőnként (`field`) hívható a felülbírálás. A szerver a token-egyenleget
+ * is ennek megfelelően módosítja (+1 ha helytelenből helyesre vált, -1 fordítva); ha már a kért
+ * állapotban van, nincs token-hatás.
  */
 export async function overrideGuess(
   roundId: string,
+  field: "title" | "artist" | "year",
   correct: boolean
-): Promise<{ ok: true; correct: boolean; tokensChanged: boolean; tokensLeft?: number }> {
-  return invoke("override_guess", { roundId, correct });
+): Promise<{ ok: true; field: string; correct: boolean; tokensChanged: boolean; tokensLeft?: number }> {
+  return invoke("override_guess", { roundId, field, correct });
 }
 
 /** resolve_round (ARCHITECTURE 3.8) — HOST-ONLY, player hívásra 403 (BACKEND-NOTES 7.) */
@@ -364,8 +367,19 @@ export async function computeGameStats(roomId: string): Promise<PlayerGameStats[
     else if (round.outcome === "wrong") active.wrongPlacements++;
     else if (round.outcome === "timeout") active.timeouts++;
 
-    const nameGuess = round.name_guess as { correct?: boolean | null } | null;
-    if (nameGuess?.correct) active.correctGuesses++;
+    // REDESIGN (2026-07-06): cím/előadó/évszám egymástól függetlenül pontozott — a
+    // correctGuesses itt az összes eltalált MEZŐT számolja (nem csak a köröket), hiszen
+    // egy körben akár 3 külön találat is lehet.
+    const nameGuess = round.name_guess as {
+      titleCorrect?: boolean | null;
+      artistCorrect?: boolean | null;
+      yearCorrect?: boolean | null;
+    } | null;
+    if (nameGuess) {
+      if (nameGuess.titleCorrect) active.correctGuesses++;
+      if (nameGuess.artistCorrect) active.correctGuesses++;
+      if (nameGuess.yearCorrect) active.correctGuesses++;
+    }
 
     const steals = (round.steals ?? []) as Array<{ playerId: string; won: boolean | null }>;
     for (const steal of steals) {

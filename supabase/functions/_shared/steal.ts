@@ -18,10 +18,22 @@ import { evaluatePlacement } from './round.ts';
 // --- Types -------------------------------------------------------------
 
 // rounds.name_guess jsonb shape (ARCHITECTURE.md 11.1.3).
+//
+// REDESIGN (2026-07-06, playtest feedback): the three guessable fields
+// (title/artist/year) now score INDEPENDENTLY — up to 3 tokens per round
+// instead of the old F2-D1 "both artist+title or nothing" rule. `yearGuess`
+// is optional (the player may skip it) and, unlike title/artist, requires an
+// EXACT numeric match (no fuzzy tolerance — a year is either right or not).
+// The three `*Correct` fields are null until reveal, and stay null forever
+// for a field the player left blank (distinguishes "didn't attempt" from
+// "attempted and wrong" for the host's per-field override UI).
 export interface NameGuess {
   artistGuess: string;
   titleGuess: string;
-  correct: boolean | null; // filled in by resolveRound (AC21.7); null until reveal
+  yearGuess?: string;
+  titleCorrect: boolean | null;
+  artistCorrect: boolean | null;
+  yearCorrect: boolean | null;
   createdAt: string;
 }
 
@@ -58,17 +70,40 @@ export interface CardForEvaluation {
 
 const GUESS_THRESHOLD = 0.85; // F2-D2
 
-// AC21.3/AC21.4/AC21.5, F2-D1/F2-D2: both artist AND title must clear the
-// 0.85 normalized-Levenshtein-similarity threshold — no partial credit.
-// The artist check accepts either a match against the full artist string or
-// against just the primary (first-listed) artist, whichever scores higher —
-// this is what makes "Tom Jones" score against "Tom Jones & The Cardigans".
-export function evaluateGuess(guess: NameGuess, card: CardForEvaluation): boolean {
+export interface GuessEvaluation {
+  titleCorrect: boolean | null;
+  artistCorrect: boolean | null;
+  yearCorrect: boolean | null;
+}
+
+// REDESIGN (2026-07-06): title/artist/year now score INDEPENDENTLY (replaces
+// the old F2-D1 "both artist+title or nothing" all-or-nothing rule) — each
+// attempted field is worth its own token. A blank field yields `null`
+// ("didn't attempt", no token, nothing to override), never `false`.
+// Title/artist still use the 0.85 normalized-Levenshtein-similarity
+// threshold (F2-D2); the artist check accepts either a match against the
+// full artist string or against just the primary (first-listed) artist,
+// whichever scores higher — this is what makes "Tom Jones" score against
+// "Tom Jones & The Cardigans". Year requires an EXACT integer match — no
+// fuzzy tolerance, since "close" isn't really "correct" for a specific year.
+export function evaluateGuess(guess: NameGuess, card: CardForEvaluation): GuessEvaluation {
+  const titleAttempted = !!guess.titleGuess?.trim();
+  const artistAttempted = !!guess.artistGuess?.trim();
+  const yearAttempted = !!guess.yearGuess?.trim();
+
+  const titleCorrect = titleAttempted ? similarity(guess.titleGuess, card.title) >= GUESS_THRESHOLD : null;
+
   const artistFull = similarity(guess.artistGuess, card.artist);
   const artistPrimary = similarity(guess.artistGuess, primaryArtist(card.artist));
-  const artistOk = Math.max(artistFull, artistPrimary) >= GUESS_THRESHOLD;
-  const titleOk = similarity(guess.titleGuess, card.title) >= GUESS_THRESHOLD;
-  return artistOk && titleOk; // F2-D1: no partial reward
+  const artistCorrect = artistAttempted ? Math.max(artistFull, artistPrimary) >= GUESS_THRESHOLD : null;
+
+  let yearCorrect: boolean | null = null;
+  if (yearAttempted) {
+    const parsedYear = Number.parseInt(guess.yearGuess as string, 10);
+    yearCorrect = Number.isFinite(parsedYear) && parsedYear === card.year;
+  }
+
+  return { titleCorrect, artistCorrect, yearCorrect };
 }
 
 // --- Steal evaluation ----------------------------------------------------

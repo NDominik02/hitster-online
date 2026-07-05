@@ -95,8 +95,21 @@ export interface RevealedCard {
    * (anti-leak, a `revealed_card` jsonb-n át, sosem a `round_public` nézet külön mezőjén).
    * `null`, ha nem volt bemondás ebben a körben. A Backend F2-bővítése előtt ez a mező
    * egyszerűen hiányzik a payloadból — a UI ezt `undefined`/`null`-ként kezeli.
+   *
+   * REDESIGN (2026-07-06, playtest feedback) — cím/előadó/évszám immár EGYMÁSTÓL FÜGGETLENÜL
+   * pontozott (max 3 zseton/kör). A nyers beírt szövegek is jelen vannak (nem csak a
+   * helyesség), hogy a host lássa, mit tippelt ténylegesen a játékos. `null` egy adott
+   * *Correct mezőn azt jelenti, hogy a játékos meg sem próbálta azt a mezőt.
    */
-  guess?: { correct: boolean; byPlayerId: string } | null;
+  guess?: {
+    byPlayerId: string;
+    titleGuess: string;
+    artistGuess: string;
+    yearGuess: string | null;
+    titleCorrect: boolean | null;
+    artistCorrect: boolean | null;
+    yearCorrect: boolean | null;
+  } | null;
   /**
    * F2 (ARCHITECTURE 11.5) — a steal-kísérletek publikus eredménye (ki próbált, helyes
    * volt-e, ki nyerte a kártyát). `position` szándékosan NINCS itt (belső infó, F2-D5).
@@ -201,8 +214,11 @@ export interface DragBroadcastPayload {
   slotIndex: number | null;
 }
 
-/** F2 (ARCHITECTURE 11.3.3) — a "Bemondom!" kapcsoló alatt gyűjtött nyers beírt sztringek. */
+/** F2 (ARCHITECTURE 11.3.3) — a "Bemondom!" kapcsoló alatt gyűjtött nyers beírt sztringek.
+ *  REDESIGN (2026-07-06) — yearGuess egy harmadik, opcionális mező: +1 zseton pontos találat
+ *  esetén (a cím/előadó tippektől függetlenül pontozva, max 3 zseton/kör). */
 export interface NameGuessInput {
   artistGuess: string;
   titleGuess: string;
+  yearGuess?: string;
 }
