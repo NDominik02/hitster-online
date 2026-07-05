@@ -51,7 +51,7 @@ function AutoSkipToast({ names, onDismiss }: { names: string[]; onDismiss: () =>
       <button
         type="button"
         onClick={onDismiss}
-        className="pointer-events-auto bg-warning text-[#0B0B14] text-sm font-semibold rounded-[var(--radius-pill)] px-4 py-2 shadow-lg"
+        className="pointer-events-auto bg-warning text-[var(--bg)] text-sm font-semibold rounded-[var(--radius-pill)] px-4 py-2 shadow-lg"
       >
         ⚠ {names.join(", ")} kimaradt, mert lecsatlakozott
       </button>
@@ -460,7 +460,7 @@ export default function PlayRoomPage() {
             </p>
           )}
           <div>
-            <h2 className="text-text-muted text-sm uppercase tracking-wide mb-2">A te idővonalad</h2>
+            <h2 className="eyebrow mb-2">A te idővonalad</h2>
             <Timeline cards={myTimeline} />
           </div>
           <p className="text-text-muted text-sm" aria-live="polite">
@@ -509,7 +509,7 @@ export default function PlayRoomPage() {
             <p className="text-warning font-semibold">🕵️ {stealCount} játékos próbál lopni…</p>
           )}
           <div>
-            <h2 className="text-text-muted text-sm uppercase tracking-wide mb-2">A te idővonalad</h2>
+            <h2 className="eyebrow mb-2">A te idővonalad</h2>
             <Timeline cards={myTimeline} />
           </div>
         </div>
@@ -540,7 +540,7 @@ export default function PlayRoomPage() {
 
           {!stealing && (
             <div>
-              <h2 className="text-text-muted text-sm uppercase tracking-wide mb-2">
+              <h2 className="eyebrow mb-2">
                 {activePlayer.name} idővonala
               </h2>
               <Timeline cards={activeTimeline} />
@@ -576,7 +576,7 @@ export default function PlayRoomPage() {
           ) : (
             <>
               <div>
-                <h2 className="text-text-muted text-sm uppercase tracking-wide mb-2">A te idővonalad</h2>
+                <h2 className="eyebrow mb-2">A te idővonalad</h2>
                 <Timeline cards={myTimeline} />
               </div>
               <p className="text-text-muted text-sm">Zene szól a közös képernyőn 🔊</p>
@@ -600,12 +600,12 @@ export default function PlayRoomPage() {
         <p className="text-text-muted text-sm">«a host mindjárt elindítja»</p>
 
         <div>
-          <h2 className="text-text-muted text-sm uppercase tracking-wide mb-2">A te idővonalad</h2>
+          <h2 className="eyebrow mb-2">A te idővonalad</h2>
           <Timeline cards={myTimeline} />
         </div>
 
         <div>
-          <h2 className="text-text-muted text-sm uppercase tracking-wide mb-2">Többiek</h2>
+          <h2 className="eyebrow mb-2">Többiek</h2>
           <PlayerList players={players.filter((p) => p.id !== me.id)} />
         </div>
       </div>

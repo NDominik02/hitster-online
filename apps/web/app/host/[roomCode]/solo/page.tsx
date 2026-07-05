@@ -324,7 +324,7 @@ export default function PassAndPlaySoloPage() {
             playerName={activePlayer.name}
           />
           <div className="w-full max-w-sm">
-            <h2 className="text-text-muted text-sm uppercase tracking-wide mb-2 text-center">
+            <h2 className="eyebrow mb-2 text-center">
               {activePlayer.name} idővonala
             </h2>
             <Timeline cards={activeTimeline} />

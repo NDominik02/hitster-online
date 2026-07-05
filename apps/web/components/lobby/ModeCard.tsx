@@ -18,7 +18,7 @@ export function ModeCard({ icon, title, description, highlighted, onClick }: Mod
       onClick={onClick}
       className={clsx(
         "min-h-24 w-full rounded-[var(--radius-card)] border-2 p-5 text-left flex flex-col gap-2 transition-colors",
-        highlighted ? "border-accent shadow-[0_0_12px_rgba(124,92,255,0.25)]" : "border-border hover:border-accent"
+        highlighted ? "border-accent shadow-[0_0_12px_rgba(245,182,46,0.25)]" : "border-border hover:border-accent"
       )}
     >
       <span className="text-2xl" aria-hidden>

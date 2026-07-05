@@ -13,8 +13,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Böngészős party-játék baráti társaságoknak — zenei idővonal-építő.",
     start_url: "/",
     display: "standalone",
-    background_color: "#0B0B14",
-    theme_color: "#7C5CFF",
+    background_color: "#0B0A0F",
+    theme_color: "#F5B62E",
     icons: [
       {
         src: "/icons/icon-192.png",

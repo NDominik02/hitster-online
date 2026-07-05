@@ -14,8 +14,6 @@ export interface RevealCardProps {
   outcome?: "correct" | "wrong" | "timeout";
 }
 
-const CONFETTI_COUNT = 12;
-
 /**
  * Az albumborító + adatok flip-kártyája (H5, P5) — DESIGN H5 wireframe, S23-mal bővítve.
  *
@@ -58,9 +56,7 @@ export function RevealCard({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={artworkUrl} alt="" className="w-full h-full object-cover" />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-text-muted text-sm">
-                  [ ALBUMBORÍTÓ ]
-                </div>
+                <AlbumArtPlaceholder />
               )}
             </motion.div>
           </>
@@ -96,9 +92,7 @@ export function RevealCard({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={artworkUrl} alt="" className="w-full h-full object-cover" />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-text-muted text-sm">
-                  [ ALBUMBORÍTÓ ]
-                </div>
+                <AlbumArtPlaceholder />
               )}
             </motion.div>
           </>
@@ -107,16 +101,16 @@ export function RevealCard({
         <AnimatePresence>
           {showFlourish && flipped && outcome === "correct" && (
             <>
-              {Array.from({ length: CONFETTI_COUNT }).map((_, i) => (
+              {CONFETTI_COLORS.map((c, i) => (
                 <motion.div
                   key={i}
-                  className="absolute w-2 h-2 rounded-full bg-accent"
-                  style={{ left: "50%", top: "40%" }}
+                  className="absolute w-2 h-2 rounded-full"
+                  style={{ left: "50%", top: "40%", background: c }}
                   initial={{ opacity: 1, x: 0, y: 0, scale: 1 }}
                   animate={{
                     opacity: 0,
-                    x: Math.cos((i / CONFETTI_COUNT) * Math.PI * 2) * (60 + ((i * 7) % 40)),
-                    y: Math.sin((i / CONFETTI_COUNT) * Math.PI * 2) * (60 + ((i * 7) % 40)) - 20,
+                    x: Math.cos((i / CONFETTI_COLORS.length) * Math.PI * 2) * (60 + ((i * 7) % 40)),
+                    y: Math.sin((i / CONFETTI_COLORS.length) * Math.PI * 2) * (60 + ((i * 7) % 40)) - 20,
                     scale: 0.4,
                   }}
                   transition={{ duration: 0.7, ease: "easeOut", delay: 0.45 }}
@@ -134,14 +128,63 @@ export function RevealCard({
             animate={{ opacity: 1, y: 0 }}
             className="text-center"
           >
-            <div className="text-2xl md:text-4xl font-bold uppercase">{artist}</div>
-            <div className="text-lg md:text-2xl text-text-muted mt-1">{title}</div>
-            <div className="font-numeric font-bold text-5xl md:text-7xl mt-3 inline-block bg-surface-2 border border-border rounded-[var(--radius-button)] px-6 py-2">
+            <div className="eyebrow">{artist}</div>
+            <div
+              className="text-2xl md:text-4xl font-bold mt-1"
+              style={{ fontFamily: "var(--font-heading)" }}
+            >
+              {title}
+            </div>
+            <div
+              className="font-numeric font-bold text-6xl md:text-8xl mt-3 leading-none"
+              style={{
+                fontFamily: "var(--font-heading)",
+                background: "linear-gradient(135deg, var(--accent), var(--accent-2))",
+                WebkitBackgroundClip: "text",
+                backgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                letterSpacing: "-0.02em",
+              }}
+            >
               {year}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+const CONFETTI_COLORS = [
+  "var(--accent)",
+  "var(--accent-2)",
+  "var(--success)",
+  "var(--danger)",
+  "var(--accent)",
+  "var(--accent-2)",
+  "var(--success)",
+  "var(--danger)",
+  "var(--accent)",
+  "var(--accent-2)",
+  "var(--success)",
+  "var(--danger)",
+];
+
+function AlbumArtPlaceholder() {
+  return (
+    <div className="relative w-full h-full">
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "repeating-linear-gradient(135deg, #201e2a 0 12px, #1a1922 12px 24px)",
+        }}
+      />
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="eyebrow" style={{ letterSpacing: "0.1em" }}>
+          album art
+        </span>
+      </div>
     </div>
   );
 }

@@ -49,9 +49,10 @@ export function RoomCodeInput({ value, onChange, disabled }: RoomCodeInputProps)
           inputMode="text"
           autoCapitalize="characters"
           aria-label={`Kód ${i + 1}. karaktere`}
+          style={{ fontFamily: "var(--font-heading)", background: "var(--surface-2)", borderColor: "var(--border-2)" }}
           className={clsx(
-            "w-14 h-16 text-center text-2xl font-bold font-code rounded-[var(--radius-button)]",
-            "bg-surface-2 border-2 border-border text-text focus-visible:border-accent",
+            "w-14 h-16 text-center text-2xl font-bold rounded-[var(--radius-button)]",
+            "border-2 text-text focus-visible:border-accent",
             "disabled:opacity-50"
           )}
         />

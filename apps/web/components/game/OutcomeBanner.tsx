@@ -20,14 +20,17 @@ export function OutcomeBanner({ outcome, playerName }: OutcomeBannerProps) {
       role="status"
       aria-live="polite"
       className={clsx(
-        "rounded-[var(--radius-card)] border-2 px-6 py-4 flex items-center gap-3 justify-center font-bold text-lg md:text-2xl",
-        isCorrect ? "border-success text-success bg-success/10" : "border-danger text-danger bg-danger/10"
+        "rounded-full px-6 py-3 flex items-center gap-3 justify-center font-bold text-base md:text-lg",
+        isCorrect ? "bg-success" : "border-2 bg-danger/15 border-danger text-danger"
       )}
+      style={isCorrect ? { color: "var(--bg)" } : undefined}
     >
-      <span aria-hidden className="text-2xl md:text-3xl">
+      <span aria-hidden className="text-xl md:text-2xl">
         {isCorrect ? "✅" : "❌"}
       </span>
-      <span>{label}</span>
+      <span className="font-code" style={{ letterSpacing: "0.06em" }}>
+        {label.toUpperCase()}
+      </span>
     </div>
   );
 }
