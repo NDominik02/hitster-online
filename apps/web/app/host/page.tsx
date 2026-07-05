@@ -139,7 +139,8 @@ export default function HostCreatePage() {
     try {
       await ensureAnonymousSession();
       const cached = pl.sourceKey ? await findReadyDeckBySourceKey(pl.sourceKey) : await findReadyDeckByPlaylistUrl(primaryUrl);
-      if (cached) {
+      const cachedLooksComplete = cached && (urls.length <= 1 || cached.totalTracks > 100);
+      if (cached && cachedLooksComplete) {
         setDeck(cached);
         setPhase("report");
         return;
