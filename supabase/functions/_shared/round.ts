@@ -34,6 +34,10 @@ export interface DrawResult {
 
 const SIGNED_URL_TTL_SEC = 60 * 5; // timeLimitSec (usually 90s) + buffer, capped generously at 5 min
 
+function pickRandom<T>(items: T[]): T {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
 // S20 — közös segédfüggvény: egy adott kártyához feloldja a lejátszási
 // forrást (mindig kiszámolt preview audioUrl fallbackként, PLUSZ opcionális
 // premium spotifyUri). Ugyanezt használja a drawCard (új kör indításakor) ÉS
@@ -70,6 +74,48 @@ export async function resolveCardPlayback(
   return { audioUrl, spotifyUri, durationMs: fullCard?.duration_ms ?? null };
 }
 
+export async function pickRandomUnusedDeckCard<T extends { id: string }>(
+  supabase: SupabaseClient,
+  room: { id: string; deck_id: string; deck_cursor?: number | null },
+  selectColumns: string
+): Promise<{ ok: true; card: T; nextCursor: number } | { ok: true; deckExhausted: true } | { ok: false; error: string }> {
+  const { data: deckCards, error: cardsError } = await supabase
+    .from('deck_cards')
+    .select(selectColumns)
+    .eq('deck_id', room.deck_id);
+
+  if (cardsError || !deckCards) return { ok: false, error: 'deck_cards_fetch_failed' };
+
+  const { data: players, error: playersError } = await supabase.from('players').select('id').eq('room_id', room.id);
+  if (playersError || !players) return { ok: false, error: 'players_fetch_failed' };
+
+  const playerIds = players.map((player: { id: string }) => player.id);
+  const { data: timelineCards, error: timelineError } = playerIds.length
+    ? await supabase.from('timeline_cards').select('card_id').in('player_id', playerIds)
+    : { data: [] as Array<{ card_id: string }>, error: null };
+  if (timelineError) return { ok: false, error: 'timeline_cards_fetch_failed' };
+
+  const { data: roundCards, error: roundsError } = await supabase.from('rounds').select('card_id').eq('room_id', room.id);
+  if (roundsError) return { ok: false, error: 'round_cards_fetch_failed' };
+
+  const usedCardIds = new Set<string>();
+  for (const row of timelineCards ?? []) {
+    if (row.card_id) usedCardIds.add(row.card_id);
+  }
+  for (const row of roundCards ?? []) {
+    if (row.card_id) usedCardIds.add(row.card_id);
+  }
+
+  const availableCards = (deckCards as T[]).filter((card) => !usedCardIds.has(card.id));
+  if (availableCards.length === 0) return { ok: true, deckExhausted: true };
+
+  return {
+    ok: true,
+    card: pickRandom(availableCards),
+    nextCursor: Math.min((room.deck_cursor ?? usedCardIds.size) + 1, deckCards.length),
+  };
+}
+
 // Draws the next card for a room and creates a new `rounds` row.
 // `activePlayerId` must be resolved by the caller (start_game: first seat;
 // next_turn: next seat in turn order).
@@ -86,19 +132,13 @@ export async function drawCard(
 
   if (roomError || !room) return { ok: false, error: 'room_not_found' };
 
-  const { data: deckCards, error: cardsError } = await supabase
-    .from('deck_cards')
-    .select('id')
-    .eq('deck_id', room.deck_id)
-    .order('sort_seed', { ascending: true });
-
-  if (cardsError || !deckCards) return { ok: false, error: 'deck_cards_fetch_failed' };
-
-  if (room.deck_cursor >= deckCards.length) {
+  const pick = await pickRandomUnusedDeckCard<{ id: string }>(supabase, room, 'id');
+  if (!pick.ok) return pick;
+  if ('deckExhausted' in pick) {
     return { ok: true, deckExhausted: true };
   }
 
-  const card = deckCards[room.deck_cursor];
+  const card = pick.card;
 
   const { count: roundCount } = await supabase
     .from('rounds')
@@ -126,7 +166,7 @@ export async function drawCard(
 
   await supabase
     .from('rooms')
-    .update({ deck_cursor: room.deck_cursor + 1, current_round_id: newRound.id, updated_at: new Date().toISOString() })
+    .update({ deck_cursor: pick.nextCursor, current_round_id: newRound.id, updated_at: new Date().toISOString() })
     .eq('id', roomId);
 
   // D7/6.4: get the audio_url PATH from deck_cards (service-role bypasses RLS

@@ -8,6 +8,15 @@ import { drawCard } from '../_shared/round.ts';
 
 const MIN_PLAYERS = 2; // D5
 
+function shuffle<T>(items: T[]): T[] {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
   if (preflight) return preflight;
@@ -57,10 +66,11 @@ Deno.serve(async (req: Request) => {
     return errorResponse('deck_too_small', 'A pakli nem elég nagy az induláshoz.', 422);
   }
 
-  // S7: deal one revealed starting card per player from the top of the shuffled deck.
+  // S7: deal one revealed starting card per player from a fresh shuffled order.
   let cursor = 0;
+  const shuffledDeckCards = shuffle(deckCards);
   const startingCardRows = players.map((p: { id: string }) => {
-    const card = deckCards[cursor];
+    const card = shuffledDeckCards[cursor];
     cursor++;
     return { player_id: p.id, card_id: card.id, position: 0, is_start: true };
   });

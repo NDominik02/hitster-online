@@ -10,7 +10,7 @@
 
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
-import { drawCard, evaluatePlacement } from '../_shared/round.ts';
+import { drawCard, evaluatePlacement, pickRandomUnusedDeckCard } from '../_shared/round.ts';
 
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
@@ -171,18 +171,23 @@ async function handleDraw3(
     return errorResponse('room_not_found', 'A szoba nem található.', 404);
   }
 
-  const { data: deckCards } = await supabase
-    .from('deck_cards')
-    .select('id, title, artist, year, artwork_url')
-    .eq('deck_id', room.deck_id)
-    .order('sort_seed', { ascending: true });
-
-  if (!deckCards || room.deck_cursor >= deckCards.length) {
+  const pick = await pickRandomUnusedDeckCard<{
+    id: string;
+    title: string;
+    artist: string;
+    year: number;
+    artwork_url: string | null;
+  }>(supabase, room, 'id, title, artist, year, artwork_url');
+  if (!pick.ok) {
+    await supabase.rpc('adjust_tokens', { p_player_id: activePlayer.id, p_delta: 3 });
+    return errorResponse('draw_failed', 'Nem sikerült kártyát húzni.', 500);
+  }
+  if ('deckExhausted' in pick) {
     await supabase.rpc('adjust_tokens', { p_player_id: activePlayer.id, p_delta: 3 });
     return jsonResponse({ action: 'draw3', deckExhausted: true, tokensLeft: newBalance });
   }
 
-  const card = deckCards[room.deck_cursor];
+  const card = pick.card;
 
   const { count: roundCount } = await supabase
     .from('rounds')
@@ -242,7 +247,7 @@ async function handleDraw3(
 
   await supabase
     .from('rooms')
-    .update({ deck_cursor: room.deck_cursor + 1, current_round_id: newRound.id, updated_at: new Date().toISOString() })
+    .update({ deck_cursor: pick.nextCursor, current_round_id: newRound.id, updated_at: new Date().toISOString() })
     .eq('id', round.room_id);
 
   // AC20.6: correct → the card joins the timeline; wrong → it's lost, and
