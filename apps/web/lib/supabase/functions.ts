@@ -28,11 +28,14 @@ async function invoke<T>(name: string, body: Record<string, unknown>): Promise<T
   const { data, error } = await client.functions.invoke(name, { body });
   if (error) {
     if (error instanceof FunctionsHttpError) {
+      let payload: { messageHu?: string; error?: string } | null = null;
       try {
-        const payload = await error.context.json();
-        throw new Error(payload.messageHu || payload.error || error.message);
+        payload = await error.context.json();
       } catch {
         // body nem parse-olható JSON-ként — visszaesünk az eredeti hibára
+      }
+      if (payload?.messageHu || payload?.error) {
+        throw new Error(payload.messageHu || payload.error);
       }
     }
     throw error;

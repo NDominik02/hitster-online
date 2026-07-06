@@ -44,7 +44,12 @@ Deno.serve(async (req: Request) => {
     .eq('deck_id', deck.id);
   if (roomError) return errorResponse('db_error', 'Hiba a szobak ellenorzese kozben.', 500);
   if ((roomCount ?? 0) > 0) {
-    return errorResponse('deck_in_use', 'Ezt a paklit mar hasznalja egy szoba, ezert nem torolheto.', 409);
+    const { error: hideError } = await supabase
+      .from('decks')
+      .update({ status: 'deleted', is_public: false })
+      .eq('id', deck.id);
+    if (hideError) return errorResponse('db_error', 'Hiba a pakli elrejtese kozben.', 500);
+    return jsonResponse({ ok: true, mode: 'hidden' });
   }
 
   const { data: cards, error: cardsError } = await supabase
