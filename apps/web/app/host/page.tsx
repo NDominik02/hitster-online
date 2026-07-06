@@ -18,6 +18,7 @@ import {
   pollDeckUntilReady,
   spotifyRefreshToken,
   listDecks,
+  deleteDeck,
   findReadyDeckByPlaylistUrl,
   findReadyDeckBySourceKey,
 } from "@/lib/supabase/functions";
@@ -95,6 +96,7 @@ export default function HostCreatePage() {
   const [libraryDecks, setLibraryDecks] = useState<Deck[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [currentUid, setCurrentUid] = useState<string | null>(null);
+  const [deletingDeckId, setDeletingDeckId] = useState<string | null>(null);
   const [featuredLoadingUrl, setFeaturedLoadingUrl] = useState<string | null>(null);
 
   async function handleSelectSource(source: "new" | "featured" | "library") {
@@ -118,6 +120,27 @@ export default function HostCreatePage() {
   function handleSelectLibraryDeck(selected: Deck) {
     setDeck(selected);
     setPhase("report");
+  }
+
+  async function handleDeleteLibraryDeck(selected: Deck) {
+    if (selected.ownerId !== currentUid || deletingDeckId) return;
+    const confirmed = window.confirm(`Törlöd ezt a paklit?\n\n${selected.name}`);
+    if (!confirmed) return;
+
+    setDeletingDeckId(selected.id);
+    setError(null);
+    try {
+      await deleteDeck(selected.id);
+      setLibraryDecks((current) => current.filter((deckItem) => deckItem.id !== selected.id));
+      if (deck?.id === selected.id) {
+        setDeck(null);
+        setPhase("form");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nem sikerült törölni a paklit.");
+    } finally {
+      setDeletingDeckId(null);
+    }
   }
 
   /**
@@ -168,7 +191,12 @@ export default function HostCreatePage() {
     await startSpotifyLogin(clientId, redirectUri);
   }
 
-  const urlLooksValid = /^https:\/\/open\.spotify\.com\/playlist\/[a-zA-Z0-9]+/.test(playlistUrl.trim());
+  const playlistUrls = playlistUrl
+    .split(/\r?\n|,/)
+    .map((url) => url.trim())
+    .filter(Boolean);
+  const playlistUrlsLookValid =
+    playlistUrls.length > 0 && playlistUrls.every((url) => /^https:\/\/open\.spotify\.com\/playlist\/[a-zA-Z0-9]+/.test(url));
 
   /**
    * `urlOverride` — az "Ajánlott playlistek" gyorsválasztó adja át explicit
@@ -181,7 +209,8 @@ export default function HostCreatePage() {
     options?: { playlistUrls?: string[]; sourceKey?: string; deckName?: string }
   ) {
     const url = (urlOverride ?? playlistUrl).trim();
-    if (!urlOverride && !urlLooksValid) {
+    const urls = options?.playlistUrls ?? (urlOverride ? [url] : playlistUrls);
+    if (!urlOverride && !playlistUrlsLookValid) {
       setError("Érvénytelen Spotify playlist link. Ellenőrizd, és próbáld újra.");
       return;
     }
@@ -193,7 +222,10 @@ export default function HostCreatePage() {
       await ensureAnonymousSession();
 
       // A HTTP hívás azonnal visszatér a deckId-vel, a feldolgozás a szerveren fut tovább.
-      const { deckId } = await generateDeck(url, options);
+      const { deckId } = await generateDeck(urls[0] ?? url, {
+        ...options,
+        playlistUrls: urls.length > 1 ? urls : options?.playlistUrls,
+      });
 
       // Pollingozzuk a decks táblát ~2 mp-enként, amíg ready/failed nem lesz (BACKEND-NOTES 4.).
       const result = await pollDeckUntilReady(deckId, (partial) => {
@@ -334,20 +366,20 @@ export default function HostCreatePage() {
               {deckSource === "new" && (
                 <div className="mt-3">
                   <label className="block mb-1 font-medium" htmlFor="playlist-url">
-                    Spotify playlist link
+                    Spotify playlist link(ek)
                   </label>
-                  <input
+                  <textarea
                     id="playlist-url"
-                    type="url"
                     value={playlistUrl}
                     onChange={(e) => setPlaylistUrl(e.target.value)}
-                    placeholder="https://open.spotify.com/playlist/..."
-                    className="w-full min-h-11 rounded-[var(--radius-button)] bg-surface-2 border-2 border-border focus-visible:border-accent px-4 py-3 text-base"
+                    placeholder={"https://open.spotify.com/playlist/...\nhttps://open.spotify.com/playlist/..."}
+                    rows={playlistUrl.includes("\n") ? 4 : 2}
+                    className="w-full min-h-24 rounded-[var(--radius-button)] bg-surface-2 border-2 border-border focus-visible:border-accent px-4 py-3 text-base resize-y"
                     aria-invalid={Boolean(error)}
                     aria-describedby="playlist-url-help"
                   />
                   <p id="playlist-url-help" className="text-sm text-text-muted mt-1">
-                    › Illeszd be egy Spotify playlist linkjét.
+                    › Egy vagy több Spotify playlist link, soronként külön. Több linkből egy közös, deduplikált pakli készül.
                   </p>
                 </div>
               )}
@@ -385,6 +417,8 @@ export default function HostCreatePage() {
                     loading={libraryLoading}
                     currentUid={currentUid}
                     onSelect={handleSelectLibraryDeck}
+                    onDelete={handleDeleteLibraryDeck}
+                    deletingDeckId={deletingDeckId}
                   />
                 </div>
               )}
@@ -464,7 +498,7 @@ export default function HostCreatePage() {
             </div>
 
             {deckSource === "new" && (
-              <AppButton size="lg" fullWidth disabled={!playlistUrl} onClick={() => handleGenerate()}>
+              <AppButton size="lg" fullWidth disabled={!playlistUrl || !playlistUrlsLookValid} onClick={() => handleGenerate()}>
                 PAKLI GENERÁLÁSA ▶
               </AppButton>
             )}

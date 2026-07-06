@@ -68,6 +68,34 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const FUNCTION_SELF_URL = `${SUPABASE_URL}/functions/v1/generate_deck`;
 
+function inferAudioStorage(contentType: string | null, sourceUrl: string): { extension: 'mp3' | 'm4a'; contentType: string } {
+  const type = (contentType ?? '').toLowerCase();
+  const url = sourceUrl.toLowerCase();
+  if (type.includes('mpeg') || type.includes('mp3') || url.includes('.mp3')) {
+    return { extension: 'mp3', contentType: 'audio/mpeg' };
+  }
+  if (type.includes('mp4') || type.includes('aac') || type.includes('m4a') || url.includes('.m4a')) {
+    return { extension: 'm4a', contentType: 'audio/mp4' };
+  }
+  if (url.includes('audio-ssl.itunes.apple.com')) {
+    return { extension: 'm4a', contentType: 'audio/mp4' };
+  }
+  return { extension: 'mp3', contentType: 'audio/mpeg' };
+}
+
+function finalGenerationDiagnostics(report: Record<string, any>): Record<string, unknown> {
+  return {
+    ...(report.playlistName ? { playlistName: report.playlistName } : {}),
+    ...(Array.isArray(report.sourcePlaylistIds) ? { sourcePlaylistIds: report.sourcePlaylistIds } : {}),
+    ...(Array.isArray(report.sourceReports) ? { sourceReports: report.sourceReports } : {}),
+    ...(typeof report.mergedTrackCountBeforeDedupe === 'number'
+      ? { mergedTrackCountBeforeDedupe: report.mergedTrackCountBeforeDedupe }
+      : {}),
+    ...(typeof report.possiblyTruncatedAt100 === 'boolean' ? { possiblyTruncatedAt100: report.possiblyTruncatedAt100 } : {}),
+    ...(Array.isArray(report.tracksCache) ? { fetchedTrackCount: report.tracksCache.length } : {}),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Step 1: playlist -> track list via anonymous fetch of the Spotify embed page
 // (ported from 01-fetch-playlist.js, unchanged logic)
@@ -834,10 +862,11 @@ async function runAudioUploadPhase(
       ]);
       if (!audioRes.ok) throw new Error(`audio fetch failed: ${audioRes.status}`);
       const audioBuf = await audioRes.arrayBuffer();
-      const path = `${deckId}/${cardId}.mp3`;
+      const audioStorage = inferAudioStorage(audioRes.headers.get('content-type'), sourceUrl);
+      const path = `${deckId}/${cardId}.${audioStorage.extension}`;
       const { error: uploadError } = await supabase.storage
         .from('deck-audio')
-        .upload(path, audioBuf, { contentType: 'audio/mpeg', upsert: true });
+        .upload(path, audioBuf, { contentType: audioStorage.contentType, upsert: true });
       if (uploadError) throw uploadError;
 
       deckCardRows.push({
@@ -892,6 +921,7 @@ async function runAudioUploadPhase(
       usable_count: usableCount,
       coverage_pct: coveragePct,
       report: {
+        ...finalGenerationDiagnostics(report),
         processed: total,
         total,
         step: 'done',

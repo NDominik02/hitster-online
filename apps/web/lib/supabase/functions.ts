@@ -89,6 +89,11 @@ export async function listDecks(limit = 30): Promise<Deck[]> {
   return (data ?? []).map(adaptDeck);
 }
 
+/** Saját, már nem használt pakli törlése a hozzá tartozó hangfájlokkal együtt. */
+export async function deleteDeck(deckId: string): Promise<{ ok: true }> {
+  return invoke("delete_deck", { deckId });
+}
+
 /** Ugyanaz a playlist-id kinyerő logika, mint a generate_deck Edge Function _shared/util.ts-ében. */
 function parsePlaylistIdFromUrl(urlOrId: string): string | null {
   const m = urlOrId.match(/playlist[/:]([a-zA-Z0-9]+)/);

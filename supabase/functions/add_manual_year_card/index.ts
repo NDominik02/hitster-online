@@ -39,6 +39,21 @@ async function fetchSpotifyOembedArtwork(spotifyUri: string | null | undefined):
   }
 }
 
+function inferAudioStorage(contentType: string | null, sourceUrl: string): { extension: 'mp3' | 'm4a'; contentType: string } {
+  const type = (contentType ?? '').toLowerCase();
+  const url = sourceUrl.toLowerCase();
+  if (type.includes('mpeg') || type.includes('mp3') || url.includes('.mp3')) {
+    return { extension: 'mp3', contentType: 'audio/mpeg' };
+  }
+  if (type.includes('mp4') || type.includes('aac') || type.includes('m4a') || url.includes('.m4a')) {
+    return { extension: 'm4a', contentType: 'audio/mp4' };
+  }
+  if (url.includes('audio-ssl.itunes.apple.com')) {
+    return { extension: 'm4a', contentType: 'audio/mp4' };
+  }
+  return { extension: 'mp3', contentType: 'audio/mpeg' };
+}
+
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
   if (preflight) return preflight;
@@ -92,10 +107,11 @@ Deno.serve(async (req: Request) => {
     ]);
     if (!audioRes.ok) throw new Error(`audio fetch failed: ${audioRes.status}`);
     const audioBuf = await audioRes.arrayBuffer();
-    const path = `${deck.id}/${cardId}.mp3`;
+    const audioStorage = inferAudioStorage(audioRes.headers.get('content-type'), sourceUrl);
+    const path = `${deck.id}/${cardId}.${audioStorage.extension}`;
     const { error: uploadError } = await supabase.storage
       .from('deck-audio')
-      .upload(path, audioBuf, { contentType: 'audio/mpeg', upsert: true });
+      .upload(path, audioBuf, { contentType: audioStorage.contentType, upsert: true });
     if (uploadError) throw uploadError;
 
     const { error: insertError } = await supabase.from('deck_cards').insert({
