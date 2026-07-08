@@ -487,15 +487,13 @@ export default function HostCreatePage() {
                 <p className="font-semibold text-sm">🎧 Spotify Premium</p>
                 <p className="text-text-muted text-xs mt-0.5">
                   {spotifyStatus === "connected"
-                    ? "Csatlakoztatva — teljes számok szólnak majd 30 mp-es preview helyett, és 100 fölötti playlisteket is be tudunk olvasni."
+                    ? "Csatlakoztatva — ha a playlist-import 403-at jelez, csatlakoztasd újra a Spotifyt az új jogosultságokhoz."
                     : "Opcionális — enélkül is megy a 30 mp-es ingyenes preview, de a playlist-import 100 számnál megállhat."}
                 </p>
               </div>
-              {spotifyStatus !== "connected" && (
-                <AppButton size="sm" variant="secondary" onClick={handleConnectSpotify}>
-                  Csatlakoztatás
-                </AppButton>
-              )}
+              <AppButton size="sm" variant="secondary" onClick={handleConnectSpotify}>
+                {spotifyStatus === "connected" ? "Újracsatlakoztatás" : "Csatlakoztatás"}
+              </AppButton>
             </div>
 
             {deckSource === "new" && (

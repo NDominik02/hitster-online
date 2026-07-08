@@ -226,10 +226,22 @@ async function fetchPlaylistTracksAuthenticated(
       const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
+        const failureReason = `page fetch failed (${res.status}) ${text}`.trim();
         console.log(
           `[premium-widen] page fetch failed status=${res.status} afterTracks=${tracks.length} url=${url} body=${text}`
         );
-        stopReason = `page fetch failed (${res.status})`;
+        stopReason = failureReason;
+        if (tracks.length === 0) {
+          return {
+            ok: false,
+            reason: failureReason,
+            tracks,
+            playlistName: meta.name,
+            spotifyTotal,
+            pagesFetched,
+            stopReason,
+          };
+        }
         break; // a partial list is still more useful than bailing entirely
       }
       const page = await res.json();
