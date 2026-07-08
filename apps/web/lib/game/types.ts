@@ -150,6 +150,7 @@ export interface DeckReport {
   meetsMinimum: boolean; // usable >= 60 (D4)
   excluded: CoverageExcludedTrack[];
   uncertainYearCount?: number;
+  playlistImportWarning?: string;
 }
 
 export interface Deck {

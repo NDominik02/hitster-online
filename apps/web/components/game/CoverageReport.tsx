@@ -13,6 +13,7 @@ export interface CoverageReportProps {
   pct: number;
   excluded: CoverageExcludedTrack[];
   meetsMinimum: boolean; // D4: >= 60 kell
+  importWarning?: string;
   /** A szülő itt kapja meg a friss usable/coverage/excluded állapotot egy sikeres
    *  évszám-mentés után (playtest feedback, 2026-07-06). */
   onRescued: (result: { usableCount: number; coveragePct: number; meetsMinimum: boolean; excluded: CoverageExcludedTrack[] }) => void;
@@ -24,11 +25,17 @@ const REASON_LABELS: Record<CoverageExcludedTrack["reason"], string> = {
 };
 
 /** Lefedettségi riport (H2): fő szám + kimaradt lista — DESIGN H2 wireframe. */
-export function CoverageReport({ deckId, usable, total, pct, excluded, meetsMinimum, onRescued }: CoverageReportProps) {
+export function CoverageReport({ deckId, usable, total, pct, excluded, meetsMinimum, importWarning, onRescued }: CoverageReportProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <div className="space-y-4">
+      {importWarning && (
+        <div className="rounded-[var(--radius-card)] border border-warning bg-warning/10 px-4 py-3 text-sm text-warning">
+          {importWarning}
+        </div>
+      )}
+
       <div
         className={clsx(
           "rounded-[var(--radius-card)] border-2 px-6 py-5 text-center",

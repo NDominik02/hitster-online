@@ -30,6 +30,7 @@ export function adaptDeck(row: DeckRow): Deck {
     step?: string;
     reason?: string;
     errorCode?: string;
+    playlistImportWarning?: string;
   };
   return {
     id: row.id,
@@ -46,6 +47,7 @@ export function adaptDeck(row: DeckRow): Deck {
       meetsMinimum: report.meetsMinimum ?? row.usable_count >= 60,
       excluded: report.excluded ?? [],
       uncertainYearCount: report.uncertainYearCount,
+      playlistImportWarning: report.playlistImportWarning,
     },
     progress: {
       processed: report.processed ?? 0,

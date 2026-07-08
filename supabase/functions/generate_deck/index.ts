@@ -92,6 +92,9 @@ function finalGenerationDiagnostics(report: Record<string, any>): Record<string,
       ? { mergedTrackCountBeforeDedupe: report.mergedTrackCountBeforeDedupe }
       : {}),
     ...(typeof report.possiblyTruncatedAt100 === 'boolean' ? { possiblyTruncatedAt100: report.possiblyTruncatedAt100 } : {}),
+    ...(typeof report.playlistImportWarning === 'string'
+      ? { playlistImportWarning: report.playlistImportWarning }
+      : {}),
     ...(Array.isArray(report.tracksCache) ? { fetchedTrackCount: report.tracksCache.length } : {}),
   };
 }
@@ -492,6 +495,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
     let tracks: RawTrack[];
     let playlistName: string;
     let possiblyTruncatedAt100 = false;
+    let playlistImportWarning: string | undefined;
 
     // Playlist fetch only needs to happen once — cache it in decks.report so
     // resumed invocations (self-chained batches) don't re-fetch it.
@@ -500,6 +504,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
       tracks = existingReport.tracksCache;
       playlistName = existingReport.playlistName ?? playlistId;
       possiblyTruncatedAt100 = existingReport.possiblyTruncatedAt100 ?? false;
+      playlistImportWarning = existingReport.playlistImportWarning;
     } else {
       const sourcePlaylistIds =
         Array.isArray(existingReport.sourcePlaylistIds) && existingReport.sourcePlaylistIds.length > 0
@@ -511,6 +516,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
         const sourceNames: string[] = [];
         const sourceReports: Array<{ playlistId: string; name: string; trackCount: number; possiblyTruncatedAt100: boolean }> = [];
         const mergedTracks: RawTrack[] = [];
+        const sourceWarnings: string[] = [];
 
         for (const sourcePlaylistId of sourcePlaylistIds) {
           const step1 = await fetchPlaylistViaEmbed(sourcePlaylistId);
@@ -554,9 +560,18 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
                     spotifyPreviewUrl: t.uri ? (previewByUri.get(t.uri) ?? t.spotifyPreviewUrl) : t.spotifyPreviewUrl,
                   }));
                   sourcePossiblyTruncatedAt100 = full.tracks.length >= MAX_TRACKS_PREMIUM;
+                  if (sourcePossiblyTruncatedAt100) {
+                    sourceWarnings.push(`${sourceName}: a Spotify playlist nagyon hosszú, ezért az első ${MAX_TRACKS_PREMIUM} számot importáltuk.`);
+                  }
                   console.log(`[premium-widen] widened source=${sourcePlaylistId} to ${sourceTracks.length} tracks`);
+                } else {
+                  sourceWarnings.push(`${sourceName}: a Spotify Web API nem adott 100-nál több számot, ezért csak az első 100-at importáltuk.`);
                 }
+              } else {
+                sourceWarnings.push(`${sourceName}: nincs érvényes Spotify-kapcsolat, ezért csak az első 100 számot importáltuk.`);
               }
+            } else {
+              sourceWarnings.push(`${sourceName}: nincs paklitulajdonos azonosító, ezért csak az első 100 számot importáltuk.`);
             }
           }
 
@@ -573,6 +588,12 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
         tracks = dedupeRawTracks(mergedTracks);
         playlistName = existingReport.deckName ?? sourceNames.join(' + ');
         possiblyTruncatedAt100 = sourceReports.some((source) => source.possiblyTruncatedAt100);
+        playlistImportWarning =
+          sourceWarnings.length > 0
+            ? sourceWarnings.length === 1
+              ? sourceWarnings[0]
+              : `${sourceWarnings.length} playlist 100/300 számos importkorlátba futott. Részletek: ${sourceWarnings.join(' ')}`
+            : undefined;
 
         await supabase
           .from('decks')
@@ -586,6 +607,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
               tracksCache: tracks,
               playlistName,
               possiblyTruncatedAt100,
+              playlistImportWarning,
               sourcePlaylistIds,
               sourceReports,
               mergedTrackCountBeforeDedupe: mergedTracks.length,
@@ -637,9 +659,18 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
                 spotifyPreviewUrl: t.uri ? (previewByUri.get(t.uri) ?? t.spotifyPreviewUrl) : t.spotifyPreviewUrl,
               }));
               possiblyTruncatedAt100 = full.tracks.length >= MAX_TRACKS_PREMIUM;
+              if (possiblyTruncatedAt100) {
+                playlistImportWarning = `A Spotify playlist nagyon hosszú, ezért az első ${MAX_TRACKS_PREMIUM} számot importáltuk.`;
+              }
               console.log(`[premium-widen] widened to ${tracks.length} tracks`);
+            } else {
+              playlistImportWarning = 'A Spotify Web API nem adott 100-nál több számot, ezért csak az első 100-at importáltuk.';
             }
+          } else {
+            playlistImportWarning = 'Nincs érvényes Spotify-kapcsolat, ezért csak az első 100 számot importáltuk.';
           }
+        } else {
+          playlistImportWarning = 'Nincs paklitulajdonos azonosító, ezért csak az első 100 számot importáltuk.';
         }
       }
 
@@ -655,6 +686,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
             tracksCache: tracks,
             playlistName,
             possiblyTruncatedAt100,
+            playlistImportWarning,
             processedTracks: [], // accumulates ProcessedTrack-lite results across batches
           },
         })
@@ -712,6 +744,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
               tracksCache: tracks,
               playlistName,
               possiblyTruncatedAt100,
+              playlistImportWarning,
               processedTracks: accumulated,
             },
           })
@@ -735,12 +768,14 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
         .from('decks')
         .update({
           report: {
+            ...report,
             processed: cursor,
             total,
             step: 'resolving_years',
             tracksCache: tracks,
             playlistName,
             possiblyTruncatedAt100,
+            playlistImportWarning,
             processedTracks: accumulated,
           },
         })
@@ -753,7 +788,20 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
     // All tracks resolved (year + preview candidate) — move to audio upload.
     await supabase
       .from('decks')
-      .update({ report: { processed: total, total, step: 'uploading_audio', uploadCursor: 0 } })
+      .update({
+        report: {
+          ...report,
+          processed: total,
+          total,
+          step: 'uploading_audio',
+          uploadCursor: 0,
+          tracksCache: tracks,
+          playlistName,
+          possiblyTruncatedAt100,
+          playlistImportWarning,
+          processedTracks: accumulated,
+        },
+      })
       .eq('id', deckId);
 
     await runAudioUploadPhase(supabase, deckId, accumulated, total, startedAt);
