@@ -194,7 +194,15 @@ async function fetchPlaylistTracksAuthenticated(
   playlistId: string,
   accessToken: string,
   maxTracks: number
-): Promise<{ ok: boolean; tracks?: RawTrack[]; playlistName?: string; reason?: string }> {
+): Promise<{
+  ok: boolean;
+  tracks?: RawTrack[];
+  playlistName?: string;
+  reason?: string;
+  spotifyTotal?: number;
+  pagesFetched?: number;
+  stopReason?: string;
+}> {
   try {
     const metaRes = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}?fields=name`, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -206,20 +214,33 @@ async function fetchPlaylistTracksAuthenticated(
     const meta = await metaRes.json();
 
     const tracks: RawTrack[] = [];
-    let url: string | null =
-      `https://api.spotify.com/v1/playlists/${playlistId}/tracks` +
-      `?fields=items(track(uri,name,artists(name),duration_ms,is_playable,preview_url)),next,total&limit=${SPOTIFY_PLAYLIST_PAGE_LIMIT}`;
+    let spotifyTotal: number | undefined;
+    let pagesFetched = 0;
+    let offset = 0;
+    let stopReason = 'done';
 
-    while (url && tracks.length < maxTracks) {
+    while (tracks.length < maxTracks) {
+      const url =
+        `https://api.spotify.com/v1/playlists/${playlistId}/tracks` +
+        `?fields=items(track(uri,name,artists(name),duration_ms,is_playable,preview_url)),total&limit=${SPOTIFY_PLAYLIST_PAGE_LIMIT}&offset=${offset}`;
       const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
         console.log(
           `[premium-widen] page fetch failed status=${res.status} afterTracks=${tracks.length} url=${url} body=${text}`
         );
+        stopReason = `page fetch failed (${res.status})`;
         break; // a partial list is still more useful than bailing entirely
       }
       const page = await res.json();
+      pagesFetched++;
+      if (typeof page.total === 'number') spotifyTotal = page.total;
+      const items = page.items ?? [];
+      if (items.length === 0) {
+        stopReason = `empty page at offset ${offset}`;
+        break;
+      }
+
       for (const item of page.items ?? []) {
         const t = item.track ?? item.item;
         if (!t || t.type === 'episode') continue;
@@ -234,10 +255,16 @@ async function fetchPlaylistTracksAuthenticated(
         });
         if (tracks.length >= maxTracks) break;
       }
-      url = page.next ?? null;
+
+      offset += SPOTIFY_PLAYLIST_PAGE_LIMIT;
+      if (typeof spotifyTotal === 'number' && offset >= spotifyTotal) break;
     }
 
-    return { ok: true, tracks, playlistName: meta.name };
+    if (tracks.length >= maxTracks && typeof spotifyTotal === 'number' && spotifyTotal > maxTracks) {
+      stopReason = `maxTracks ${maxTracks} reached before spotifyTotal ${spotifyTotal}`;
+    }
+
+    return { ok: true, tracks, playlistName: meta.name, spotifyTotal, pagesFetched, stopReason };
   } catch (err) {
     return { ok: false, reason: String(err) };
   }
@@ -549,7 +576,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
               if (token) {
                 const full = await fetchPlaylistTracksAuthenticated(sourcePlaylistId, token.accessToken, MAX_TRACKS_PREMIUM);
                 console.log(
-                  `[premium-widen] fetch ok=${full.ok} reason=${full.reason ?? 'n/a'} fetchedTracks=${full.tracks?.length ?? 0} embedTracks=${sourceTracks.length}`
+                  `[premium-widen] fetch ok=${full.ok} reason=${full.reason ?? 'n/a'} fetchedTracks=${full.tracks?.length ?? 0} embedTracks=${sourceTracks.length} spotifyTotal=${full.spotifyTotal ?? 'unknown'} pages=${full.pagesFetched ?? 0} stop=${full.stopReason ?? 'n/a'}`
                 );
                 if (full.ok && full.tracks && full.tracks.length > sourceTracks.length) {
                   const previewByUri = new Map(
@@ -565,7 +592,9 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
                   }
                   console.log(`[premium-widen] widened source=${sourcePlaylistId} to ${sourceTracks.length} tracks`);
                 } else {
-                  const reason = full.reason ? ` (${full.reason})` : '';
+                  const reason = full.reason
+                    ? ` (${full.reason})`
+                    : ` (Spotify total: ${full.spotifyTotal ?? 'ismeretlen'}, oldalak: ${full.pagesFetched ?? 0}, beolvasott: ${full.tracks?.length ?? 0}, stop: ${full.stopReason ?? 'ismeretlen'})`;
                   sourceWarnings.push(`${sourceName}: a Spotify Web API nem adott 100-nál több számot, ezért csak az első 100-at importáltuk.${reason}`);
                 }
               } else {
@@ -649,7 +678,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
           if (token) {
             const full = await fetchPlaylistTracksAuthenticated(playlistId, token.accessToken, MAX_TRACKS_PREMIUM);
             console.log(
-              `[premium-widen] fetch ok=${full.ok} reason=${full.reason ?? 'n/a'} fetchedTracks=${full.tracks?.length ?? 0} embedTracks=${tracks.length}`
+              `[premium-widen] fetch ok=${full.ok} reason=${full.reason ?? 'n/a'} fetchedTracks=${full.tracks?.length ?? 0} embedTracks=${tracks.length} spotifyTotal=${full.spotifyTotal ?? 'unknown'} pages=${full.pagesFetched ?? 0} stop=${full.stopReason ?? 'n/a'}`
             );
             if (full.ok && full.tracks && full.tracks.length > tracks.length) {
               const previewByUri = new Map(
@@ -665,7 +694,9 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
               }
               console.log(`[premium-widen] widened to ${tracks.length} tracks`);
             } else {
-              const reason = full.reason ? ` (${full.reason})` : '';
+              const reason = full.reason
+                ? ` (${full.reason})`
+                : ` (Spotify total: ${full.spotifyTotal ?? 'ismeretlen'}, oldalak: ${full.pagesFetched ?? 0}, beolvasott: ${full.tracks?.length ?? 0}, stop: ${full.stopReason ?? 'ismeretlen'})`;
               playlistImportWarning = `A Spotify Web API nem adott 100-nál több számot, ezért csak az első 100-at importáltuk.${reason}`;
             }
           } else {
