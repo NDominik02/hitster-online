@@ -93,8 +93,12 @@ export async function listDecks(limit = 30): Promise<Deck[]> {
 }
 
 /** Saját, már nem használt pakli törlése a hozzá tartozó hangfájlokkal együtt. */
-export async function deleteDeck(deckId: string): Promise<{ ok: true }> {
+export async function deleteDeck(deckId: string): Promise<{ ok: true; mode?: "hidden" }> {
   return invoke("delete_deck", { deckId });
+}
+
+export async function renameDeck(deckId: string, name: string): Promise<{ ok: true; name: string }> {
+  return invoke("rename_deck", { deckId, name });
 }
 
 /** Ugyanaz a playlist-id kinyerő logika, mint a generate_deck Edge Function _shared/util.ts-ében. */
@@ -137,14 +141,14 @@ export async function findReadyDeckBySourceKey(sourceKey: string): Promise<Deck 
  * GenerationProgress komponens élőben frissülhessen.
  *
  * `maxWaitMs` — védőháló, ha a decks sor valamiért sosem érné el a ready/failed állapotot (pl. a
- * self-chaining batch-lánc megszakadt — ld. generate_deck invokeNextBatch jsdoc). 25 perc bőven
- * a legrosszabb eset (Premium-módú, 300 track-es, teljesen újragenerált pakli) fölött van.
+ * self-chaining batch-lánc megszakadt — ld. generate_deck invokeNextBatch jsdoc). 45 perc bőven
+ * a legrosszabb eset (Premium-módú, 500 track-es, teljesen újragenerált pakli) fölött van.
  */
 export async function pollDeckUntilReady(
   deckId: string,
   onProgress?: (deck: Deck) => void,
   intervalMs = 2000,
-  maxWaitMs = 25 * 60 * 1000
+  maxWaitMs = 45 * 60 * 1000
 ): Promise<Deck> {
   const deadline = Date.now() + maxWaitMs;
   while (true) {

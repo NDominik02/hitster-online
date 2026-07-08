@@ -52,10 +52,10 @@ const YEAR_DISAGREEMENT_THRESHOLD = 3; // F0-REPORT 4.: |MB - iTunes| >= 3 -> un
 const SPOTIFY_PLAYLIST_PAGE_LIMIT = 50;
 // S20-bővítés (F3): a Premium-kapcsolattal rendelkező hostoknál a hitelesített
 // Web API-val a 100-as embed-korlát fölé is lapozunk, de van egy józan felső
-// határ — a MusicBrainz 1 req/s throttle miatt 300 track már ~5-8 perc
+// határ — a MusicBrainz 1 req/s throttle miatt 500 track már hosszú,
 // generálást jelent (a meglévő self-chaining batch-logika ezt kezeli, csak
 // nem szabad a hostot a végtelenségig várakoztatni egyetlen playlistért).
-const MAX_TRACKS_PREMIUM = 300;
+const MAX_TRACKS_PREMIUM = 500;
 
 // Time-boxing for the self-chaining background worker. Free tier wall clock
 // is 150s; we budget well under that per invocation so there's headroom for
@@ -638,7 +638,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
           sourceWarnings.length > 0
             ? sourceWarnings.length === 1
               ? sourceWarnings[0]
-              : `${sourceWarnings.length} playlist 100/300 számos importkorlátba futott. Részletek: ${sourceWarnings.join(' ')}`
+              : `${sourceWarnings.length} playlist importkorlátba futott. Részletek: ${sourceWarnings.join(' ')}`
             : undefined;
 
         await supabase

@@ -157,6 +157,7 @@ export interface Deck {
   id: string;
   name: string;
   sourcePlaylistUrl: string;
+  sourcePlaylistId: string;
   totalTracks: number;
   usableCount: number;
   coveragePct: number;
@@ -164,6 +165,8 @@ export interface Deck {
   report: DeckReport;
   /** S31 (F3, pakli-könyvtár) — a pakli-könyvtár listánál kell (saját vs. megosztott jelölés). */
   ownerId?: string | null;
+  isPublic?: boolean;
+  isFeatured?: boolean;
   createdAt?: string;
   /** Generálás közbeni progress (BACKEND-NOTES 4.: decks.report.{processed,total,step}). */
   progress: {

@@ -19,6 +19,7 @@ import {
   spotifyRefreshToken,
   listDecks,
   deleteDeck,
+  renameDeck,
   findReadyDeckByPlaylistUrl,
   findReadyDeckBySourceKey,
 } from "@/lib/supabase/functions";
@@ -96,6 +97,7 @@ export default function HostCreatePage() {
   const [libraryDecks, setLibraryDecks] = useState<Deck[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [currentUid, setCurrentUid] = useState<string | null>(null);
+  const [renamingDeckId, setRenamingDeckId] = useState<string | null>(null);
   const [deletingDeckId, setDeletingDeckId] = useState<string | null>(null);
   const [featuredLoadingUrl, setFeaturedLoadingUrl] = useState<string | null>(null);
 
@@ -122,8 +124,36 @@ export default function HostCreatePage() {
     setPhase("report");
   }
 
+  async function refreshLibraryDecks() {
+    const decks = await listDecks();
+    setLibraryDecks(decks);
+    return decks;
+  }
+
+  async function handleRenameLibraryDeck(selected: Deck) {
+    if (selected.ownerId !== currentUid || selected.isFeatured || renamingDeckId) return;
+    const nextName = window.prompt("Új paklinév", selected.name)?.trim();
+    if (!nextName || nextName === selected.name) return;
+
+    setRenamingDeckId(selected.id);
+    setError(null);
+    try {
+      const result = await renameDeck(selected.id, nextName);
+      setLibraryDecks((current) =>
+        current.map((deckItem) => (deckItem.id === selected.id ? { ...deckItem, name: result.name } : deckItem))
+      );
+      if (deck?.id === selected.id) {
+        setDeck((current) => (current ? { ...current, name: result.name } : current));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nem sikerült átnevezni a paklit.");
+    } finally {
+      setRenamingDeckId(null);
+    }
+  }
+
   async function handleDeleteLibraryDeck(selected: Deck) {
-    if (selected.ownerId !== currentUid || deletingDeckId) return;
+    if (selected.ownerId !== currentUid || selected.isFeatured || deletingDeckId) return;
     const confirmed = window.confirm(`Törlöd ezt a paklit?\n\n${selected.name}`);
     if (!confirmed) return;
 
@@ -131,7 +161,7 @@ export default function HostCreatePage() {
     setError(null);
     try {
       await deleteDeck(selected.id);
-      setLibraryDecks((current) => current.filter((deckItem) => deckItem.id !== selected.id));
+      await refreshLibraryDecks();
       if (deck?.id === selected.id) {
         setDeck(null);
         setPhase("form");
@@ -418,7 +448,9 @@ export default function HostCreatePage() {
                     loading={libraryLoading}
                     currentUid={currentUid}
                     onSelect={handleSelectLibraryDeck}
+                    onRename={handleRenameLibraryDeck}
                     onDelete={handleDeleteLibraryDeck}
+                    renamingDeckId={renamingDeckId}
                     deletingDeckId={deletingDeckId}
                   />
                 </div>
@@ -513,7 +545,7 @@ export default function HostCreatePage() {
               currentStep={stepLabel(progress.step)}
             />
             <p className="text-text-muted text-sm">
-              Ez playlist mérettől függően akár 2-4 percig is eltarthat (MusicBrainz + iTunes lekérdezések).
+              Ez playlist mérettől függően több percig is eltarthat (MusicBrainz + iTunes lekérdezések).
             </p>
             {progress.warning && (
               <p className="rounded-[var(--radius-card)] border border-warning bg-warning/10 px-4 py-3 text-sm text-warning">

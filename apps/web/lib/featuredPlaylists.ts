@@ -30,3 +30,22 @@ export const FEATURED_PLAYLISTS: FeaturedPlaylist[] = [
   },
   { name: "Hitster#1", url: "https://open.spotify.com/playlist/310mLKsO1dHAaIePY4NpLy" },
 ];
+
+const FEATURED_SOURCE_KEYS = new Set(
+  FEATURED_PLAYLISTS.flatMap((playlist) => [
+    playlist.sourceKey,
+    playlist.url ? parsePlaylistIdFromUrl(playlist.url) : null,
+    ...(playlist.urls ?? []).map(parsePlaylistIdFromUrl),
+  ]).filter((value): value is string => Boolean(value))
+);
+
+function parsePlaylistIdFromUrl(urlOrId: string): string | null {
+  const m = urlOrId.match(/playlist[/:]([a-zA-Z0-9]+)/);
+  if (m) return m[1];
+  if (/^[a-zA-Z0-9]{10,30}$/.test(urlOrId)) return urlOrId;
+  return null;
+}
+
+export function isFeaturedDeckSource(sourcePlaylistId: string | null | undefined): boolean {
+  return typeof sourcePlaylistId === "string" && FEATURED_SOURCE_KEYS.has(sourcePlaylistId);
+}

@@ -8,7 +8,9 @@ export interface DeckLibraryProps {
   loading: boolean;
   currentUid: string | null;
   onSelect: (deck: Deck) => void;
+  onRename?: (deck: Deck) => void;
   onDelete?: (deck: Deck) => void;
+  renamingDeckId?: string | null;
   deletingDeckId?: string | null;
 }
 
@@ -16,7 +18,16 @@ export interface DeckLibraryProps {
  * S31 (F3, pakli-könyvtár) - korábban generált saját vagy megosztott
  * kész paklik listája újrafelhasználásra.
  */
-export function DeckLibrary({ decks, loading, currentUid, onSelect, onDelete, deletingDeckId }: DeckLibraryProps) {
+export function DeckLibrary({
+  decks,
+  loading,
+  currentUid,
+  onSelect,
+  onRename,
+  onDelete,
+  renamingDeckId,
+  deletingDeckId,
+}: DeckLibraryProps) {
   if (loading) {
     return <p className="text-text-muted text-sm text-center py-8">Paklik betöltése...</p>;
   }
@@ -33,10 +44,11 @@ export function DeckLibrary({ decks, loading, currentUid, onSelect, onDelete, de
     <div className="space-y-2">
       {decks.map((deck) => {
         const isOwn = deck.ownerId === currentUid;
+        const canManage = isOwn && !deck.isFeatured;
         return (
           <div
             key={deck.id}
-            className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] border border-border bg-surface-2 px-4 py-3"
+            className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-surface-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
           >
             <div className="min-w-0">
               <p className="font-semibold truncate">{deck.name}</p>
@@ -44,11 +56,21 @@ export function DeckLibrary({ decks, loading, currentUid, onSelect, onDelete, de
                 {deck.usableCount} kártya - {deck.coveragePct.toFixed(0)}% lefedettség - {isOwn ? "saját" : "megosztott"}
               </p>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
               <AppButton size="sm" variant="secondary" onClick={() => onSelect(deck)}>
                 Kiválasztom
               </AppButton>
-              {isOwn && onDelete && (
+              {canManage && onRename && (
+                <AppButton
+                  size="sm"
+                  variant="secondary"
+                  disabled={renamingDeckId === deck.id}
+                  onClick={() => onRename(deck)}
+                >
+                  {renamingDeckId === deck.id ? "Mentés..." : "Átnevezés"}
+                </AppButton>
+              )}
+              {canManage && onDelete && (
                 <AppButton
                   size="sm"
                   variant="danger"
