@@ -51,7 +51,7 @@ export default function HostCreatePage() {
   const [helpOpen, setHelpOpen] = useState(false);
 
   const [phase, setPhase] = useState<"mode" | "form" | "generating" | "report">("mode");
-  const [progress, setProgress] = useState<{ processed: number; total: number; step: string }>({
+  const [progress, setProgress] = useState<{ processed: number; total: number; step: string; warning?: string }>({
     processed: 0,
     total: 0,
     step: "fetching_playlist",
@@ -231,8 +231,9 @@ export default function HostCreatePage() {
       const result = await pollDeckUntilReady(deckId, (partial) => {
         setProgress({
           processed: partial.progress.processed,
-          total: partial.progress.total || 100,
+          total: partial.progress.total,
           step: partial.progress.step,
+          warning: partial.progress.warning,
         });
       });
 
@@ -486,8 +487,8 @@ export default function HostCreatePage() {
                 <p className="font-semibold text-sm">🎧 Spotify Premium</p>
                 <p className="text-text-muted text-xs mt-0.5">
                   {spotifyStatus === "connected"
-                    ? "Csatlakoztatva — teljes számok szólnak majd 30 mp-es preview helyett."
-                    : "Opcionális — enélkül is megy a 30 mp-es ingyenes preview."}
+                    ? "Csatlakoztatva — teljes számok szólnak majd 30 mp-es preview helyett, és 100 fölötti playlisteket is be tudunk olvasni."
+                    : "Opcionális — enélkül is megy a 30 mp-es ingyenes preview, de a playlist-import 100 számnál megállhat."}
                 </p>
               </div>
               {spotifyStatus !== "connected" && (
@@ -510,12 +511,17 @@ export default function HostCreatePage() {
             <h2 className="text-2xl font-bold">PAKLI ELŐKÉSZÍTÉSE</h2>
             <GenerationProgress
               processed={progress.processed}
-              total={progress.total || 100}
+              total={progress.total}
               currentStep={stepLabel(progress.step)}
             />
             <p className="text-text-muted text-sm">
               Ez playlist mérettől függően akár 2-4 percig is eltarthat (MusicBrainz + iTunes lekérdezések).
             </p>
+            {progress.warning && (
+              <p className="rounded-[var(--radius-card)] border border-warning bg-warning/10 px-4 py-3 text-sm text-warning">
+                {progress.warning}
+              </p>
+            )}
           </div>
         )}
 
@@ -529,6 +535,7 @@ export default function HostCreatePage() {
               pct={deck.report.coveragePct}
               excluded={deck.report.excluded}
               meetsMinimum={deck.report.meetsMinimum}
+              importWarning={deck.report.playlistImportWarning}
               onRescued={(result) =>
                 setDeck((d) =>
                   d

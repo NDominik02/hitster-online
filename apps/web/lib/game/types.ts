@@ -150,6 +150,7 @@ export interface DeckReport {
   meetsMinimum: boolean; // usable >= 60 (D4)
   excluded: CoverageExcludedTrack[];
   uncertainYearCount?: number;
+  playlistImportWarning?: string;
 }
 
 export interface Deck {
@@ -171,6 +172,8 @@ export interface Deck {
     step: "fetching_playlist" | "resolving_years" | "uploading_audio" | "done" | "failed" | string;
     /** Csak status='failed' esetén — a hiba oka (pl. playlist_not_public). */
     failReason?: string;
+    /** Generálás közben is látható, nem végzetes importfigyelmeztetés. */
+    warning?: string;
   };
 }
 
