@@ -7,6 +7,7 @@ export interface GenerationProgressProps {
 /** Pakli-generálás progress + aktuális lépés (H2) — soha nem tűnhet fagyottnak (DESIGN H2). */
 export function GenerationProgress({ processed, total, currentStep }: GenerationProgressProps) {
   const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+  const progressText = total > 0 ? `${pct}% (feldolgozva: ${processed} / ${total})` : "Playlist beolvasása...";
 
   return (
     <div className="space-y-2" aria-live="polite">
@@ -19,9 +20,7 @@ export function GenerationProgress({ processed, total, currentStep }: Generation
       </div>
       <div className="flex justify-between text-sm text-text-muted">
         <span>› {currentStep}</span>
-        <span className="font-numeric">
-          {pct}% (feldolgozva: {processed} / {total})
-        </span>
+        <span className="font-numeric">{progressText}</span>
       </div>
     </div>
   );
