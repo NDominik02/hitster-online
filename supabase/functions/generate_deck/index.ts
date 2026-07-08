@@ -610,7 +610,8 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
                   const reason = full.reason
                     ? ` (${full.reason})`
                     : ` (Spotify total: ${full.spotifyTotal ?? 'ismeretlen'}, oldalak: ${full.pagesFetched ?? 0}, beolvasott: ${full.tracks?.length ?? 0}, stop: ${full.stopReason ?? 'ismeretlen'})`;
-                  sourceWarnings.push(`${sourceName}: a Spotify Web API nem adott 100-nál több számot, ezért csak az első 100-at importáltuk.${reason}`);
+                  const scopeHint = token.scope ? ` Token scope: ${token.scope}.` : '';
+                  sourceWarnings.push(`${sourceName}: a Spotify Web API nem adott 100-nál több számot, ezért csak az első 100-at importáltuk.${reason}${scopeHint}`);
                 }
               } else {
                 sourceWarnings.push(`${sourceName}: nincs érvényes Spotify-kapcsolat, ezért csak az első 100 számot importáltuk.`);
@@ -712,7 +713,8 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
               const reason = full.reason
                 ? ` (${full.reason})`
                 : ` (Spotify total: ${full.spotifyTotal ?? 'ismeretlen'}, oldalak: ${full.pagesFetched ?? 0}, beolvasott: ${full.tracks?.length ?? 0}, stop: ${full.stopReason ?? 'ismeretlen'})`;
-              playlistImportWarning = `A Spotify Web API nem adott 100-nál több számot, ezért csak az első 100-at importáltuk.${reason}`;
+              const scopeHint = token.scope ? ` Token scope: ${token.scope}.` : '';
+              playlistImportWarning = `A Spotify Web API nem adott 100-nál több számot, ezért csak az első 100-at importáltuk.${reason}${scopeHint}`;
             }
           } else {
             playlistImportWarning = 'Nincs érvényes Spotify-kapcsolat, ezért csak az első 100 számot importáltuk.';

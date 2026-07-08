@@ -14,6 +14,7 @@ const SPOTIFY_SCOPES = [
   "user-read-email",
   "user-read-private",
   "playlist-read-private",
+  "playlist-read-collaborative",
   "user-modify-playback-state",
   "user-read-playback-state",
 ].join(" ");
@@ -54,6 +55,7 @@ export async function startSpotifyLogin(clientId: string, redirectUri: string): 
     code_challenge_method: "S256",
     code_challenge: challenge,
     scope: SPOTIFY_SCOPES,
+    show_dialog: "true",
   });
 
   window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;

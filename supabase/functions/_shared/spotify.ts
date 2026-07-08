@@ -75,10 +75,10 @@ export async function getValidSpotifyAccessToken(
   // deno-lint-ignore no-explicit-any
   supabase: any,
   hostUid: string
-): Promise<{ accessToken: string; expiresAt: string } | null> {
+): Promise<{ accessToken: string; expiresAt: string; scope?: string | null } | null> {
   const { data: connection } = await supabase
     .from('spotify_connections')
-    .select('access_token, refresh_token, access_expires_at')
+    .select('access_token, refresh_token, access_expires_at, scope')
     .eq('host_uid', hostUid)
     .maybeSingle();
 
@@ -86,7 +86,7 @@ export async function getValidSpotifyAccessToken(
 
   const expiresAt = new Date(connection.access_expires_at).getTime();
   if (expiresAt - Date.now() > EXPIRY_SAFETY_MARGIN_MS) {
-    return { accessToken: connection.access_token, expiresAt: connection.access_expires_at };
+    return { accessToken: connection.access_token, expiresAt: connection.access_expires_at, scope: connection.scope };
   }
 
   const refreshed = await refreshSpotifyToken(connection.refresh_token);
@@ -106,5 +106,5 @@ export async function getValidSpotifyAccessToken(
     })
     .eq('host_uid', hostUid);
 
-  return { accessToken: refreshed.access_token, expiresAt: newExpiresAt };
+  return { accessToken: refreshed.access_token, expiresAt: newExpiresAt, scope: refreshed.scope ?? connection.scope };
 }
