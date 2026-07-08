@@ -111,6 +111,8 @@ interface RawTrack {
   artist: string;
   durationMs: number | null;
   spotifyPreviewUrl: string | null;
+  spotifyReleaseYear: number | null;
+  spotifyReleaseDatePrecision: string | null;
   isPlayable: boolean;
 }
 
@@ -122,6 +124,12 @@ interface FetchPlaylistResult {
   trackCount?: number;
   possiblyTruncatedAt100?: boolean;
   tracks?: RawTrack[];
+}
+
+function parseReleaseYear(releaseDate: unknown): number | null {
+  if (typeof releaseDate !== 'string' || releaseDate.length < 4) return null;
+  const year = parseInt(releaseDate.slice(0, 4), 10);
+  return Number.isFinite(year) && year >= 1900 && year <= new Date().getUTCFullYear() + 1 ? year : null;
 }
 
 function extractNextData(html: string): any | null {
@@ -168,6 +176,8 @@ async function fetchPlaylistViaEmbed(playlistId: string): Promise<FetchPlaylistR
     artist: t.subtitle, // embed API gives artist names joined as "subtitle", no album/year here
     durationMs: t.duration ?? null,
     spotifyPreviewUrl: t.audioPreview ? t.audioPreview.url : null,
+    spotifyReleaseYear: null,
+    spotifyReleaseDatePrecision: null,
     isPlayable: t.isPlayable,
   }));
 
@@ -220,16 +230,40 @@ async function fetchPlaylistTracksAuthenticated(
     let stopReason = 'done';
 
     while (tracks.length < maxTracks) {
-      // Keep this request intentionally minimal. Newer Spotify apps can get
+      // Keep this request intentionally narrow. Newer Spotify apps can get
       // 403s for some catalog/playability fields; for widening beyond the
-      // embed's first 100 tracks we only need stable identity metadata.
-      const url =
+      // embed's first 100 tracks we need identity metadata plus album release
+      // year as a soft fallback when MusicBrainz/iTunes find no year.
+      const buildPageUrl = (includeAlbumRelease: boolean) =>
         `https://api.spotify.com/v1/playlists/${playlistId}/items` +
-        `?fields=items(item(uri,name,artists(name),duration_ms,type)),total&limit=${SPOTIFY_PLAYLIST_PAGE_LIMIT}&offset=${offset}`;
-      const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+        `?fields=${
+          includeAlbumRelease
+            ? 'items(item(uri,name,artists(name),duration_ms,type,album(release_date,release_date_precision))),total'
+            : 'items(item(uri,name,artists(name),duration_ms,type)),total'
+        }&limit=${SPOTIFY_PLAYLIST_PAGE_LIMIT}&offset=${offset}`;
+
+      let url = buildPageUrl(true);
+      let res: Response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      let albumFieldFailure = '';
+      if (!res.ok && res.status === 403) {
+        albumFieldFailure = await res.text().catch(() => '');
+        const fallbackUrl = buildPageUrl(false);
+        const fallbackRes = await fetch(fallbackUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (fallbackRes.ok) {
+          console.log(
+            `[premium-widen] album release fields forbidden, retried without album fields afterTracks=${tracks.length} url=${url} body=${albumFieldFailure}`
+          );
+          url = fallbackUrl;
+          res = fallbackRes;
+        } else {
+          res = fallbackRes;
+          url = fallbackUrl;
+        }
+      }
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        const failureReason = `page fetch failed (${res.status}) ${text}`.trim();
+        const albumFailureDetail = albumFieldFailure ? ` album fields 403: ${albumFieldFailure}` : '';
+        const failureReason = `page fetch failed (${res.status}) ${text}${albumFailureDetail}`.trim();
         console.log(
           `[premium-widen] page fetch failed status=${res.status} afterTracks=${tracks.length} url=${url} body=${text}`
         );
@@ -266,6 +300,8 @@ async function fetchPlaylistTracksAuthenticated(
           artist: (t.artists ?? []).map((a: { name: string }) => a.name).join(', '),
           durationMs: t.duration_ms ?? null,
           spotifyPreviewUrl: t.preview_url ?? null,
+          spotifyReleaseYear: parseReleaseYear(t.album?.release_date),
+          spotifyReleaseDatePrecision: t.album?.release_date_precision ?? null,
           isPlayable: t.is_playable ?? true,
         });
         if (tracks.length >= maxTracks) break;
@@ -502,6 +538,16 @@ async function processTrack(track: RawTrack, mbCacheMap: Map<string, YearResolut
     // playlist, not only when there's no Spotify embed source.
     finalYear = itunesRes.releaseYear;
     finalYearSource = 'itunes';
+  }
+
+  if (!finalYear && track.spotifyReleaseYear) {
+    // Spotify album release dates are excellent coverage fallbacks, but they
+    // can point at album/remaster/compilation dates instead of the original
+    // single release. Use them only when MB+iTunes found no year, and mark
+    // them uncertain so the report still surfaces that this was a softer hit.
+    finalYear = track.spotifyReleaseYear;
+    finalYearSource = 'spotify_album';
+    yearUncertain = true;
   }
 
   const preview = track.spotifyPreviewUrl ?? itunesRes.previewUrl; // D12: Spotify embed primary, iTunes fallback
