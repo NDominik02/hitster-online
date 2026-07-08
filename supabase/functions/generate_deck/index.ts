@@ -183,7 +183,7 @@ async function fetchPlaylistViaEmbed(playlistId: string): Promise<FetchPlaylistR
 
 // S20-bővítés (F3): a Premium-kapcsolattal rendelkező host hitelesített
 // tokenjével lapozva lekéri a TELJES track-listát (a Spotify Web API
-// /playlists/{id}/tracks végpontja lapozható, nincs 100-as korlátja — az
+// /playlists/{id}/items végpontja lapozható, nincs 100-as korlátja — az
 // anonim embed oldal viszont MAGA a Spotify vágja le 100-nál). A
 // preview_url mezőt a hitelesített API 2024 november óta nem adja vissza
 // megbízhatóan új appoknak (F0-REPORT 5. szakasz) — ezért ez a fetch szinte
@@ -224,8 +224,8 @@ async function fetchPlaylistTracksAuthenticated(
       // 403s for some catalog/playability fields; for widening beyond the
       // embed's first 100 tracks we only need stable identity metadata.
       const url =
-        `https://api.spotify.com/v1/playlists/${playlistId}/tracks` +
-        `?fields=items(track(uri,name,artists(name),duration_ms)),total&limit=${SPOTIFY_PLAYLIST_PAGE_LIMIT}&offset=${offset}`;
+        `https://api.spotify.com/v1/playlists/${playlistId}/items` +
+        `?fields=items(item(uri,name,artists(name),duration_ms,type)),total&limit=${SPOTIFY_PLAYLIST_PAGE_LIMIT}&offset=${offset}`;
       const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
