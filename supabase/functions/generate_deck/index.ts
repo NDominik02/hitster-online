@@ -220,9 +220,12 @@ async function fetchPlaylistTracksAuthenticated(
     let stopReason = 'done';
 
     while (tracks.length < maxTracks) {
+      // Keep this request intentionally minimal. Newer Spotify apps can get
+      // 403s for some catalog/playability fields; for widening beyond the
+      // embed's first 100 tracks we only need stable identity metadata.
       const url =
         `https://api.spotify.com/v1/playlists/${playlistId}/tracks` +
-        `?fields=items(track(uri,name,artists(name),duration_ms,is_playable,preview_url)),total&limit=${SPOTIFY_PLAYLIST_PAGE_LIMIT}&offset=${offset}`;
+        `?fields=items(track(uri,name,artists(name),duration_ms)),total&limit=${SPOTIFY_PLAYLIST_PAGE_LIMIT}&offset=${offset}`;
       const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
