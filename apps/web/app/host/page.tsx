@@ -319,13 +319,22 @@ export default function HostCreatePage() {
           <h1 className="text-xl font-bold flex items-center gap-2">
             <span aria-hidden>🎵</span> HITSTER ONLINE
           </h1>
-          <button
-            type="button"
-            className="text-text-muted text-sm hover:text-text"
-            onClick={() => setHelpOpen(true)}
-          >
-            ? Súgó
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="text-text-muted text-sm hover:text-text"
+              onClick={() => router.push("/")}
+            >
+              Főmenü
+            </button>
+            <button
+              type="button"
+              className="text-text-muted text-sm hover:text-text"
+              onClick={() => setHelpOpen(true)}
+            >
+              ? Súgó
+            </button>
+          </div>
         </header>
 
         {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}

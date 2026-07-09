@@ -126,11 +126,11 @@ export function RevealCard({
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-center"
+            className="mx-auto max-w-[min(92vw,42rem)] text-center"
           >
-            <div className="eyebrow">{artist}</div>
+            <div className="eyebrow break-words">{artist}</div>
             <div
-              className="text-2xl md:text-4xl font-bold mt-1"
+              className="text-2xl md:text-4xl font-bold mt-1 leading-tight break-words"
               style={{ fontFamily: "var(--font-heading)" }}
             >
               {title}

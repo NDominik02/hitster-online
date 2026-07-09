@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { AppButton } from "@/components/system/AppButton";
 import { RoomCodeInput } from "@/components/lobby/RoomCodeInput";
 import { ColorPicker } from "@/components/lobby/ColorPicker";
@@ -22,6 +22,7 @@ import {
   joinRoom,
   placeCard,
   registerSteal,
+  leaveRoom,
   fetchPlayers,
   fetchRoundPublic,
   getTimeline,
@@ -61,6 +62,7 @@ function AutoSkipToast({ names, onDismiss }: { names: string[]; onDismiss: () =>
 
 export default function PlayRoomPage() {
   const params = useParams<{ roomCode: string }>();
+  const router = useRouter();
   const roomCode = params.roomCode;
 
   const [checkingReconnect, setCheckingReconnect] = useState(true);
@@ -232,40 +234,24 @@ export default function PlayRoomPage() {
     },
   });
 
-  // FALLBACK POLLING (2026-07-02 hotfix): ha a `round_revealed` broadcast valamiért nem
-  // érkezik meg (pl. a host tab háttérbe kerül és a setTimeout throttle-ölődik, vagy a
-  // broadcast-csatorna épp nem volt feliratkozva), a player kliens korábban véglegesen
-  // beragadt a "Lejárt az idő!" képernyőn — semmi nem mentette meg. Ez a tartalék: ha a
-  // kör fázisa még nem reveal/done, DE a placingDeadline már (jó ráhagyással) a múltban
-  // van, rövid intervallumban újraolvassuk a round_public nézetet, amíg a fázis ténylegesen
-  // reveal-re nem vált (vagy amíg a broadcast közben meg nem érkezik — ilyenkor a round.phase
-  // már reveal lesz, és ez az effect magától leáll).
+  // Fallback polling: a Realtime broadcast gyors, de nem perzisztens. Ha a
+  // `card_placed`/`round_revealed` üzenet kimarad, a player kliens a biztonságos
+  // `round_public` nézetből konvergál vissza a szerver valódi fázisára/deadline-jára.
   const roundIdForPolling = round?.id;
   const roundPhaseForPolling = round?.phase;
-  const placingDeadlineForPolling = round?.placingDeadline;
+  const roundPlacementForPolling = round?.placement;
+  const stealDeadlineForPolling = round?.stealDeadline;
   useEffect(() => {
     if (!roomId || !roundIdForPolling) return;
     if (roundPhaseForPolling === "reveal" || roundPhaseForPolling === "done") return;
-    if (!placingDeadlineForPolling) return;
 
-    const deadline = new Date(placingDeadlineForPolling).getTime();
-    const GRACE_MS = 4000; // ráhagyás, hogy a hostnak legyen ideje a normál úton reagálni
-    const POLL_INTERVAL_MS = 2500;
+    const POLL_INTERVAL_MS = 2000;
 
     let cancelled = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    function scheduleNextCheck() {
-      const msUntilPollingShouldStart = Math.max(0, deadline + GRACE_MS - Date.now());
-      timeoutId = setTimeout(tick, msUntilPollingShouldStart || POLL_INTERVAL_MS);
-    }
+    let intervalId: ReturnType<typeof setInterval> | null = null;
 
     async function tick() {
       if (cancelled) return;
-      if (Date.now() < deadline + GRACE_MS) {
-        scheduleNextCheck();
-        return;
-      }
       try {
         const row = await fetchRoundPublic(roundIdForPolling!);
         const r = adaptRoundPublic(row);
@@ -276,19 +262,26 @@ export default function PlayRoomPage() {
           await applyRevealedRound(roundIdForPolling!);
           return; // ne ütemezzünk további pollingot, a phase-változás úgyis leállítja az effectet
         }
+        if (
+          r.phase !== roundPhaseForPolling ||
+          r.stealDeadline !== stealDeadlineForPolling ||
+          r.placement !== roundPlacementForPolling
+        ) {
+          setRound(r);
+        }
       } catch (err) {
         console.warn("[fallback-poll round_public]", err);
       }
-      if (!cancelled) scheduleNextCheck();
     }
 
-    scheduleNextCheck();
+    intervalId = setInterval(tick, POLL_INTERVAL_MS);
+    tick();
     return () => {
       cancelled = true;
-      if (timeoutId) clearTimeout(timeoutId);
+      if (intervalId) clearInterval(intervalId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, roundIdForPolling, roundPhaseForPolling, placingDeadlineForPolling]);
+  }, [roomId, roundIdForPolling, roundPhaseForPolling, roundPlacementForPolling, stealDeadlineForPolling]);
 
   async function handleJoin() {
     if (!name.trim() || !color) return;
@@ -341,14 +334,23 @@ export default function PlayRoomPage() {
     setStealSubmitting(true);
     setStealError(null);
     try {
-      await registerSteal(round.id, position);
+      const result = await registerSteal(round.id, position);
       setStealSubmittedForRound(round.id);
-      await broadcastEvent("steal_registered", { roundId: round.id });
+      setStealCount(result.stealCount);
+      await broadcastEvent("steal_registered", { roundId: round.id, stealCount: result.stealCount });
     } catch (err) {
       setStealError(err instanceof Error ? err.message : "Nem sikerült leadni a lopást.");
     } finally {
       setStealSubmitting(false);
     }
+  }
+
+  async function handleLeaveToMenu() {
+    if (round && round.phase !== "reveal" && round.phase !== "done" && !window.confirm("Biztosan kilépsz a szobából?")) return;
+    if (roomId) {
+      await leaveRoom(roomId).catch(() => {});
+    }
+    router.push("/");
   }
 
   const takenColors = players.filter((p) => p.id !== me?.id).map((p) => p.color);
@@ -431,6 +433,9 @@ export default function PlayRoomPage() {
         </p>
         <p className="text-text-muted">A győzelem részletei a közös képernyőn láthatók.</p>
         <GameStats players={players} stats={gameStats} />
+        <AppButton variant="secondary" onClick={() => router.push("/")}>
+          Főmenü
+        </AppButton>
       </div>
     );
   }
@@ -636,6 +641,11 @@ export default function PlayRoomPage() {
       )}
       <div className="flex-1 flex flex-col px-6 py-6 gap-6 max-w-sm mx-auto w-full">
         <PlayerBadge name={`${me.name} (te)`} color={me.color} tokens={me.tokens} />
+        <div className="flex justify-end">
+          <AppButton variant="ghost" size="sm" onClick={handleLeaveToMenu}>
+            Kilépés
+          </AppButton>
+        </div>
         <p className="text-text-muted">Várj a hostra…</p>
         <p className="text-text-muted text-sm">«a host mindjárt elindítja»</p>
 

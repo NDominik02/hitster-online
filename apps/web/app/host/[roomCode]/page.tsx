@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { AppButton } from "@/components/system/AppButton";
 import { RoomCodeBadge } from "@/components/lobby/RoomCodeBadge";
 import { QRCodePanel } from "@/components/lobby/QRCodePanel";
@@ -50,6 +50,7 @@ import type { Player, PlayerGameStats, RoundPublic, TimelineCardPublic } from "@
  */
 export default function HostRoomPage() {
   const params = useParams<{ roomCode: string }>();
+  const router = useRouter();
   const roomCode = params.roomCode;
 
   const [roomId, setRoomId] = useState<string | null>(null);
@@ -79,6 +80,7 @@ export default function HostRoomPage() {
   const [currentPlaybackSec, setCurrentPlaybackSec] = useState(0);
   const [manuallyPaused, setManuallyPaused] = useState(false);
   const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [volume, setVolume] = useState(0.85);
 
   // S20 (F3, Spotify Premium) — a rooms.spotify_playback_mode oszlop (NEM a settings JSON
   // része, ld. lib/game/types.ts Room.spotifyPlaybackMode jsdoc) — csak 'premium'-nál
@@ -92,6 +94,22 @@ export default function HostRoomPage() {
   // A host bezárhatja a Connect-eszközválasztót anélkül, hogy eszközt választana — ilyenkor
   // a parti egyszerűen a preview módra esik vissza, a picker nem jelenik meg újra.
   const [spotifyPickerDismissed, setSpotifyPickerDismissed] = useState(false);
+
+  async function stopPlayback() {
+    audioRef.current?.pause();
+    setPreviewPlaying(false);
+    if (spotifyPlaying) {
+      await spotify.pause();
+      setSpotifyPlaying(false);
+    }
+    setManuallyPaused(false);
+  }
+
+  async function handleBackToMenu() {
+    if (roomStatus === "playing" && !window.confirm("A parti fut. Biztosan visszalépsz a főmenübe?")) return;
+    await stopPlayback();
+    router.push("/");
+  }
 
   // F2 (S22, ARCHITECTURE 11.8) — élő steal-számláló a `steal_registered` broadcastból
   // (H5 mintájára, D8: a host lát élő tükrözést, a payload csak darabszám, anti-leak).
@@ -384,11 +402,21 @@ export default function HostRoomPage() {
   async function handleTogglePlayback() {
     if (spotifyPlaying) {
       if (manuallyPaused) {
-        await spotify.resume();
+        const resumed = await spotify.resume();
+        if (!resumed) {
+          setLoadError("Nem sikerült folytatni a Spotify-lejátszást. Ellenőrizd az aktív eszközt, majd próbáld újra.");
+          return;
+        }
+        setLoadError(null);
+        setManuallyPaused(false);
       } else {
-        await spotify.pause();
+        const paused = await spotify.pause();
+        if (!paused) {
+          setLoadError("Nem sikerült megállítani a Spotify-lejátszást. Ellenőrizd az aktív eszközt.");
+          return;
+        }
+        setManuallyPaused(true);
       }
-      setManuallyPaused((p) => !p);
       return;
     }
     const el = audioRef.current;
@@ -413,6 +441,7 @@ export default function HostRoomPage() {
     if (!round) return;
     try {
       await resolveRound(round.id);
+      await stopPlayback();
       await refreshRound(round.id);
       await refreshTimelines(roomId!);
       // F2 (ARCHITECTURE 11.8): a steal-ablak lezárásának jelzése — a round_revealed a
@@ -509,8 +538,8 @@ export default function HostRoomPage() {
           await broadcastEvent("turn_auto_skipped", { skipped: res.skipped });
         }
         await broadcastEvent("turn_advanced", { roundId: res.roundId });
+        await stopPlayback();
         setAudioUrl(null);
-        setSpotifyPlaying(false);
         setPreviewPlaying(false);
         setCurrentPlaybackSec(0);
         setDragGhostIndex(null);
@@ -534,11 +563,14 @@ export default function HostRoomPage() {
         const row = await fetchRoundPublic(roundId);
         const serverRound = adaptRoundPublic(row);
         if (!serverRound) return;
-        if (
-          (serverRound.phase === "reveal" || serverRound.phase === "done") &&
-          round?.phase !== "reveal" &&
-          round?.phase !== "done"
-        ) {
+        const serverMovedToReveal = serverRound.phase === "reveal" || serverRound.phase === "done";
+        const localMovedToReveal = round?.phase === "reveal" || round?.phase === "done";
+        const shouldRefreshOpenRound =
+          !serverMovedToReveal &&
+          (serverRound.phase !== round?.phase ||
+            serverRound.stealDeadline !== round?.stealDeadline ||
+            serverRound.placement !== round?.placement);
+        if ((serverMovedToReveal && !localMovedToReveal) || shouldRefreshOpenRound) {
           // A szerver (host-hívás VAGY a pg_cron auto_resolve_expired_rounds safety net,
           // BACKEND-NOTES 9.) már lezárta a kört, de a mi UI-unk még a régi fázisnál áll —
           // pl. a broadcast lemaradt, mert a tab háttérben volt. Frissítsük a state-et,
@@ -550,8 +582,14 @@ export default function HostRoomPage() {
         console.warn("[host round-state check]", err);
       }
     },
-    [round?.phase, roomId, refreshRound, refreshTimelines]
+    [round?.phase, round?.placement, round?.stealDeadline, roomId, refreshRound, refreshTimelines]
   );
+
+  useEffect(() => {
+    if (!round || round.phase === "reveal" || round.phase === "done") return;
+    const id = window.setInterval(() => checkServerRoundState(round.id), 2000);
+    return () => window.clearInterval(id);
+  }, [checkServerRoundState, round]);
 
   // Deadline-lejárat figyelése: amikor letelik, a host hívja a resolve_round-ot (D6, A2).
   //
@@ -709,6 +747,13 @@ export default function HostRoomPage() {
     }
   }, [audioUrl]);
 
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = volume;
+    if (spotifyPlaying) {
+      spotify.setVolume(volume).catch(() => {});
+    }
+  }, [spotifyPlaying, spotify, volume]);
+
   // Playtest feedback (2026-07-06) — valós lejátszási pozíció az AudioProgressBar-hoz
   // (korábban ez sosem haladt, mindig 0:00-t mutatott). Az <audio> elem élettartama a
   // komponens gyökeréhez kötött (ld. fenti AUDIO-HOTFIX jsdoc), tehát ez az effect csak
@@ -793,9 +838,14 @@ export default function HostRoomPage() {
   return (
     <div className="flex flex-col flex-1 px-6 py-8">
       <div className="w-full max-w-5xl mx-auto space-y-8">
-        <div className="flex justify-between text-xs text-text-muted border-b border-border pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-text-muted border-b border-border pb-3">
           <span className="font-code">Host · {roomCode}</span>
-          {loadError && <span className="text-danger">{loadError}</span>}
+          <div className="flex items-center gap-3">
+            {loadError && <span className="text-danger">{loadError}</span>}
+            <AppButton variant="ghost" size="sm" onClick={handleBackToMenu}>
+              Főmenü
+            </AppButton>
+          </div>
         </div>
 
         {/*
@@ -915,6 +965,8 @@ export default function HostRoomPage() {
                     playing={playbackPlaying}
                     onTogglePlayback={handleTogglePlayback}
                     toggleDisabled={!canTogglePlayback || audioLocked}
+                    volume={volume}
+                    onVolumeChange={setVolume}
                   />
                 </div>
                 {activePlayer && (
@@ -1170,6 +1222,14 @@ export default function HostRoomPage() {
             )}
 
             <GameStats players={players} stats={gameStats} />
+            <div className="flex flex-wrap justify-center gap-3">
+              <AppButton variant="secondary" onClick={() => router.push("/host")}>
+                Új parti
+              </AppButton>
+              <AppButton variant="ghost" onClick={() => router.push("/")}>
+                Főmenü
+              </AppButton>
+            </div>
           </section>
         )}
       </div>

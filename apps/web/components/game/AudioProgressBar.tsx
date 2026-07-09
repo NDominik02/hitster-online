@@ -4,6 +4,8 @@ export interface AudioProgressBarProps {
   playing: boolean;
   onTogglePlayback?: () => void;
   toggleDisabled?: boolean;
+  volume?: number;
+  onVolumeChange?: (volume: number) => void;
 }
 
 const BAR_COUNT = 32;
@@ -19,6 +21,8 @@ export function AudioProgressBar({
   playing,
   onTogglePlayback,
   toggleDisabled = false,
+  volume = 1,
+  onVolumeChange,
 }: AudioProgressBarProps) {
   const safeDuration = Math.max(0, duration);
   const safeCurrent = Math.max(0, Math.min(current, safeDuration));
@@ -60,6 +64,23 @@ export function AudioProgressBar({
           {format(safeCurrent)} / {format(safeDuration)}
         </span>
       </div>
+      {onVolumeChange && (
+        <div className="mt-3 flex items-center gap-3">
+          <span aria-hidden className="w-10 text-xs font-semibold uppercase tracking-wide text-text-muted">
+            Vol
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={Math.round(Math.max(0, Math.min(1, volume)) * 100)}
+            onChange={(event) => onVolumeChange(Number(event.target.value) / 100)}
+            aria-label="Hangerő"
+            title="Hangerő"
+            className="h-2 flex-1 accent-[var(--accent)]"
+          />
+        </div>
+      )}
     </div>
   );
 }

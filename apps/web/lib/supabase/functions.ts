@@ -481,16 +481,17 @@ export async function spotifyListDevices(): Promise<{
 }
 
 /**
- * spotify_playback_command (S20) — play/pause/resume a megadott Spotify Connect
+ * spotify_playback_command (S20) — play/pause/resume/volume a megadott Spotify Connect
  * device-on. "play" mindig a kör elejéről indít (position_ms:0); "resume" a
  * korábban megállított pozíciótól folytat (playtest feedback, 2026-07-06).
  */
 export async function spotifyPlaybackCommand(
-  action: "play" | "pause" | "resume",
+  action: "play" | "pause" | "resume" | "volume",
   deviceId: string,
-  spotifyUri?: string
+  spotifyUri?: string,
+  volumePercent?: number
 ): Promise<{ ok: true }> {
-  return invoke("spotify_playback_command", { action, deviceId, spotifyUri });
+  return invoke("spotify_playback_command", { action, deviceId, spotifyUri, volumePercent });
 }
 
 /**

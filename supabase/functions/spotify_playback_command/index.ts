@@ -21,29 +21,38 @@ Deno.serve(async (req: Request) => {
   const callerUid = await getCallerUid(req);
   if (!callerUid) return errorResponse('unauthorized', 'Be kell jelentkezni.', 401);
 
-  let body: { action?: string; deviceId?: string; spotifyUri?: string };
+  let body: { action?: string; deviceId?: string; spotifyUri?: string; volumePercent?: number };
   try {
     body = await req.json();
   } catch {
     return errorResponse('invalid_body', 'Érvénytelen kérés.', 400);
   }
 
-  if (body.action !== 'play' && body.action !== 'pause' && body.action !== 'resume') {
+  if (body.action !== 'play' && body.action !== 'pause' && body.action !== 'resume' && body.action !== 'volume') {
     return errorResponse('invalid_action', 'Érvénytelen művelet.', 400);
   }
   if (!body.deviceId) return errorResponse('invalid_device', 'Hiányzó eszköz azonosító.', 400);
   if (body.action === 'play' && !body.spotifyUri) {
     return errorResponse('invalid_track', 'Hiányzó Spotify track URI.', 400);
   }
+  if (
+    body.action === 'volume' &&
+    (typeof body.volumePercent !== 'number' || !Number.isFinite(body.volumePercent))
+  ) {
+    return errorResponse('invalid_volume', 'Érvénytelen hangerő.', 400);
+  }
 
   const supabase = adminClient();
   const token = await getValidSpotifyAccessToken(supabase, callerUid);
   if (!token) return errorResponse('no_spotify_connection', 'Nincs csatlakoztatott Spotify-fiók.', 404);
 
+  const encodedDeviceId = encodeURIComponent(body.deviceId);
   const url =
     body.action === 'pause'
-      ? `https://api.spotify.com/v1/me/player/pause?device_id=${encodeURIComponent(body.deviceId)}`
-      : `https://api.spotify.com/v1/me/player/play?device_id=${encodeURIComponent(body.deviceId)}`;
+      ? `https://api.spotify.com/v1/me/player/pause?device_id=${encodedDeviceId}`
+      : body.action === 'volume'
+        ? `https://api.spotify.com/v1/me/player/volume?device_id=${encodedDeviceId}&volume_percent=${Math.max(0, Math.min(100, Math.round(body.volumePercent)))}`
+        : `https://api.spotify.com/v1/me/player/play?device_id=${encodedDeviceId}`;
 
   // Playtest feedback (2026-07-06) — 'resume' hívja UGYANEZT a play végpontot,
   // de body NÉLKÜL: a Spotify API ilyenkor a korábban megállított pozíciótól

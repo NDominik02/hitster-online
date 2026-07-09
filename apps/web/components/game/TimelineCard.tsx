@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import clsx from "clsx";
 import type { PlayerColorId } from "@/lib/game/types";
 import { playerColorValue } from "@/lib/game/colors";
@@ -25,28 +28,34 @@ const yearSize = {
   lg: "text-3xl",
 };
 
-/**
- * Egy idővonal-kártya (év + állapot) — player idővonal, host mini-idővonal, reveal, győzelem.
- * DESIGN 5.1 komponenslista. Redesign (Claude Design pass): "lemezboríték" motívum — négyzet
- * art-terület egy kis kilyukasztott középponttal, alatta az évszám és az előadó.
- */
 export function TimelineCard({ year, title, artist, state = "placed", size = "md", color }: TimelineCardProps) {
   const isGhost = state === "ghost";
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const hasDetails = Boolean(title && size !== "sm" && !isGhost);
+  const detailsLabel = title ? (artist ? `${artist} - ${title}` : title) : "";
+  const ariaLabel = hasDetails ? `${detailsLabel}, ${year}` : String(year);
 
   return (
-    <div
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      title={ariaLabel}
+      onClick={() => hasDetails && setDetailsOpen((open) => !open)}
+      onBlur={() => setDetailsOpen(false)}
+      disabled={!hasDetails}
       className={clsx(
-        "rounded-[var(--radius-button)] shrink-0 border transition-all duration-150 p-2 text-center",
+        "relative shrink-0 rounded-[var(--radius-button)] border p-2 text-center transition-all duration-150",
         sizeClasses[size],
-        isGhost ? "opacity-50 border-dashed" : "border-solid"
+        isGhost ? "border-dashed opacity-50" : "border-solid",
+        hasDetails ? "cursor-pointer hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-accent" : "cursor-default"
       )}
       style={{
         background: state === "unknown" ? "var(--surface-2)" : "linear-gradient(160deg, #201e2a, #1a1922)",
         borderColor: color ? playerColorValue(color) : "var(--border-3)",
       }}
     >
-      <div
-        className="w-full aspect-square rounded-md flex items-center justify-center mb-1.5"
+      <span
+        className="mb-1.5 flex aspect-square w-full items-center justify-center rounded-md"
         style={{ background: "var(--surface-2)" }}
       >
         {!isGhost && (
@@ -60,18 +69,34 @@ export function TimelineCard({ year, title, artist, state = "placed", size = "md
             }}
           />
         )}
-      </div>
+      </span>
       <span
-        className={clsx("font-numeric font-bold block leading-none", yearSize[size], isGhost && "animate-pulse")}
+        className={clsx("block font-numeric font-bold leading-none", yearSize[size], isGhost && "animate-pulse")}
         style={{ fontFamily: "var(--font-heading)" }}
       >
         {isGhost ? "?" : year}
       </span>
       {title && size !== "sm" && (
-        <span className="text-[10px] font-normal text-text-muted mt-1 block px-1 truncate">
-          {artist ? `${artist} — ${title}` : title}
+        <span
+          className="mt-1 block px-1 text-[10px] font-normal leading-tight text-text-muted"
+          style={{
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+            overflowWrap: "anywhere",
+          }}
+        >
+          {detailsLabel}
         </span>
       )}
-    </div>
+      {hasDetails && detailsOpen && (
+        <span className="absolute bottom-[calc(100%+0.5rem)] left-1/2 z-50 w-56 -translate-x-1/2 rounded-[var(--radius-card)] border border-border bg-surface px-3 py-2 text-left text-xs font-normal leading-snug text-text shadow-xl">
+          <span className="block font-semibold text-text">{title}</span>
+          {artist && <span className="mt-0.5 block text-text-muted">{artist}</span>}
+          <span className="mt-1 block font-code text-accent">{year}</span>
+        </span>
+      )}
+    </button>
   );
 }

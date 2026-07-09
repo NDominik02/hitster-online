@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSpotifyWebPlaybackSdk } from "./webPlaybackSdk";
 import { spotifyListDevices, spotifyPlaybackCommand } from "../supabase/functions";
 
@@ -52,7 +52,7 @@ export function useSpotifyPlayback(enabled: boolean) {
 
   const activeDeviceId = sdkDeviceId ?? selectedConnectDeviceId;
 
-  async function play(spotifyUri: string): Promise<boolean> {
+  const play = useCallback(async (spotifyUri: string): Promise<boolean> => {
     if (!activeDeviceId) return false;
     try {
       await spotifyPlaybackCommand("play", activeDeviceId, spotifyUri);
@@ -60,30 +60,41 @@ export function useSpotifyPlayback(enabled: boolean) {
     } catch {
       return false;
     }
-  }
+  }, [activeDeviceId]);
 
-  async function pause(): Promise<void> {
-    if (!activeDeviceId) return;
+  const pause = useCallback(async (): Promise<boolean> => {
+    if (!activeDeviceId) return false;
     try {
       await spotifyPlaybackCommand("pause", activeDeviceId);
+      return true;
     } catch {
-      // Néma hiba — a pause best-effort (pl. kör-váltáskor), sosem szabad
-      // emiatt megszakítani a játékfolyamot.
+      return false;
     }
-  }
+  }, [activeDeviceId]);
 
   /** Playtest feedback (2026-07-06) — a host manuálisan folytathatja a
    *  lejátszást a megállított pozíciótól (nem az elejéről, mint a play()). */
-  async function resume(): Promise<void> {
-    if (!activeDeviceId) return;
+  const resume = useCallback(async (): Promise<boolean> => {
+    if (!activeDeviceId) return false;
     try {
       await spotifyPlaybackCommand("resume", activeDeviceId);
+      return true;
     } catch {
-      // Néma hiba, ugyanazon okból, mint pause().
+      return false;
     }
-  }
+  }, [activeDeviceId]);
 
-  return {
+  const setVolume = useCallback(async (volume: number): Promise<boolean> => {
+    if (!activeDeviceId) return false;
+    try {
+      await spotifyPlaybackCommand("volume", activeDeviceId, undefined, Math.round(Math.max(0, Math.min(1, volume)) * 100));
+      return true;
+    } catch {
+      return false;
+    }
+  }, [activeDeviceId]);
+
+  return useMemo(() => ({
     sdkStatus,
     needsDevicePicker: enabled && sdkStatus === "unavailable" && !selectedConnectDeviceId,
     connectDevices,
@@ -93,5 +104,17 @@ export function useSpotifyPlayback(enabled: boolean) {
     play,
     pause,
     resume,
-  };
+    setVolume,
+  }), [
+    activeDeviceId,
+    connectDevices,
+    enabled,
+    loadingDevices,
+    pause,
+    play,
+    resume,
+    sdkStatus,
+    selectedConnectDeviceId,
+    setVolume,
+  ]);
 }
