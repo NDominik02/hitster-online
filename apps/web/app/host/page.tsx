@@ -297,6 +297,7 @@ export default function HostCreatePage() {
         timeLimitSec,
         stealEnabled: false,
         mode: "pass_and_play",
+        spotifyPlaybackMode: spotifyStatus === "connected" ? "premium" : "preview",
       });
       // Sorban, nem párhuzamosan — a szín/seat-ütközések elkerülése végett.
       for (const entry of roster) {
@@ -547,6 +548,7 @@ export default function HostCreatePage() {
               excluded={deck.report.excluded}
               meetsMinimum={deck.report.meetsMinimum}
               importWarning={deck.report.playlistImportWarning}
+              spotifyOnlyCount={deck.report.spotifyOnlyCount}
               onRescued={(result) =>
                 setDeck((d) =>
                   d
@@ -559,6 +561,7 @@ export default function HostCreatePage() {
                           usable: result.usableCount,
                           coveragePct: result.coveragePct,
                           meetsMinimum: result.meetsMinimum,
+                          spotifyOnlyCount: result.spotifyOnlyCount ?? d.report.spotifyOnlyCount,
                           excluded: result.excluded,
                         },
                       }

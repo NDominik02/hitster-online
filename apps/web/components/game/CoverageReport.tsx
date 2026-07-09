@@ -14,9 +14,16 @@ export interface CoverageReportProps {
   excluded: CoverageExcludedTrack[];
   meetsMinimum: boolean; // D4: >= 60 kell
   importWarning?: string;
+  spotifyOnlyCount?: number;
   /** A szülő itt kapja meg a friss usable/coverage/excluded állapotot egy sikeres
    *  évszám-mentés után (playtest feedback, 2026-07-06). */
-  onRescued: (result: { usableCount: number; coveragePct: number; meetsMinimum: boolean; excluded: CoverageExcludedTrack[] }) => void;
+  onRescued: (result: {
+    usableCount: number;
+    coveragePct: number;
+    meetsMinimum: boolean;
+    spotifyOnlyCount?: number;
+    excluded: CoverageExcludedTrack[];
+  }) => void;
 }
 
 const REASON_LABELS: Record<CoverageExcludedTrack["reason"], string> = {
@@ -25,7 +32,17 @@ const REASON_LABELS: Record<CoverageExcludedTrack["reason"], string> = {
 };
 
 /** Lefedettségi riport (H2): fő szám + kimaradt lista — DESIGN H2 wireframe. */
-export function CoverageReport({ deckId, usable, total, pct, excluded, meetsMinimum, importWarning, onRescued }: CoverageReportProps) {
+export function CoverageReport({
+  deckId,
+  usable,
+  total,
+  pct,
+  excluded,
+  meetsMinimum,
+  importWarning,
+  spotifyOnlyCount = 0,
+  onRescued,
+}: CoverageReportProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -46,6 +63,11 @@ export function CoverageReport({ deckId, usable, total, pct, excluded, meetsMini
           {meetsMinimum ? "✅" : "⚠"} {usable} / {total} szám használható
         </div>
         <div className="text-text-muted mt-1">({pct.toFixed(1)}% lefedettség)</div>
+        {spotifyOnlyCount > 0 && (
+          <div className="text-text-muted mt-2 text-sm">
+            {spotifyOnlyCount} szám teljes Spotify-lejátszással működik, ezekhez Premium mód kell.
+          </div>
+        )}
         {!meetsMinimum && (
           <p className="text-warning text-sm mt-3">
             Ehhez a paklihoz kevés a játszható szám (60 kell). Próbálj hosszabb vagy ismertebb playlistet.

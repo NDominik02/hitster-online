@@ -19,7 +19,7 @@ export type Database = {
           artist: string
           artwork_url: string | null
           audio_source: string
-          audio_url: string
+          audio_url: string | null
           created_at: string
           deck_id: string
           duration_ms: number | null
@@ -35,7 +35,7 @@ export type Database = {
           artist: string
           artwork_url?: string | null
           audio_source: string
-          audio_url: string
+          audio_url?: string | null
           created_at?: string
           deck_id: string
           duration_ms?: number | null
@@ -51,7 +51,7 @@ export type Database = {
           artist?: string
           artwork_url?: string | null
           audio_source?: string
-          audio_url?: string
+          audio_url?: string | null
           created_at?: string
           deck_id?: string
           duration_ms?: number | null

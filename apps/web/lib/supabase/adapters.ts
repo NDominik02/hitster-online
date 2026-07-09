@@ -49,6 +49,7 @@ export function adaptDeck(row: DeckRow): Deck {
       meetsMinimum: report.meetsMinimum ?? row.usable_count >= 60,
       excluded: report.excluded ?? [],
       uncertainYearCount: report.uncertainYearCount,
+      spotifyOnlyCount: report.spotifyOnlyCount,
       playlistImportWarning: report.playlistImportWarning,
     },
     progress: {

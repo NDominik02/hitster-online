@@ -61,6 +61,14 @@ Deno.serve(async (req: Request) => {
     return errorResponse('deck_too_small', `A paklinak legalább ${MIN_USABLE_CARDS} kártyát kell tartalmaznia.`, 422);
   }
 
+  const { count: spotifyOnlyCount, error: spotifyOnlyCountError } = await supabase
+    .from('deck_cards')
+    .select('id', { count: 'exact', head: true })
+    .eq('deck_id', body.deckId)
+    .is('audio_url', null);
+  if (spotifyOnlyCountError) return errorResponse('db_error', 'Nem sikerült a pakli ellenőrzése.', 500);
+  const requiresPremiumPlayback = (spotifyOnlyCount ?? 0) > 0;
+
   // S20/S30 (F3, Spotify Premium): a kliens KÉRHETI a 'premium' módot, de a
   // szerver sosem bízik ebben vakon — csak akkor kapcsoljuk be ténylegesen,
   // ha a hívónak (a leendő host_uid-nak) van érvényes, Premium Spotify-
@@ -77,6 +85,14 @@ Deno.serve(async (req: Request) => {
       const token = await getValidSpotifyAccessToken(supabase, callerUid);
       if (token) spotifyPlaybackMode = 'premium';
     }
+  }
+
+  if (requiresPremiumPlayback && spotifyPlaybackMode !== 'premium') {
+    return errorResponse(
+      'premium_required',
+      'Ez a pakli tartalmaz teljes Spotify-lejátszást igénylő számokat. Kapcsold össze a Spotify Premium fiókot, majd indítsd Premium módban.',
+      409
+    );
   }
 
   const settings = {

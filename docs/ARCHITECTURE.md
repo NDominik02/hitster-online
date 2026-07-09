@@ -77,8 +77,8 @@ create table deck_cards (
   year                int  not null,                    -- csak év-adattal rendelkező kártya kerül be
   year_source         text not null,                    -- 'musicbrainz' | 'itunes' | 'crosschecked'
   year_uncertain      bool not null default false,      -- F0: |MB - iTunes| >= 3 → flag (F0-REPORT 4.)
-  audio_url           text not null,                    -- D12: STABIL Supabase Storage-beli URL (nem p.scdn.co!)
-  audio_source        text not null,                    -- 'spotify_embed' | 'itunes' (melyikből töltöttük fel)
+  audio_url           text,                             -- D12: STABIL Supabase Storage-beli URL; null Spotify-only kártyánál
+  audio_source        text not null,                    -- 'spotify_embed' | 'itunes' | 'spotify'
   artwork_url         text,                             -- albumborító (reveal); külső URL is lehet
   spotify_uri         text,                             -- F2/F3 Premium mód (Web Playback SDK / Connect)
   duration_ms         int,
@@ -189,7 +189,7 @@ create index timeline_cards_player_idx on timeline_cards (player_id);
 
 **Séma-döntések, amelyek túlmutatnak a PLAN.md vázlatán (indoklással):**
 
-1. **`deck_cards.audio_url` = Storage-beli stabil URL, nem `p.scdn.co` (D12).** A PLAN vázlat `preview_token`-t írt; a D12 döntés alapján a generáláskor áttöltjük a Spotify embed MP3-at Supabase Storage-ba, és az `audio_url` erre a stabil, opaque URL-re mutat. `audio_source` rögzíti, spotify_embed-ből vagy iTunes-fallbackből jött-e (6. szakasz).
+1. **`deck_cards.audio_url` = Storage-beli stabil URL, nem `p.scdn.co` (D12).** A PLAN vázlat `preview_token`-t írt; a D12 döntés alapján a generáláskor áttöltjük a Spotify embed MP3-at Supabase Storage-ba, és az `audio_url` erre a stabil, opaque URL-re mutat. Spotify-only kártyánál ez null, ilyenkor a `spotify_uri` alapján Premium lejátszás kell. `audio_source` rögzíti, spotify_embed-ből, iTunes-fallbackből vagy Spotify-only forrásból jött-e (6. szakasz).
 2. **`rooms.deck_cursor` + `deck_cards.sort_seed`.** A pakli-keverést generáláskor determinisztikussá tesszük (`sort_seed`), a `draw_card` a `deck_cursor`-t lépteti — így a húzás sorrendje szerver-oldali, kliens nem tudja előre a következő kártyát (anti-leak támogatás).
 3. **`rounds.revealed_card` jsonb.** Ez a **kritikus anti-leak mező**: a reveal pillanatában a `resolve_round` ide **másolja** a kártya publikus adatait ({title, artist, year, artworkUrl}). A player kliens RLS-ben CSAK ezt a mezőt (és a `phase = reveal`-t) látja — a `card_id`-t és a `deck_cards` sort soha. Így fizikailag lehetetlen, hogy a kliens reveal előtt lássa a megfejtést.
 4. **`tokens`, `missed_turns`, `steals`, `name_guess`, `steal_deadline`, `disputed` — mind F2-kész, F1-ben inaktív.** A prompt kérése szerint séma-szinten már megvannak, hogy F2-ben ne kelljen migrálni.
@@ -623,8 +623,8 @@ minden usable track:
   mp3 = await fetch(forrás_url).arrayBuffer()            # ~360 KB / 30 mp (F0-REPORT)
   path = `deck-audio/${deckId}/${cardId}.mp3`
   await storage.from('deck-audio').upload(path, mp3, { contentType: 'audio/mpeg' })
-  deck_cards.audio_url    = <stabil Storage URL a path-ra>
-  deck_cards.audio_source = forrás_url === spotify ? 'spotify_embed' : 'itunes'
+  deck_cards.audio_url    = <stabil Storage URL a path-ra> vagy null Spotify-only kártyánál
+  deck_cards.audio_source = forrás_url === spotify ? 'spotify_embed' : forrás_url === itunes ? 'itunes' : 'spotify'
 ```
 
 - **Méret:** 100 track ≈ 36 MB (F0-REPORT); a free tier 1 GB-jába sok pakli belefér.

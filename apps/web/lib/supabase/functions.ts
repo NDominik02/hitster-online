@@ -502,6 +502,13 @@ export async function addManualYearCard(
   deckId: string,
   trackIndex: number,
   year: number
-): Promise<{ ok: true; usableCount: number; coveragePct: number; meetsMinimum: boolean; excluded: CoverageExcludedTrack[] }> {
+): Promise<{
+  ok: true;
+  usableCount: number;
+  coveragePct: number;
+  meetsMinimum: boolean;
+  spotifyOnlyCount?: number;
+  excluded: CoverageExcludedTrack[];
+}> {
   return invoke("add_manual_year_card", { deckId, trackIndex, year });
 }

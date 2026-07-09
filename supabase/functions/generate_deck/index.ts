@@ -551,9 +551,10 @@ async function processTrack(track: RawTrack, mbCacheMap: Map<string, YearResolut
   }
 
   const preview = track.spotifyPreviewUrl ?? itunesRes.previewUrl; // D12: Spotify embed primary, iTunes fallback
+  const hasPlayableSource = Boolean(preview || track.uri);
   let excludeReason: 'no_preview' | 'no_year' | null = null;
   if (!finalYear) excludeReason = 'no_year';
-  else if (!preview) excludeReason = 'no_preview';
+  else if (!hasPlayableSource) excludeReason = 'no_preview';
 
   return {
     raw: track,
@@ -947,20 +948,21 @@ async function runAudioUploadPhase(
     .filter((t) => t.excludeReason)
     .map((t) => {
       const sourceUrl = t.raw.spotifyPreviewUrl ?? t.itunesPreviewUrl;
+      const hasPlayableSource = Boolean(sourceUrl || t.raw.uri);
       return {
         title: t.raw.title,
         artist: t.raw.artist,
         reason: t.excludeReason,
         index: t.raw.index,
-        hasSource: t.excludeReason === 'no_year' && !!sourceUrl,
-        ...(t.excludeReason === 'no_year' && sourceUrl
+        hasSource: t.excludeReason === 'no_year' && hasPlayableSource,
+        ...(t.excludeReason === 'no_year' && hasPlayableSource
           ? {
               spotifyPreviewUrl: t.raw.spotifyPreviewUrl,
               itunesPreviewUrl: t.itunesPreviewUrl,
               spotifyUri: t.raw.uri,
               durationMs: t.raw.durationMs,
               itunesArtworkUrl: t.itunesArtworkUrl,
-              audioSource: t.raw.spotifyPreviewUrl ? 'spotify_embed' : 'itunes',
+              audioSource: t.raw.spotifyPreviewUrl ? 'spotify_embed' : sourceUrl ? 'itunes' : 'spotify',
             }
           : {}),
       };
@@ -987,13 +989,37 @@ async function runAudioUploadPhase(
 
     const t = usableTracks[i];
     const sourceUrl = t.raw.spotifyPreviewUrl ?? t.itunesPreviewUrl;
-    if (!sourceUrl) {
+    if (!sourceUrl && !t.raw.uri) {
       excluded.push({ title: t.raw.title, artist: t.raw.artist, reason: 'no_preview' });
       continue;
     }
 
     const cardId = crypto.randomUUID();
     const audioSource = t.raw.spotifyPreviewUrl ? 'spotify_embed' : 'itunes';
+
+    if (!sourceUrl) {
+      try {
+        const artworkUrl = t.itunesArtworkUrl ?? (await fetchSpotifyOembedArtwork(t.raw.uri));
+        deckCardRows.push({
+          id: cardId,
+          deck_id: deckId,
+          title: t.raw.title,
+          artist: t.raw.artist,
+          year: t.finalYear,
+          year_source: t.finalYearSource,
+          year_uncertain: t.yearUncertain,
+          audio_url: null,
+          audio_source: 'spotify',
+          artwork_url: artworkUrl,
+          spotify_uri: t.raw.uri,
+          duration_ms: t.raw.durationMs,
+        });
+        uploaded++;
+      } catch {
+        excluded.push({ title: t.raw.title, artist: t.raw.artist, reason: 'no_preview' });
+      }
+      continue;
+    }
 
     try {
       // Borítókép: elsődlegesen az iTunes-keresésből (ami amúgy is lefutott minden
@@ -1057,6 +1083,7 @@ async function runAudioUploadPhase(
   const usableCount = deckCardRows.length;
   const coveragePct = total > 0 ? Math.round((usableCount / total) * 1000) / 10 : 0;
   const uncertainYearCount = deckCardRows.filter((c) => c.year_uncertain).length;
+  const spotifyOnlyCount = deckCardRows.filter((c) => c.audio_source === 'spotify').length;
 
   await supabase
     .from('decks')
@@ -1071,6 +1098,7 @@ async function runAudioUploadPhase(
         step: 'done',
         excluded,
         uncertainYearCount,
+        spotifyOnlyCount,
         meetsMinimum: usableCount >= MIN_USABLE_CARDS,
       },
     })

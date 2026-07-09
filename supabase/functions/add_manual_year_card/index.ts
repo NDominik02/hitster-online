@@ -22,7 +22,7 @@ interface ExcludedEntry {
   spotifyUri?: string | null;
   durationMs?: number | null;
   itunesArtworkUrl?: string | null;
-  audioSource?: 'spotify_embed' | 'itunes';
+  audioSource?: 'spotify_embed' | 'itunes' | 'spotify';
 }
 
 async function fetchSpotifyOembedArtwork(spotifyUri: string | null | undefined): Promise<string | null> {
@@ -86,7 +86,7 @@ Deno.serve(async (req: Request) => {
   if (deckError || !deck) return errorResponse('deck_not_found', 'A pakli nem található.', 404);
   if (deck.owner_id !== callerUid) return errorResponse('not_owner', 'Csak a pakli létrehozója egészítheti ki.', 403);
 
-  const report = (deck.report ?? {}) as { excluded?: ExcludedEntry[]; meetsMinimum?: boolean };
+  const report = (deck.report ?? {}) as { excluded?: ExcludedEntry[]; meetsMinimum?: boolean; spotifyOnlyCount?: number };
   const excludedList = report.excluded ?? [];
   const entry = excludedList.find((e) => e.index === body.trackIndex && e.reason === 'no_year');
 
@@ -96,23 +96,33 @@ Deno.serve(async (req: Request) => {
   }
 
   const sourceUrl = entry.spotifyPreviewUrl ?? entry.itunesPreviewUrl;
-  if (!sourceUrl) return errorResponse('no_audio_source', 'Ehhez a számhoz nincs elérhető hangforrás, nem menthető.', 409);
+  if (!sourceUrl && !entry.spotifyUri) {
+    return errorResponse('no_audio_source', 'Ehhez a számhoz nincs elérhető hangforrás, nem menthető.', 409);
+  }
 
   const cardId = crypto.randomUUID();
+  const spotifyOnly = !sourceUrl;
 
   try {
-    const [audioRes, artworkUrl] = await Promise.all([
-      fetch(sourceUrl),
-      entry.itunesArtworkUrl ? Promise.resolve(entry.itunesArtworkUrl) : fetchSpotifyOembedArtwork(entry.spotifyUri),
-    ]);
-    if (!audioRes.ok) throw new Error(`audio fetch failed: ${audioRes.status}`);
-    const audioBuf = await audioRes.arrayBuffer();
-    const audioStorage = inferAudioStorage(audioRes.headers.get('content-type'), sourceUrl);
-    const path = `${deck.id}/${cardId}.${audioStorage.extension}`;
-    const { error: uploadError } = await supabase.storage
-      .from('deck-audio')
-      .upload(path, audioBuf, { contentType: audioStorage.contentType, upsert: true });
-    if (uploadError) throw uploadError;
+    let path: string | null = null;
+    let artworkUrl: string | null = null;
+    if (sourceUrl) {
+      const [audioRes, resolvedArtworkUrl] = await Promise.all([
+        fetch(sourceUrl),
+        entry.itunesArtworkUrl ? Promise.resolve(entry.itunesArtworkUrl) : fetchSpotifyOembedArtwork(entry.spotifyUri),
+      ]);
+      if (!audioRes.ok) throw new Error(`audio fetch failed: ${audioRes.status}`);
+      const audioBuf = await audioRes.arrayBuffer();
+      const audioStorage = inferAudioStorage(audioRes.headers.get('content-type'), sourceUrl);
+      path = `${deck.id}/${cardId}.${audioStorage.extension}`;
+      const { error: uploadError } = await supabase.storage
+        .from('deck-audio')
+        .upload(path, audioBuf, { contentType: audioStorage.contentType, upsert: true });
+      if (uploadError) throw uploadError;
+      artworkUrl = resolvedArtworkUrl;
+    } else {
+      artworkUrl = entry.itunesArtworkUrl ?? (await fetchSpotifyOembedArtwork(entry.spotifyUri));
+    }
 
     const { error: insertError } = await supabase.from('deck_cards').insert({
       id: cardId,
@@ -123,7 +133,7 @@ Deno.serve(async (req: Request) => {
       year_source: 'host_manual',
       year_uncertain: false,
       audio_url: path,
-      audio_source: entry.audioSource ?? 'itunes',
+      audio_source: spotifyOnly ? 'spotify' : (entry.audioSource ?? 'itunes'),
       artwork_url: artworkUrl,
       spotify_uri: entry.spotifyUri ?? null,
       duration_ms: entry.durationMs ?? null,
@@ -138,13 +148,14 @@ Deno.serve(async (req: Request) => {
   const coveragePct = totalTracks > 0 ? Math.round((usableCount / totalTracks) * 1000) / 10 : 0;
   const remainingExcluded = excludedList.filter((e) => !(e.index === body.trackIndex && e.reason === 'no_year'));
   const meetsMinimum = usableCount >= 60;
+  const spotifyOnlyCount = (report.spotifyOnlyCount ?? 0) + (spotifyOnly ? 1 : 0);
 
   await supabase
     .from('decks')
     .update({
       usable_count: usableCount,
       coverage_pct: coveragePct,
-      report: { ...report, excluded: remainingExcluded, meetsMinimum },
+      report: { ...report, excluded: remainingExcluded, meetsMinimum, spotifyOnlyCount },
     })
     .eq('id', deck.id);
 
@@ -153,6 +164,7 @@ Deno.serve(async (req: Request) => {
     usableCount,
     coveragePct,
     meetsMinimum,
+    spotifyOnlyCount,
     excluded: remainingExcluded,
   });
 });

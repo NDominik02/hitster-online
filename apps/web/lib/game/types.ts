@@ -150,6 +150,7 @@ export interface DeckReport {
   meetsMinimum: boolean; // usable >= 60 (D4)
   excluded: CoverageExcludedTrack[];
   uncertainYearCount?: number;
+  spotifyOnlyCount?: number;
   playlistImportWarning?: string;
 }
 
@@ -185,10 +186,10 @@ export interface DrawCardResponse {
   roundId: string;
   roundNo: number;
   activePlayerId: string;
-  audioUrl: string; // signed URL, csak host — mindig jelen, premium módban is fallbackként
+  audioUrl?: string; // signed preview URL, csak host; Spotify-only kártyáknál nincs fallback
   /** S20 (F3, Web Playback SDK) — csak 'premium' módú szobában, ha a kártyának van spotify_uri-ja
-   *  és a host Spotify-kapcsolata érvényes/frissíthető. Hiányában a kliens a preview audioUrl-re
-   *  esik vissza. A tényleges access token sosem jut el ide — a spotify_playback_command proxy
+   *  és a host Spotify-kapcsolata érvényes/frissíthető. Ha van audioUrl, a kliens hiba esetén
+   *  arra esik vissza. A tényleges access token sosem jut el ide — a spotify_playback_command proxy
    *  szerveroldalon kéri le, amikor a kliens ezzel az URI-vel lejátszást indít. */
   spotifyUri?: string;
   /** Playtest feedback (2026-07-06) — a track valós hossza ms-ben, a deck_cards.duration_ms-ből.

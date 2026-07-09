@@ -350,21 +350,26 @@ export default function HostRoomPage() {
   async function beginRound(roundId: string) {
     if (!roomId) return;
     try {
+      setLoadError(null);
       const draw = await drawCard(roomId);
       // S20 (F3) — 'premium' módban ELSŐKÉNT a Spotify-lejátszást próbáljuk (SDK vagy a host
-      // által kiválasztott Connect-eszköz); csak sikertelenség esetén (nincs eszköz, hiba a
-      // parancsnál) esünk vissza a megszokott preview <audio> útra — a játék emiatt sosem törik.
+      // által kiválasztott Connect-eszköz); ha van preview fallback, sikertelenség esetén arra
+      // esünk vissza. Spotify-only kártyánál nincs audioUrl, ezért ott Premium playback kell.
       setTrackDurationSec(draw.durationMs ? draw.durationMs / 1000 : 30);
       setCurrentPlaybackSec(0);
       setManuallyPaused(false);
       setPreviewPlaying(false);
+      let played = false;
       if (draw.spotifyUri) {
-        const played = await spotify.play(draw.spotifyUri);
+        played = await spotify.play(draw.spotifyUri);
         setSpotifyPlaying(played);
-        setAudioUrl(played ? null : draw.audioUrl);
       } else {
         setSpotifyPlaying(false);
-        setAudioUrl(draw.audioUrl);
+      }
+      const fallbackAudioUrl = played ? null : (draw.audioUrl ?? null);
+      setAudioUrl(fallbackAudioUrl);
+      if (!played && !fallbackAudioUrl) {
+        setLoadError("Ehhez a kártyához csak Spotify Premium teljes lejátszás érhető el. Ellenőrizd a Spotify kapcsolatot és az aktív eszközt.");
       }
       await refreshRound(draw.roundId);
       await broadcastEvent("round_started", { roundId: draw.roundId, activePlayerId: draw.activePlayerId });
