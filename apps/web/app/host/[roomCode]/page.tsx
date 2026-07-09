@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import clsx from "clsx";
 import { useParams, useRouter } from "next/navigation";
 import { AppButton } from "@/components/system/AppButton";
 import { RoomCodeBadge } from "@/components/lobby/RoomCodeBadge";
@@ -39,6 +40,13 @@ import { useRoomChannel } from "@/lib/game/useRoomChannel";
 import { playRevealSound, primeSoundContext } from "@/lib/sound";
 import { useSpotifyPlayback } from "@/lib/spotify/useSpotifyPlayback";
 import type { Player, PlayerGameStats, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
+
+type CardPlacedPayload = {
+  roundId?: string;
+  phase?: RoundPublic["phase"];
+  stealDeadline?: string | null;
+  placement?: number | null;
+};
 
 /**
  * Host shell — a `rooms.status` + `round_public.phase`-ből derivált fázis alapján
@@ -182,7 +190,23 @@ export default function HostRoomPage() {
 
   const refreshRound = useCallback(async (rid: string) => {
     const row = await fetchRoundPublic(rid);
-    setRound(adaptRoundPublic(row));
+    const nextRound = adaptRoundPublic(row);
+    setRound(nextRound);
+    return nextRound;
+  }, []);
+
+  const applyCardPlacedPayload = useCallback((payload: CardPlacedPayload, fallbackRoundId?: string) => {
+    const rid = payload.roundId ?? fallbackRoundId;
+    if (!rid || payload.phase !== "stealing") return;
+    setRound((current) => {
+      if (!current || current.id !== rid) return current;
+      return {
+        ...current,
+        phase: "stealing",
+        stealDeadline: payload.stealDeadline ?? current.stealDeadline,
+        placement: typeof payload.placement === "number" ? payload.placement : current.placement,
+      };
+    });
   }, []);
 
   const refreshPlayers = useCallback(async (rid: string) => {
@@ -250,8 +274,15 @@ export default function HostRoomPage() {
       } else if (event === "card_placed") {
         // Defensive: elsődlegesen a broadcast payload roundId-jét használjuk, ne a
         // closure-ből olvasott `round` state-et (lásd useRoomChannel stale closure fix).
-        const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
-        if (rid) await refreshRound(rid);
+        const cardPlaced = payload as CardPlacedPayload;
+        const rid = cardPlaced.roundId ?? round?.id;
+        applyCardPlacedPayload(cardPlaced, rid);
+        if (rid) {
+          const refreshed = await refreshRound(rid);
+          if (cardPlaced.phase === "stealing" && refreshed?.phase !== "stealing") {
+            applyCardPlacedPayload(cardPlaced, rid);
+          }
+        }
       } else if (event === "round_revealed") {
         const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
         if (rid) await refreshRound(rid);
@@ -945,7 +976,7 @@ export default function HostRoomPage() {
               // csak, anti-leak — 11.9/5.) és a visszaszámlálót a szerver steal_deadline-jából.
               <div className="flex flex-col items-center gap-4">
                 {round.stealDeadline ? (
-                  <CountdownTimer deadlineIso={round.stealDeadline} size="lg" warningAt={5} />
+                  <CountdownTimer key={`${round.id}-${round.stealDeadline}`} deadlineIso={round.stealDeadline} size="lg" warningAt={5} />
                 ) : (
                   <p className="text-text-muted text-sm">«kiértékelés…»</p>
                 )}
@@ -1062,7 +1093,7 @@ export default function HostRoomPage() {
               const steals = round.revealedCard?.steals ?? [];
               if (!guess && steals.length === 0) return null;
               return (
-                <div className="text-center space-y-1 text-sm">
+                <div className="w-full max-w-3xl text-center space-y-5">
                   {guess && (
                     <div className="flex flex-col items-center gap-2">
                       <p className="text-text-muted">
@@ -1098,12 +1129,42 @@ export default function HostRoomPage() {
                         ))}
                     </div>
                   )}
-                  {steals.map((s) => (
-                    <p key={s.playerId} className={s.won ? "text-success" : "text-text-muted"}>
-                      🕵️ {players.find((p) => p.id === s.playerId)?.name ?? "Valaki"}{" "}
-                      {s.won ? "sikeresen ellopta a kártyát!" : s.correct ? "jól jelölt, de nem ő nyert" : "nem talált"}
-                    </p>
-                  ))}
+                  {steals.length > 0 && (
+                    <div className="grid gap-3">
+                      {steals.map((s) => {
+                        const playerName = players.find((p) => p.id === s.playerId)?.name ?? "Valaki";
+                        const resultText = s.won
+                          ? "Sikeres lopás - övé a kártya"
+                          : s.correct
+                            ? "Jó helyet jelölt, de nem ő nyert"
+                            : "Nem talált";
+                        return (
+                          <div
+                            key={s.playerId}
+                            className={clsx(
+                              "rounded-[var(--radius-card)] border-2 px-5 py-4 text-left shadow-lg",
+                              s.won
+                                ? "border-success bg-success/10"
+                                : s.correct
+                                  ? "border-warning bg-warning/10"
+                                  : "border-border bg-surface-2"
+                            )}
+                          >
+                            <p className="text-sm font-semibold uppercase tracking-wide text-text-muted">Lopás eredménye</p>
+                            <p
+                              className={clsx(
+                                "mt-1 text-2xl md:text-3xl font-bold",
+                                s.won ? "text-success" : s.correct ? "text-warning" : "text-text"
+                              )}
+                            >
+                              {playerName}
+                            </p>
+                            <p className="mt-1 text-xl md:text-2xl font-semibold">{resultText}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })()}

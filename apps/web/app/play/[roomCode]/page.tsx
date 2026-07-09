@@ -31,6 +31,13 @@ import { adaptRoundPublic } from "@/lib/supabase/adapters";
 import { useRoomChannel } from "@/lib/game/useRoomChannel";
 import { vibrateOutcome } from "@/lib/haptics";
 
+type CardPlacedPayload = {
+  roundId?: string;
+  phase?: RoundPublic["phase"];
+  stealDeadline?: string | null;
+  placement?: number | null;
+};
+
 /**
  * Player shell — P1 (ha még nem tag) → P2..P5 a fázis alapján (ARCHITECTURE 5.1).
  * A player kliens SOSEM hívja a draw_card/resolve_round-ot (host-only, 403, BACKEND-NOTES 7.),
@@ -181,6 +188,20 @@ export default function PlayRoomPage() {
     [roomId, me, refreshRound, refreshTimelineFor]
   );
 
+  const applyCardPlacedPayload = useCallback((payload: CardPlacedPayload, fallbackRoundId?: string) => {
+    const rid = payload.roundId ?? fallbackRoundId;
+    if (!rid || payload.phase !== "stealing") return;
+    setRound((current) => {
+      if (!current || current.id !== rid) return current;
+      return {
+        ...current,
+        phase: "stealing",
+        stealDeadline: payload.stealDeadline ?? current.stealDeadline,
+        placement: typeof payload.placement === "number" ? payload.placement : current.placement,
+      };
+    });
+  }, []);
+
   const { sendDragUpdate, broadcastEvent } = useRoomChannel({
     roomId,
     presenceKey: me?.id,
@@ -204,8 +225,15 @@ export default function PlayRoomPage() {
       } else if (event === "card_placed") {
         // Defensive: elsődlegesen a broadcast payload roundId-jét használjuk, ne a
         // closure-ből olvasott `round` state-et (lásd useRoomChannel stale closure fix).
-        const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
-        if (rid) await refreshRound(rid);
+        const cardPlaced = payload as CardPlacedPayload;
+        const rid = cardPlaced.roundId ?? round?.id;
+        applyCardPlacedPayload(cardPlaced, rid);
+        if (rid) {
+          const refreshed = await refreshRound(rid);
+          if (cardPlaced.phase === "stealing" && refreshed?.phase !== "stealing") {
+            applyCardPlacedPayload(cardPlaced, rid);
+          }
+        }
       } else if (event === "round_revealed") {
         const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
         if (rid) await applyRevealedRound(rid);
@@ -308,11 +336,16 @@ export default function PlayRoomPage() {
     if (!round || placingSubmitting) return;
     setPlacingSubmitting(true);
     try {
-      await placeCard(round.id, slotIndex, nameGuess);
+      const placed = await placeCard(round.id, slotIndex, nameGuess);
       await refreshRound(round.id);
       // A host figyeli a placement-et és hívja a resolve_round-ot; itt jelezzük a broadcastot,
       // hogy a host (és a többi player) azonnal frissítse a round_public állapotot.
-      await broadcastEvent("card_placed", { roundId: round.id });
+      await broadcastEvent("card_placed", {
+        roundId: round.id,
+        phase: placed.phase,
+        stealDeadline: placed.stealDeadline,
+        placement: slotIndex,
+      });
     } catch (err) {
       setJoinError(err instanceof Error ? err.message : "Nem sikerült lerakni a kártyát.");
       setPlacingSubmitting(false);
@@ -546,7 +579,7 @@ export default function PlayRoomPage() {
           <div className="flex items-center justify-between">
             <PlayerBadge name={`${me.name} (te)`} color={me.color} state="active" tokens={me.tokens} />
             {round.stealDeadline && (
-              <CountdownTimer deadlineIso={round.stealDeadline} size="md" warningAt={5} />
+              <CountdownTimer key={`${round.id}-${round.stealDeadline}`} deadlineIso={round.stealDeadline} size="md" warningAt={5} />
             )}
           </div>
           <p className="text-text-muted text-sm">Lerakva! Most 15 mp-ig bárki ellophatja, ha szerinte rossz helyre tetted…</p>
@@ -579,7 +612,7 @@ export default function PlayRoomPage() {
               </p>
             </div>
             {stealing && round.stealDeadline && (
-              <CountdownTimer deadlineIso={round.stealDeadline} size="md" warningAt={5} />
+              <CountdownTimer key={`${round.id}-${round.stealDeadline}`} deadlineIso={round.stealDeadline} size="md" warningAt={5} />
             )}
           </div>
 
