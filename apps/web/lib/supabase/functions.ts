@@ -92,6 +92,20 @@ export async function listDecks(limit = 30): Promise<Deck[]> {
   return (data ?? []).map(adaptDeck);
 }
 
+export async function listFeaturedDecks(limit = 30): Promise<Deck[]> {
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("decks")
+    .select("*")
+    .eq("status", "ready")
+    .eq("is_public", true)
+    .contains("report", { featured: true })
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map(adaptDeck);
+}
+
 /** Saját, már nem használt pakli törlése a hozzá tartozó hangfájlokkal együtt. */
 export async function deleteDeck(deckId: string): Promise<{ ok: true; mode?: "hidden" }> {
   return invoke("delete_deck", { deckId });

@@ -4,7 +4,7 @@
  * domain alakjára, amit a UI komponensek használnak.
  */
 import type { Database } from "../shared-types/database.types";
-import { isFeaturedDeckSource } from "../featuredPlaylists";
+import { isFeaturedDeckReport } from "../featuredPlaylists";
 import type {
   Deck,
   DeckReport,
@@ -60,7 +60,7 @@ export function adaptDeck(row: DeckRow): Deck {
     },
     ownerId: row.owner_id,
     isPublic: row.is_public,
-    isFeatured: isFeaturedDeckSource(row.source_playlist_id),
+    isFeatured: isFeaturedDeckReport(row.report),
     createdAt: row.created_at,
   };
 }

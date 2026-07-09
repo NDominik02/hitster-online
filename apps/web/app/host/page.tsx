@@ -18,12 +18,10 @@ import {
   pollDeckUntilReady,
   spotifyRefreshToken,
   listDecks,
+  listFeaturedDecks,
   deleteDeck,
   renameDeck,
-  findReadyDeckByPlaylistUrl,
-  findReadyDeckBySourceKey,
 } from "@/lib/supabase/functions";
-import { FEATURED_PLAYLISTS, type FeaturedPlaylist } from "@/lib/featuredPlaylists";
 import { startSpotifyLogin } from "@/lib/spotify/pkce";
 import type { Deck } from "@/lib/game/types";
 
@@ -94,16 +92,28 @@ export default function HostCreatePage() {
   // könyvtárból/ajánlottból választás — ha van már kész pakli rá — azonnal
   // a "report" fázisba ugrik, generálás/pollingozás nélkül.
   const [deckSource, setDeckSource] = useState<"new" | "featured" | "library">("new");
+  const [featuredDecks, setFeaturedDecks] = useState<Deck[]>([]);
+  const [featuredLoading, setFeaturedLoading] = useState(false);
   const [libraryDecks, setLibraryDecks] = useState<Deck[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [currentUid, setCurrentUid] = useState<string | null>(null);
   const [renamingDeckId, setRenamingDeckId] = useState<string | null>(null);
   const [deletingDeckId, setDeletingDeckId] = useState<string | null>(null);
-  const [featuredLoadingUrl, setFeaturedLoadingUrl] = useState<string | null>(null);
 
   async function handleSelectSource(source: "new" | "featured" | "library") {
     setDeckSource(source);
     setError(null);
+    if (source === "featured" && featuredDecks.length === 0) {
+      setFeaturedLoading(true);
+      try {
+        await ensureAnonymousSession();
+        setFeaturedDecks(await listFeaturedDecks());
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Nem sikerult betolteni az ajanlott paklikat.");
+      } finally {
+        setFeaturedLoading(false);
+      }
+    }
     if (source === "library" && libraryDecks.length === 0) {
       setLibraryLoading(true);
       try {
@@ -173,43 +183,10 @@ export default function HostCreatePage() {
     }
   }
 
-  /**
-   * "Ajánlott playlistek" gyorsválasztó (ld. lib/featuredPlaylists.ts) — előbb
-   * megnézzük, van-e már KÉSZ pakli erre a playlistre (bárkitől), ha igen,
-   * azonnal újrahasználjuk generálás nélkül; ha nem, elindul a szokásos
-   * generálás (playlistUrl state-et is beállítjuk, hogy a "form" fázis
-   * visszatérésekor a mező ne legyen üres).
-   */
-  async function handleSelectFeatured(pl: FeaturedPlaylist) {
-    const urls = pl.urls ?? (pl.url ? [pl.url] : []);
-    const primaryUrl = urls[0] ?? "";
-    const sourceKey = pl.sourceKey ?? primaryUrl;
-    if (!primaryUrl) return;
-
-    setError(null);
-    setPlaylistUrl(primaryUrl);
-    setFeaturedLoadingUrl(sourceKey);
-    try {
-      await ensureAnonymousSession();
-      const cached = pl.sourceKey ? await findReadyDeckBySourceKey(pl.sourceKey) : await findReadyDeckByPlaylistUrl(primaryUrl);
-      const cachedLooksComplete = cached && (urls.length <= 1 || cached.totalTracks > 100);
-      if (cached && cachedLooksComplete) {
-        setDeck(cached);
-        setPhase("report");
-        return;
-      }
-      await handleGenerate(primaryUrl, {
-        playlistUrls: urls.length > 1 ? urls : undefined,
-        sourceKey: pl.sourceKey,
-        deckName: pl.name,
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Nem sikerült betölteni az ajánlott playlistet.");
-    } finally {
-      setFeaturedLoadingUrl(null);
-    }
+  function handleSelectFeatured(pl: Deck) {
+    setDeck(pl);
+    setPhase("report");
   }
-
   async function handleConnectSpotify() {
     await ensureAnonymousSession();
     const clientId = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID;
@@ -332,6 +309,8 @@ export default function HostCreatePage() {
     }
   }
 
+  const featuredDeckList: Deck[] = featuredDecks;
+
   return (
     <div className="flex flex-col flex-1 items-center px-6 py-10">
       <div className="w-full max-w-2xl space-y-8">
@@ -417,21 +396,23 @@ export default function HostCreatePage() {
 
               {deckSource === "featured" && (
                 <div className="mt-3 space-y-2">
-                  {FEATURED_PLAYLISTS.length === 0 ? (
-                    <p className="text-text-muted text-sm">Még nincs ajánlott playlist beállítva.</p>
+                  {featuredLoading ? (
+                    <p className="text-text-muted text-sm">Ajánlott paklik betöltése...</p>
+                  ) : featuredDeckList.length === 0 ? (
+                    <p className="text-text-muted text-sm">Még nincs ajánlott pakli beállítva.</p>
                   ) : (
-                    FEATURED_PLAYLISTS.map((pl) => {
-                      const key = pl.sourceKey ?? pl.url ?? pl.name;
+                    featuredDeckList.map((pl) => {
+                      const key = pl.id;
                       return (
                         <button
                           key={key}
                           type="button"
-                          disabled={featuredLoadingUrl !== null}
+                          disabled={featuredLoading}
                           onClick={() => handleSelectFeatured(pl)}
                           className="w-full min-h-11 rounded-[var(--radius-button)] bg-surface-2 border-2 border-border hover:border-accent px-4 py-3 text-left disabled:opacity-50"
                         >
                           <span className="font-semibold">{pl.name}</span>
-                          {featuredLoadingUrl === key && (
+                          {featuredLoading && (
                             <span className="text-text-muted text-sm ml-2">betöltés…</span>
                           )}
                         </button>

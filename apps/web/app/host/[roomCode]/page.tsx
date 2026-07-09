@@ -78,6 +78,7 @@ export default function HostRoomPage() {
   const [trackDurationSec, setTrackDurationSec] = useState(30);
   const [currentPlaybackSec, setCurrentPlaybackSec] = useState(0);
   const [manuallyPaused, setManuallyPaused] = useState(false);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
 
   // S20 (F3, Spotify Premium) — a rooms.spotify_playback_mode oszlop (NEM a settings JSON
   // része, ld. lib/game/types.ts Room.spotifyPlaybackMode jsdoc) — csak 'premium'-nál
@@ -356,6 +357,7 @@ export default function HostRoomPage() {
       setTrackDurationSec(draw.durationMs ? draw.durationMs / 1000 : 30);
       setCurrentPlaybackSec(0);
       setManuallyPaused(false);
+      setPreviewPlaying(false);
       if (draw.spotifyUri) {
         const played = await spotify.play(draw.spotifyUri);
         setSpotifyPlaying(played);
@@ -387,11 +389,19 @@ export default function HostRoomPage() {
     const el = audioRef.current;
     if (!el) return;
     if (manuallyPaused) {
-      el.play().catch(() => {});
+      el
+        .play()
+        .then(() => {
+          setPreviewPlaying(true);
+          setManuallyPaused(false);
+          setAudioLocked(false);
+        })
+        .catch(() => setAudioLocked(true));
     } else {
       el.pause();
+      setPreviewPlaying(false);
+      setManuallyPaused(true);
     }
-    setManuallyPaused((p) => !p);
   }
 
   async function handleResolve() {
@@ -496,6 +506,8 @@ export default function HostRoomPage() {
         await broadcastEvent("turn_advanced", { roundId: res.roundId });
         setAudioUrl(null);
         setSpotifyPlaying(false);
+        setPreviewPlaying(false);
+        setCurrentPlaybackSec(0);
         setDragGhostIndex(null);
         await beginRound(res.roundId);
       }
@@ -677,8 +689,18 @@ export default function HostRoomPage() {
   useEffect(() => {
     if (audioUrl && audioRef.current) {
       setAudioLocked(false);
+      setPreviewPlaying(false);
       audioRef.current.src = audioUrl;
-      audioRef.current.play().catch(() => setAudioLocked(true));
+      audioRef.current
+        .play()
+        .then(() => {
+          setPreviewPlaying(true);
+          setAudioLocked(false);
+        })
+        .catch(() => {
+          setPreviewPlaying(false);
+          setAudioLocked(true);
+        });
     }
   }, [audioUrl]);
 
@@ -690,9 +712,48 @@ export default function HostRoomPage() {
     const el = audioRef.current;
     if (!el) return;
     const onTimeUpdate = () => setCurrentPlaybackSec(el.currentTime);
+    const onLoadedMetadata = () => {
+      if (Number.isFinite(el.duration) && el.duration > 0) {
+        setTrackDurationSec(el.duration);
+      }
+    };
+    const onPlay = () => setPreviewPlaying(true);
+    const onPause = () => setPreviewPlaying(false);
+    const onEnded = () => {
+      setPreviewPlaying(false);
+      setCurrentPlaybackSec((current) => Math.max(current, Number.isFinite(el.duration) ? el.duration : current));
+    };
     el.addEventListener("timeupdate", onTimeUpdate);
-    return () => el.removeEventListener("timeupdate", onTimeUpdate);
+    el.addEventListener("loadedmetadata", onLoadedMetadata);
+    el.addEventListener("play", onPlay);
+    el.addEventListener("pause", onPause);
+    el.addEventListener("ended", onEnded);
+    return () => {
+      el.removeEventListener("timeupdate", onTimeUpdate);
+      el.removeEventListener("loadedmetadata", onLoadedMetadata);
+      el.removeEventListener("play", onPlay);
+      el.removeEventListener("pause", onPause);
+      el.removeEventListener("ended", onEnded);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!spotifyPlaying || manuallyPaused) return;
+
+    const basePlaybackSec = currentPlaybackSec;
+    const startedAt = performance.now();
+    const interval = window.setInterval(() => {
+      const elapsedSec = (performance.now() - startedAt) / 1000;
+      const nextPlaybackSec = Math.min(trackDurationSec, basePlaybackSec + elapsedSec);
+      setCurrentPlaybackSec(nextPlaybackSec);
+      if (nextPlaybackSec >= trackDurationSec) {
+        setSpotifyPlaying(false);
+      }
+    }, 250);
+
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spotifyPlaying, manuallyPaused, trackDurationSec]);
 
   // S23 (reveal-show) — a hangeffekt a reveal fázisba lépés PILLANATÁBAN szól egyszer,
   // körönként (a `round?.id` dependency zárja ki, hogy re-render újra elsüsse).
@@ -721,6 +782,8 @@ export default function HostRoomPage() {
 
   const activePlayer = players.find((p) => p.id === round?.activePlayerId) ?? null;
   const winners = players.filter((p) => winnerPlayerIds.includes(p.id));
+  const playbackPlaying = !manuallyPaused && (spotifyPlaying || previewPlaying);
+  const canTogglePlayback = spotifyPlaying || Boolean(audioUrl);
 
   return (
     <div className="flex flex-col flex-1 px-6 py-8">
@@ -844,15 +907,10 @@ export default function HostRoomPage() {
                   <AudioProgressBar
                     current={currentPlaybackSec}
                     duration={trackDurationSec}
-                    playing={!manuallyPaused && (spotifyPlaying || (Boolean(audioUrl) && !audioLocked))}
+                    playing={playbackPlaying}
+                    onTogglePlayback={handleTogglePlayback}
+                    toggleDisabled={!canTogglePlayback || audioLocked}
                   />
-                  <button
-                    type="button"
-                    onClick={handleTogglePlayback}
-                    className="text-sm text-text-muted hover:text-text underline"
-                  >
-                    {manuallyPaused ? "▶ Folytatás" : "⏸ Megállítás"}
-                  </button>
                 </div>
                 {activePlayer && (
                   <div className="text-center md:pl-6 md:border-l border-border">
@@ -909,8 +967,15 @@ export default function HostRoomPage() {
                 // esélyt újra feloldani, és a zene véglegesen néma marad a kör hátralévő részére.
                 audioRef.current
                   ?.play()
-                  .then(() => setAudioLocked(false))
-                  .catch(() => setAudioLocked(true));
+                  .then(() => {
+                    setAudioLocked(false);
+                    setPreviewPlaying(true);
+                    setManuallyPaused(false);
+                  })
+                  .catch(() => {
+                    setAudioLocked(true);
+                    setPreviewPlaying(false);
+                  });
               }}
             />
           </section>

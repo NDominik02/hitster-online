@@ -2,7 +2,7 @@
 
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
-import { isProtectedDeckSource } from '../_shared/protected_decks.ts';
+import { isProtectedDeckReport } from '../_shared/protected_decks.ts';
 
 function normalizeDeckName(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -32,13 +32,13 @@ Deno.serve(async (req: Request) => {
   const supabase = adminClient();
   const { data: deck, error: deckError } = await supabase
     .from('decks')
-    .select('id, owner_id, source_playlist_id')
+    .select('id, owner_id, report')
     .eq('id', body.deckId)
     .maybeSingle();
 
   if (deckError) return errorResponse('db_error', 'Hiba a pakli lekerdezese kozben.', 500);
   if (!deck) return errorResponse('deck_not_found', 'A pakli nem talalhato.', 404);
-  if (isProtectedDeckSource(deck.source_playlist_id)) {
+  if (isProtectedDeckReport(deck.report)) {
     return errorResponse('protected_deck', 'Az ajanlott paklik nem nevezhetok at.', 403);
   }
   if (deck.owner_id !== callerUid) return errorResponse('not_owner', 'Csak a sajat paklidat nevezheted at.', 403);
