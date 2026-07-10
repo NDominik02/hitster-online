@@ -39,6 +39,7 @@ import { adaptRoundPublic } from "@/lib/supabase/adapters";
 import { useRoomChannel } from "@/lib/game/useRoomChannel";
 import { playRevealSound, primeSoundContext } from "@/lib/sound";
 import { useSpotifyPlayback } from "@/lib/spotify/useSpotifyPlayback";
+import { useServerClock } from "@/lib/time/server-clock";
 import type { Player, PlayerGameStats, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
 
 type CardPlacedPayload = {
@@ -60,6 +61,7 @@ export default function HostRoomPage() {
   const params = useParams<{ roomCode: string }>();
   const router = useRouter();
   const roomCode = params.roomCode;
+  const { offsetMs: serverClockOffsetMs } = useServerClock();
 
   const [roomId, setRoomId] = useState<string | null>(null);
   const [roomStatus, setRoomStatus] = useState<"lobby" | "playing" | "paused" | "finished">("lobby");
@@ -652,12 +654,12 @@ export default function HostRoomPage() {
     if (!round || (round.phase !== "playing" && round.phase !== "placing") || !round.placingDeadline) return;
     const roundId = round.id;
     const deadline = new Date(round.placingDeadline).getTime();
-    const msLeft = Math.max(0, deadline - Date.now());
+    const msLeft = Math.max(0, deadline - (Date.now() + serverClockOffsetMs));
     const t = setTimeout(() => handleResolve(), msLeft + 500);
 
     function handleVisibilityChange() {
       if (document.visibilityState !== "visible") return;
-      if (Date.now() >= deadline) {
+      if (Date.now() + serverClockOffsetMs >= deadline) {
         // A tab háttérben volt, amíg a deadline lejárt. Előbb ellenőrizzük a szerver
         // tényleges állapotát (lehet, hogy a pg_cron már lezárta) — csak ha még mindig
         // nyitva van, próbáljuk a hostot magát lezáratni.
@@ -672,7 +674,7 @@ export default function HostRoomPage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [round?.id, round?.placingDeadline, round?.phase]);
+  }, [round?.id, round?.placingDeadline, round?.phase, serverClockOffsetMs]);
 
   // FALLBACK POLLING (BACKEND-NOTES 9.4): a player-oldali round_public fallback pollinggal
   // analóg host-oldali tartalék — a pg_cron `auto_resolve_expired_rounds` job (20 mp-enként)
@@ -743,11 +745,11 @@ export default function HostRoomPage() {
   useEffect(() => {
     if (!round || round.phase !== "stealing" || !round.stealDeadline) return;
     const deadline = new Date(round.stealDeadline).getTime();
-    const msLeft = Math.max(0, deadline - Date.now());
+    const msLeft = Math.max(0, deadline - (Date.now() + serverClockOffsetMs));
     const t = setTimeout(() => handleResolve(), msLeft + 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [round?.id, round?.phase, round?.stealDeadline]);
+  }, [round?.id, round?.phase, round?.stealDeadline, serverClockOffsetMs]);
 
   // Audio elindítása amikor új audioUrl érkezik.
   //

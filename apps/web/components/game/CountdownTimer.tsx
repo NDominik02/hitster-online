@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
+import { useServerClock } from "@/lib/time/server-clock";
 
 export interface CountdownTimerProps {
   /** Relatív hátralévő idő másodpercben — a deadline Date.now() + seconds lesz (render-mentesen, effect-ben). */
@@ -30,6 +31,8 @@ export function CountdownTimer({
   size = "md",
   ring = false,
 }: CountdownTimerProps) {
+  const { offsetMs, synced } = useServerClock();
+  const clockOffsetForDeadline = deadlineIso ? offsetMs : 0;
   const deadlineRef = useRef<number | null>(null);
   const [remaining, setRemaining] = useState(seconds);
   const [total, setTotal] = useState(seconds);
@@ -47,15 +50,16 @@ export function CountdownTimer({
     // teljesen eltérő, "random" hátralévő időt láttunk ugyanabban a körben.
     // Most a deadline MINDEN alkalommal újraszámolódik, amikor a `deadlineIso`
     // prop ténylegesen megváltozik (a hatás-függőséglistában szerepel).
-    deadlineRef.current = deadlineIso ? new Date(deadlineIso).getTime() : Date.now() + seconds * 1000;
+    const now = Date.now() + clockOffsetForDeadline;
+    deadlineRef.current = deadlineIso ? new Date(deadlineIso).getTime() : now + seconds * 1000;
     expiredRef.current = false;
-    setTotal(deadlineIso ? Math.max(1, Math.round((deadlineRef.current - Date.now()) / 1000)) : seconds);
+    setTotal(deadlineIso ? Math.max(1, Math.round((deadlineRef.current - now) / 1000)) : seconds);
 
     if (paused) return;
 
     const tick = () => {
-      const deadline = deadlineRef.current ?? Date.now();
-      const next = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      const deadline = deadlineRef.current ?? Date.now() + clockOffsetForDeadline;
+      const next = Math.max(0, Math.ceil((deadline - (Date.now() + clockOffsetForDeadline)) / 1000));
       setRemaining(next);
       if (next <= 0 && !expiredRef.current) {
         expiredRef.current = true;
@@ -65,13 +69,13 @@ export function CountdownTimer({
     tick();
     const id = setInterval(tick, 250);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deadlineIso, paused, onExpire]);
+  }, [deadlineIso, clockOffsetForDeadline, paused, onExpire, seconds]);
 
-  const urgent = remaining <= warningAt;
+  const waitingForServerClock = Boolean(deadlineIso) && !synced;
+  const urgent = !waitingForServerClock && remaining <= warningAt;
   const mm = Math.floor(remaining / 60);
   const ss = remaining % 60;
-  const label = `${mm}:${String(ss).padStart(2, "0")}`;
+  const label = waitingForServerClock ? "--:--" : `${mm}:${String(ss).padStart(2, "0")}`;
   const color = urgent ? "var(--danger)" : "var(--accent)";
 
   if (ring) {

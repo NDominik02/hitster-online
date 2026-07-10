@@ -26,6 +26,7 @@ import {
 import { adaptRoundPublic } from "@/lib/supabase/adapters";
 import { playRevealSound, primeSoundContext } from "@/lib/sound";
 import { vibrateOutcome } from "@/lib/haptics";
+import { useServerClock } from "@/lib/time/server-clock";
 import type { NameGuessInput, Player, PlayerGameStats, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
 
 type Screen = "handoff" | "playing" | "guard" | "reveal" | "finished";
@@ -47,6 +48,7 @@ export default function PassAndPlaySoloPage() {
   const params = useParams<{ roomCode: string }>();
   const router = useRouter();
   const roomCode = params.roomCode;
+  const { offsetMs: serverClockOffsetMs } = useServerClock();
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -293,7 +295,11 @@ export default function PassAndPlaySoloPage() {
           playerName={activePlayer.name}
           playerColor={activePlayer.color}
           onConfirm={handleReveal}
-          disabled={resolving || !round.stealDeadline || new Date(round.stealDeadline).getTime() > Date.now()}
+          disabled={
+            resolving ||
+            !round.stealDeadline ||
+            new Date(round.stealDeadline).getTime() > Date.now() + serverClockOffsetMs
+          }
         />
       )}
       {screen === "guard" && round?.stealDeadline && (
