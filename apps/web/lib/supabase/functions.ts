@@ -19,6 +19,7 @@ import type {
   Player,
   PlayerGameStats,
   Room,
+  RoundPhase,
   RoomSettings,
   TimelineCardPublic,
 } from "../game/types";
@@ -225,7 +226,7 @@ export async function placeCard(
   roundId: string,
   position: number,
   nameGuess?: { artistGuess: string; titleGuess: string; yearGuess?: string } | null
-): Promise<{ phase: string; stealDeadline: string | null }> {
+): Promise<{ phase: RoundPhase; stealDeadline: string | null }> {
   return invoke("place_card", {
     roundId,
     position,

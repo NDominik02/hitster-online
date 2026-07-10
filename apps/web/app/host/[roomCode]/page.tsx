@@ -285,6 +285,7 @@ export default function HostRoomPage() {
         }
       } else if (event === "round_revealed") {
         const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
+        await stopPlayback();
         if (rid) await refreshRound(rid);
         await refreshTimelines(roomId);
       } else if (event === "turn_advanced") {
@@ -648,7 +649,7 @@ export default function HostRoomPage() {
   // ELŐTT megkérdezi a szervert (checkServerRoundState) — ha a szerver már reveal/done
   // fázisban van, csak frissítünk, NEM hívjuk feleslegesen a resolve_round-ot.
   useEffect(() => {
-    if (!round || round.phase === "reveal" || round.phase === "done" || !round.placingDeadline) return;
+    if (!round || (round.phase !== "playing" && round.phase !== "placing") || !round.placingDeadline) return;
     const roundId = round.id;
     const deadline = new Date(round.placingDeadline).getTime();
     const msLeft = Math.max(0, deadline - Date.now());
@@ -777,6 +778,21 @@ export default function HostRoomPage() {
         });
     }
   }, [audioUrl]);
+
+  useEffect(() => {
+    if (round?.phase !== "reveal" && round?.phase !== "done") return;
+    const t = window.setTimeout(() => {
+      audioRef.current?.pause();
+      setPreviewPlaying(false);
+      setSpotifyPlaying(false);
+      setManuallyPaused(false);
+      if (spotifyPlaying) {
+        spotify.pause().catch(() => {});
+      }
+    }, 0);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round?.id, round?.phase]);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;

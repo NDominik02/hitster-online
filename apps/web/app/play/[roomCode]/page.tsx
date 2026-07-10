@@ -337,15 +337,17 @@ export default function PlayRoomPage() {
     setPlacingSubmitting(true);
     try {
       const placed = await placeCard(round.id, slotIndex, nameGuess);
-      await refreshRound(round.id);
-      // A host figyeli a placement-et és hívja a resolve_round-ot; itt jelezzük a broadcastot,
-      // hogy a host (és a többi player) azonnal frissítse a round_public állapotot.
-      await broadcastEvent("card_placed", {
+      const cardPlaced: CardPlacedPayload = {
         roundId: round.id,
         phase: placed.phase,
         stealDeadline: placed.stealDeadline,
         placement: slotIndex,
-      });
+      };
+      applyCardPlacedPayload(cardPlaced, round.id);
+      // A host figyeli a placement-et és hívja a resolve_round-ot; itt jelezzük a broadcastot,
+      // hogy a host (és a többi player) azonnal frissítse a round_public állapotot.
+      await broadcastEvent("card_placed", cardPlaced);
+      await refreshRound(round.id);
     } catch (err) {
       setJoinError(err instanceof Error ? err.message : "Nem sikerült lerakni a kártyát.");
       setPlacingSubmitting(false);
