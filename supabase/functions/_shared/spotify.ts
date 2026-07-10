@@ -52,6 +52,7 @@ export async function refreshSpotifyToken(refreshToken: string): Promise<Spotify
 
 export interface SpotifyProfile {
   id: string;
+  display_name?: string | null;
   product?: string; // 'premium' | 'free' | 'open'
 }
 

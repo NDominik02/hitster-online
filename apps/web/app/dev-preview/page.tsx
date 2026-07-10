@@ -79,9 +79,10 @@ export default function DevPreviewPage() {
 
       <Section title="ColorPicker">
         <ColorPicker
-          taken={mockPlayers.slice(1).map((p) => p.color)}
+          taken={[...mockPlayers.slice(1).map((p) => p.color), "blue"]}
           selected={colorSel}
           onSelect={setColorSel}
+          takenByNames={{ blue: ["Bence", "Eszter"], purple: ["Csilla"], orange: ["Dani"] }}
         />
       </Section>
 

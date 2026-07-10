@@ -2,8 +2,9 @@
 // Caller: bármely bejelentkezett (anon auth) kliens, a Spotify OAuth redirect
 // után a /host/spotify/callback oldalon. Ez a kapcsolódás a H1 (Létrehozás)
 // képernyőn történik, MIELŐTT bármilyen szoba létezne — a spotify_connections
-// sor a caller `auth.uid()`-jéhez kötött, NEM egy adott szobához (ugyanaz az
-// identitás lesz a host_uid, ha/amikor ez a kliens szobát hoz létre). Nincs
+// sor a caller `auth.uid()`-jéhez kötött, míg a paklik stabil tulajdonosa a
+// Spotify profile id. Ugyanazzal a Spotify-fiókkal másik eszközön is elérhető
+// ugyanaz a privát paklikönyvtár. Nincs
 // roomId-alapú jogosultság-ellenőrzés: a kapcsolódás a "csatlakoztatom a
 // SAJÁT Spotify-fiókomat" művelet, ehhez elég egy érvényes Supabase JWT.
 //
@@ -57,6 +58,7 @@ Deno.serve(async (req: Request) => {
       {
         host_uid: callerUid,
         spotify_user_id: profile.id,
+        display_name: profile.display_name ?? null,
         access_token: tokenResponse.access_token,
         refresh_token: tokenResponse.refresh_token,
         access_expires_at: accessExpiresAt,
@@ -69,8 +71,20 @@ Deno.serve(async (req: Request) => {
 
   if (upsertError) return errorResponse('db_error', 'Nem sikerült a Spotify-kapcsolat mentése.', 500);
 
+  const { error: claimError } = await supabase
+    .from('decks')
+    .update({ spotify_owner_id: profile.id })
+    .eq('owner_id', callerUid)
+    .is('spotify_owner_id', null);
+
+  if (claimError) {
+    return errorResponse('deck_claim_failed', 'A Spotify-fiók csatlakozott, de a korábbi paklik átvétele nem sikerült.', 500);
+  }
+
   return jsonResponse({
     connected: true,
+    spotifyUserId: profile.id,
+    displayName: profile.display_name ?? null,
     product: profile.product ?? null,
     accessToken: tokenResponse.access_token,
     expiresAt: accessExpiresAt,

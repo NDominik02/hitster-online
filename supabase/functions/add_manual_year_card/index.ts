@@ -10,6 +10,7 @@
 
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
+import { callerCanManageDeck } from '../_shared/deck_ownership.ts';
 
 interface ExcludedEntry {
   title: string;
@@ -79,12 +80,14 @@ Deno.serve(async (req: Request) => {
 
   const { data: deck, error: deckError } = await supabase
     .from('decks')
-    .select('id, owner_id, report, usable_count, total_tracks')
+    .select('id, owner_id, spotify_owner_id, report, usable_count, total_tracks')
     .eq('id', body.deckId)
     .single();
 
   if (deckError || !deck) return errorResponse('deck_not_found', 'A pakli nem található.', 404);
-  if (deck.owner_id !== callerUid) return errorResponse('not_owner', 'Csak a pakli létrehozója egészítheti ki.', 403);
+  if (!(await callerCanManageDeck(supabase, callerUid, deck))) {
+    return errorResponse('not_owner', 'Csak a pakli létrehozója egészítheti ki.', 403);
+  }
 
   const report = (deck.report ?? {}) as { excluded?: ExcludedEntry[]; meetsMinimum?: boolean; spotifyOnlyCount?: number };
   const excludedList = report.excluded ?? [];

@@ -23,7 +23,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: connection } = await supabase
     .from('spotify_connections')
-    .select('id')
+    .select('id, spotify_user_id, display_name, product')
     .eq('host_uid', callerUid)
     .maybeSingle();
   if (!connection) return errorResponse('no_spotify_connection', 'Nincs csatlakoztatott Spotify-fiók.', 404);
@@ -33,5 +33,11 @@ Deno.serve(async (req: Request) => {
     return errorResponse('spotify_refresh_failed', 'A Spotify-kapcsolat lejárt, csatlakoztasd újra.', 502);
   }
 
-  return jsonResponse({ accessToken: token.accessToken, expiresAt: token.expiresAt });
+  return jsonResponse({
+    accessToken: token.accessToken,
+    expiresAt: token.expiresAt,
+    spotifyUserId: connection.spotify_user_id,
+    displayName: connection.display_name ?? null,
+    product: connection.product ?? null,
+  });
 });

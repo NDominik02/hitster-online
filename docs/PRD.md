@@ -150,7 +150,7 @@ Ez a PRD az MVP-t a PLAN.md **F1 fázisával** azonosítja (játszható core loo
 ### S5 — Csatlakozás + név/szín
 - **AC5.1** A Játékos QR-ból érkezve vagy a 4 betűs kód beírásával eljut a P1 képernyőre; **nem kell appot telepíteni és nem kell regisztrálni** (Anonymous Auth).
 - **AC5.2** A Játékos megad egy nevet és választ egy színt; a szín a lobbyban és a host nézetben végig hozzá van rendelve.
-- **AC5.3** Két játékos nem választhatja ugyanazt a színt egyszerre (a foglalt színek nem választhatók / feloldódik ütközés esetén).
+- **AC5.3** Több játékos is választhatja ugyanazt a színt; a választó darabszámmal és név szerint jelzi, kik használják már az adott színt.
 - **AC5.4** Sikeres csatlakozás után a Játékos a P2 várakozó képernyőre kerül, és megjelenik a Host lobbyjában.
 - **AC5.5** A szoba legfeljebb **8 játékost** fogad; a 9. csatlakozási kísérlet érthető üzenettel elutasításra kerül.
 

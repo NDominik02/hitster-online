@@ -81,6 +81,7 @@ export type Database = {
           is_public: boolean
           name: string
           owner_id: string | null
+          spotify_owner_id: string | null
           report: Json
           source_playlist_id: string
           source_playlist_url: string | null
@@ -95,6 +96,7 @@ export type Database = {
           is_public?: boolean
           name: string
           owner_id?: string | null
+          spotify_owner_id?: string | null
           report?: Json
           source_playlist_id: string
           source_playlist_url?: string | null
@@ -109,6 +111,7 @@ export type Database = {
           is_public?: boolean
           name?: string
           owner_id?: string | null
+          spotify_owner_id?: string | null
           report?: Json
           source_playlist_id?: string
           source_playlist_url?: string | null
@@ -337,6 +340,7 @@ export type Database = {
           access_expires_at: string
           access_token: string
           created_at: string
+          display_name: string | null
           host_uid: string
           id: string
           product: string | null
@@ -349,6 +353,7 @@ export type Database = {
           access_expires_at: string
           access_token: string
           created_at?: string
+          display_name?: string | null
           host_uid: string
           id?: string
           product?: string | null
@@ -361,6 +366,7 @@ export type Database = {
           access_expires_at?: string
           access_token?: string
           created_at?: string
+          display_name?: string | null
           host_uid?: string
           id?: string
           product?: string | null

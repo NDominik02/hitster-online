@@ -3,6 +3,7 @@
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
 import { isProtectedDeckReport } from '../_shared/protected_decks.ts';
+import { callerCanManageDeck } from '../_shared/deck_ownership.ts';
 
 function normalizeDeckName(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -32,7 +33,7 @@ Deno.serve(async (req: Request) => {
   const supabase = adminClient();
   const { data: deck, error: deckError } = await supabase
     .from('decks')
-    .select('id, owner_id, report')
+    .select('id, owner_id, spotify_owner_id, report')
     .eq('id', body.deckId)
     .maybeSingle();
 
@@ -41,7 +42,9 @@ Deno.serve(async (req: Request) => {
   if (isProtectedDeckReport(deck.report)) {
     return errorResponse('protected_deck', 'Az ajanlott paklik nem nevezhetok at.', 403);
   }
-  if (deck.owner_id !== callerUid) return errorResponse('not_owner', 'Csak a sajat paklidat nevezheted at.', 403);
+  if (!(await callerCanManageDeck(supabase, callerUid, deck))) {
+    return errorResponse('not_owner', 'Csak a sajat paklidat nevezheted at.', 403);
+  }
 
   const { error: updateError } = await supabase.from('decks').update({ name }).eq('id', deck.id);
   if (updateError) return errorResponse('db_error', 'Hiba a pakli atnevezese kozben.', 500);

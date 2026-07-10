@@ -129,7 +129,7 @@ create table players (
 );
 
 create unique index players_room_uid_idx   on players (room_id, auth_uid);   -- egy uid = egy játékos/szoba (S15/AC15.3: nincs duplikátum)
-create unique index players_room_color_idx on players (room_id, color);      -- szín-ütközés tiltása (AC5.3)
+-- A játékosszín nem egyedi: többen is választhatják ugyanazt, a UI jelzi a használókat.
 create unique index players_room_seat_idx  on players (room_id, seat_order);
 create index players_room_idx on players (room_id);
 
@@ -231,9 +231,14 @@ $$;
 
 ```sql
 create policy decks_select on decks for select to authenticated
-  using ( is_public = true or owner_id = auth.uid() );
+  using (
+    is_public = true
+    or (spotify_owner_id is null and owner_id = auth.uid())
+    or spotify_owner_id = current_spotify_user_id()
+  );
 ```
-- A generált pakli metaadata (név, lefedettség, riport) látható a hostnak és — ha `is_public` — link útján bárkinek (AC1.5 megosztás). A `deck_cards` NEM válik ezzel láthatóvá (külön tábla, saját policy).
+- A `spotify_owner_id` a csatlakoztatott Spotify-fiók stabil azonosítója, ezért a mentett paklik ugyanazzal a Spotify-fiókkal más eszközön is elérhetők. Kapcsolat nélkül a könyvtár üres; a még fiókhoz nem rendelt, éppen generált paklit az eredeti anonim session az `owner_id` alapján továbbra is olvashatja.
+- A generált pakli metaadata (név, lefedettség, riport) látható a tulajdonosnak és — ha `is_public` — link útján bárkinek (AC1.5 megosztás). A `deck_cards` NEM válik ezzel láthatóvá (külön tábla, saját policy).
 
 ### 2.3 `deck_cards` — a kliens SOHA nem olvassa közvetlenül (anti-leak mag)
 
@@ -332,7 +337,7 @@ create policy timeline_member_select on timeline_cards for select to authenticat
 |---|---|---|---|
 | `generate_deck` | host | — (pakli, nem kör) | bármely authenticated; rate-limit |
 | `create_room` | host | — → `lobby` | authenticated; a deck usable_count ≥ 60 (D4) |
-| `join_room` | player | `lobby` | authenticated; szoba `lobby`, < 8 játékos, szabad szín |
+| `join_room` | player | `lobby` | authenticated; szoba `lobby`, < 8 játékos |
 | `start_game` | host | `lobby` → `playing` (+ első `draw`) | **csak host**; ≥ 2 játékos (D5) |
 | `draw_card` | szerver* | új `rounds`, `phase=playing` | csak host (vagy szerver-trigger next_turn-ből) |
 | `place_card` | player | `playing`/`placing` → `stealing` | csak `active_player_id`; a kör aktív |
@@ -421,7 +426,7 @@ A `tools/deck-pipeline/` prototípus logikáját portoljuk (NEM találjuk ki új
 { "roomId": "uuid", "playerId": "uuid", "seatOrder": 0, "status": "lobby" }
 ```
 - **Jogosultság:** authenticated. A Function service-role-lal keresi meg a szobát a kódra (a kliens nem tag még, RLS-en át nem látná — 2.4).
-- **Ellenőrzés:** szoba létezik és `status = lobby`; játékosszám < 8 (AC5.5) → különben `{ error: "room_full" }`; a szín szabad (AC5.3, `players_room_color_idx`) → különben `{ error: "color_taken" }`; ha ugyanaz az `auth_uid` már bent van → **nem duplikál**, a meglévő sort adja vissza (reconnect-barát, AC15.3).
+- **Ellenőrzés:** szoba létezik és `status = lobby`; játékosszám < 8 (AC5.5) → különben `{ error: "room_full" }`; ha ugyanaz az `auth_uid` már bent van → **nem duplikál**, a meglévő sort adja vissza (reconnect-barát, AC15.3). A játékosszín nem egyedi: a már használt színek újra választhatók, a kliens névvel és darabszámmal jelzi őket.
 - **Fázis:** marad `lobby`. `seat_order` = a jelenlegi max+1.
 
 ### 3.4 `start_game` — játék indítása
@@ -579,7 +584,7 @@ components/                       // a DESIGN 5. komponenslistája (lásd lent)
 | `RevealCard`, `OutcomeBanner` | H5 (host), P5 (player) | `variant='simple'` F1-ben (DESIGN 6.5) |
 | `PlayerTimelineRow` | H4 (host) | `ghostSlotIndex` az élő húzáshoz (4.2) |
 | `RoomCodeBadge`, `QRCodePanel` | H3 (host lobby) | QR a `/play/[code]`-ra |
-| `RoomCodeInput`, `ColorPicker`, `PlayerBadge`, `PlayerList` | P1 (player), H3 (host) | foglalt szín tiltás a `players` state-ből |
+| `RoomCodeInput`, `ColorPicker`, `PlayerBadge`, `PlayerList` | P1 (player), H3 (host) | használt színek jelzése névvel és darabszámmal a `players` state-ből |
 | `AudioProgressBar`, `AudioUnlockOverlay` | H4 (host) | az autoplay-fallback (DESIGN 4.3b) kritikus |
 | `CoverageReport`, `GenerationProgress`, `SegmentedControl` | H1/H2 (host) | a `decks.report`-ból |
 | `ConnectionOverlay` | mind | presence-alapú (4.3) |

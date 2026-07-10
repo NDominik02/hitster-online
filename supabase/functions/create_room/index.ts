@@ -4,6 +4,7 @@
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
 import { getValidSpotifyAccessToken } from '../_shared/spotify.ts';
+import { callerCanManageDeck } from '../_shared/deck_ownership.ts';
 
 const MIN_USABLE_CARDS = 60; // D4
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous 0/O/1/I
@@ -51,11 +52,14 @@ Deno.serve(async (req: Request) => {
 
   const { data: deck, error: deckError } = await supabase
     .from('decks')
-    .select('id, usable_count, status')
+    .select('id, owner_id, spotify_owner_id, is_public, usable_count, status')
     .eq('id', body.deckId)
     .single();
 
   if (deckError || !deck) return errorResponse('deck_not_found', 'A pakli nem található.', 404);
+  if (!deck.is_public && !(await callerCanManageDeck(supabase, callerUid, deck))) {
+    return errorResponse('deck_not_accessible', 'Ez a pakli egy másik Spotify-fiókhoz tartozik.', 403);
+  }
   if (deck.status !== 'ready') return errorResponse('deck_not_ready', 'A pakli még generálódik vagy hibás.', 409);
   if (deck.usable_count < MIN_USABLE_CARDS) {
     return errorResponse('deck_too_small', `A paklinak legalább ${MIN_USABLE_CARDS} kártyát kell tartalmaznia.`, 422);

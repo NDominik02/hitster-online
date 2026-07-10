@@ -85,15 +85,6 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  const { data: colorTaken } = await supabase
-    .from('players')
-    .select('id')
-    .eq('room_id', room.id)
-    .eq('color', color)
-    .maybeSingle();
-
-  if (colorTaken) return errorResponse('color_taken', 'Ezt a színt már választották.', 409);
-
   const { data: maxSeatRow } = await supabase
     .from('players')
     .select('seat_order')
@@ -117,7 +108,7 @@ Deno.serve(async (req: Request) => {
     .single();
 
   if (insertError || !player) {
-    // Most likely a race on the color/seat unique index — ask the client to retry.
+    // Most likely a race on the seat-order unique index — ask the client to retry.
     return errorResponse('join_conflict', 'Ütközés csatlakozáskor, próbáld újra.', 409);
   }
 

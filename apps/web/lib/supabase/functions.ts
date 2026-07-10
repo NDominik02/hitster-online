@@ -65,7 +65,7 @@ export async function generateDeck(
   });
 }
 
-/** Egyszeri lekérdezés a decks tábláról (RLS: owner_id = auth.uid() vagy is_public). */
+/** Egyszeri lekérdezés a decks tábláról (RLS: publikus, anonim saját vagy Spotify-fiókhoz tartozó). */
 export async function pollDeckProgress(deckId: string): Promise<Deck> {
   const client = getSupabaseClient();
   const { data, error } = await client.from("decks").select("*").eq("id", deckId).single();
@@ -74,19 +74,17 @@ export async function pollDeckProgress(deckId: string): Promise<Deck> {
 }
 
 /**
- * S31 (F3, pakli-könyvtár) — a host korábban generált (saját) vagy más által
- * megosztott (is_public) kész paklikat listázhatja újrafelhasználásra, hogy ne
- * kelljen minden partihoz újragenerálni. Nincs külön Edge Function — a decks
- * RLS policy (owner_id = auth.uid() vagy is_public = true) már eleve csak a
- * jogosult sorokat engedi át, közvetlen SELECT elég (ugyanaz a minta, mint
- * pollDeckProgress-nél).
+ * A mentett paklik könyvtára a csatlakoztatott Spotify-fiókhoz tartozik. A
+ * spotify_owner_id szűrés és az RLS együtt biztosítja, hogy a publikus, de nem
+ * saját paklik csak az Ajánlott nézetben jelenjenek meg.
  */
-export async function listDecks(limit = 30): Promise<Deck[]> {
+export async function listDecks(spotifyUserId: string, limit = 30): Promise<Deck[]> {
   const client = getSupabaseClient();
   const { data, error } = await client
     .from("decks")
     .select("*")
     .eq("status", "ready")
+    .eq("spotify_owner_id", spotifyUserId)
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;
@@ -465,13 +463,30 @@ export async function spotifyOauthCallback(
   code: string,
   codeVerifier: string,
   redirectUri: string
-): Promise<{ connected: true; product: string | null; accessToken: string; expiresAt: string }> {
+): Promise<{
+  connected: true;
+  spotifyUserId: string;
+  displayName: string | null;
+  product: string | null;
+  accessToken: string;
+  expiresAt: string;
+}> {
   return invoke("spotify_oauth_callback", { code, codeVerifier, redirectUri });
 }
 
 /** spotify_refresh_token (S30) — friss access token a hívó saját Spotify-kapcsolatára. */
-export async function spotifyRefreshToken(): Promise<{ accessToken: string; expiresAt: string }> {
+export async function spotifyRefreshToken(): Promise<{
+  accessToken: string;
+  expiresAt: string;
+  spotifyUserId: string;
+  displayName: string | null;
+  product: string | null;
+}> {
   return invoke("spotify_refresh_token", {});
+}
+
+export async function spotifyDisconnect(): Promise<{ ok: true }> {
+  return invoke("spotify_disconnect", {});
 }
 
 /** spotify_list_devices (S20) — a hívó Spotify Connect-eszközei (Connect API-s eszközválasztóhoz). */

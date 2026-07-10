@@ -5,6 +5,7 @@ import { AppButton } from "../system/AppButton";
 import { ColorPicker } from "../lobby/ColorPicker";
 import { PlayerBadge } from "../lobby/PlayerBadge";
 import type { PlayerColorId } from "@/lib/game/types";
+import { groupPlayerNamesByColor } from "@/lib/game/colors";
 
 export interface RosterEntry {
   name: string;
@@ -39,9 +40,7 @@ export function RosterBuilder({
   const [color, setColor] = useState<PlayerColorId | null>(null);
 
   const takenColors = players.map((p) => p.color);
-  const takenByName = Object.fromEntries(players.map((p) => [p.color, p.name])) as Partial<
-    Record<PlayerColorId, string>
-  >;
+  const takenByNames = groupPlayerNamesByColor(players);
   const atLimit = players.length >= maxPlayers;
 
   function handleAdd() {
@@ -97,7 +96,7 @@ export function RosterBuilder({
           </div>
           <div>
             <label className="block mb-2 font-medium text-sm">Színe</label>
-            <ColorPicker taken={takenColors} selected={color} onSelect={setColor} takenByName={takenByName} />
+            <ColorPicker taken={takenColors} selected={color} onSelect={setColor} takenByNames={takenByNames} />
           </div>
           <AppButton variant="secondary" fullWidth disabled={!name.trim() || !color} onClick={handleAdd}>
             + Hozzáadás

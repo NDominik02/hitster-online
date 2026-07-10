@@ -14,7 +14,7 @@ import { PlayerBadge } from "@/components/lobby/PlayerBadge";
 import { StealButton } from "@/components/game/StealButton";
 import { CountdownTimer } from "@/components/game/CountdownTimer";
 import { GameStats } from "@/components/game/GameStats";
-import { playerColorValue } from "@/lib/game/colors";
+import { groupPlayerNamesByColor, playerColorValue } from "@/lib/game/colors";
 import type { NameGuessInput, Player, PlayerColorId, PlayerGameStats, RoundPublic, TimelineCardPublic } from "@/lib/game/types";
 import { ensureAnonymousSession } from "@/lib/supabase/client";
 import {
@@ -124,6 +124,7 @@ export default function PlayRoomPage() {
   const refreshPlayers = useCallback(async (rid: string) => {
     const list = await fetchPlayers(rid);
     setPlayers(list);
+    setMe((current) => (current ? (list.find((player) => player.id === current.id) ?? current) : current));
     return list;
   }, []);
 
@@ -180,12 +181,13 @@ export default function PlayRoomPage() {
       if (!roomId) return;
       const r = await refreshRound(rid);
       if (me) setMyTimeline(await refreshTimelineFor(roomId, me.id));
+      await refreshPlayers(roomId);
       if (r) {
         setActiveTimeline(await refreshTimelineFor(roomId, r.activePlayerId));
         setPlacedOutcome(r.outcome as "correct" | "wrong" | "timeout" | null);
       }
     },
-    [roomId, me, refreshRound, refreshTimelineFor]
+    [roomId, me, refreshPlayers, refreshRound, refreshTimelineFor]
   );
 
   const applyCardPlacedPayload = useCallback((payload: CardPlacedPayload, fallbackRoundId?: string) => {
@@ -211,6 +213,7 @@ export default function PlayRoomPage() {
       if (event === "player_joined") {
         await refreshPlayers(roomId);
       } else if (event === "game_started" || event === "round_started" || event === "turn_advanced") {
+        await refreshPlayers(roomId);
         const rid = (payload as { roundId?: string })?.roundId;
         if (rid) {
           const r = await refreshRound(rid);
@@ -246,6 +249,7 @@ export default function PlayRoomPage() {
         if (rid) await applyRevealedRound(rid);
       } else if (event === "game_finished") {
         setRoomFinished(true);
+        await refreshPlayers(roomId);
         // Csak a broadcast payload-ból olvasunk (a host már kiszámolta) — a player kliens
         // SOHA nem olvassa a `rounds` táblát közvetlenül, ugyanúgy, mint a round_public
         // view-nál (anti-leak elv, ld. a fájl tetején lévő jsdoc-ot).
@@ -255,6 +259,7 @@ export default function PlayRoomPage() {
       } else if (event === "steal_registered") {
         const count = (payload as { stealCount?: number })?.stealCount;
         if (typeof count === "number") setStealCount(count);
+        await refreshPlayers(roomId);
       } else if (event === "turn_auto_skipped") {
         const skipped = (payload as { skipped?: string[] })?.skipped ?? [];
         if (skipped.length > 0) setAutoSkipBanner(skipped);
@@ -372,6 +377,10 @@ export default function PlayRoomPage() {
       const result = await registerSteal(round.id, position);
       setStealSubmittedForRound(round.id);
       setStealCount(result.stealCount);
+      setPlayers((current) =>
+        current.map((player) => (player.id === me?.id ? { ...player, tokens: result.tokensLeft } : player))
+      );
+      setMe((current) => (current ? { ...current, tokens: result.tokensLeft } : current));
       await broadcastEvent("steal_registered", { roundId: round.id, stealCount: result.stealCount });
     } catch (err) {
       setStealError(err instanceof Error ? err.message : "Nem sikerült leadni a lopást.");
@@ -389,9 +398,7 @@ export default function PlayRoomPage() {
   }
 
   const takenColors = players.filter((p) => p.id !== me?.id).map((p) => p.color);
-  const takenByName = Object.fromEntries(
-    players.filter((p) => p.id !== me?.id).map((p) => [p.color, p.name])
-  ) as Partial<Record<PlayerColorId, string>>;
+  const takenByNames = groupPlayerNamesByColor(players.filter((p) => p.id !== me?.id));
 
   // F2 (S25, AC25.5) — a turn_auto_skipped payload playerId-kat ad; itt oldjuk fel névre.
   const autoSkipNames = autoSkipBanner
@@ -439,7 +446,7 @@ export default function PlayRoomPage() {
 
           <div>
             <label className="block mb-2 font-medium text-sm">Színed</label>
-            <ColorPicker taken={takenColors} selected={color} onSelect={setColor} takenByName={takenByName} />
+            <ColorPicker taken={takenColors} selected={color} onSelect={setColor} takenByNames={takenByNames} />
           </div>
 
           {joinError && (

@@ -1239,6 +1239,12 @@ Deno.serve(async (req: Request) => {
 
   const supabase = adminClient();
 
+  const { data: spotifyConnection } = await supabase
+    .from('spotify_connections')
+    .select('spotify_user_id')
+    .eq('host_uid', callerUid)
+    .maybeSingle();
+
   // Create the deck row immediately with status='generating'. The HTTP
   // response returns right after this — the actual pipeline work happens in
   // the background (EdgeRuntime.waitUntil), NOT before responding.
@@ -1249,6 +1255,7 @@ Deno.serve(async (req: Request) => {
       source_playlist_id: sourceKey,
       source_playlist_url: playlistUrls.join('\n'),
       owner_id: callerUid,
+      spotify_owner_id: spotifyConnection?.spotify_user_id ?? null,
       status: 'generating',
       report: { processed: 0, total: 0, step: 'fetching_playlist', sourcePlaylistIds: playlistIds, deckName },
     })

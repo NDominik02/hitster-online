@@ -10,13 +10,14 @@ import { ModeCard } from "@/components/lobby/ModeCard";
 import { HelpModal } from "@/components/system/HelpModal";
 import { DeckLibrary } from "@/components/lobby/DeckLibrary";
 import { RosterBuilder, type RosterEntry } from "@/components/pass-and-play/RosterBuilder";
-import { ensureAnonymousSession, getSupabaseClient } from "@/lib/supabase/client";
+import { ensureAnonymousSession } from "@/lib/supabase/client";
 import {
   generateDeck,
   createRoom,
   joinRoom,
   pollDeckUntilReady,
   spotifyRefreshToken,
+  spotifyDisconnect,
   listDecks,
   listFeaturedDecks,
   deleteDeck,
@@ -64,20 +65,35 @@ export default function HostCreatePage() {
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [creatingRoster, setCreatingRoster] = useState(false);
 
-  // S30 (Spotify Premium, F3) — a kapcsolat a SAJÁT auth.uid()-hez kötött, nem
-  // egy adott szobához (Architect terv), ezért itt, a szoba létrehozása ELŐTT
-  // is csatlakoztatható. A státuszt egy csendes spotify_refresh_token hívással
-  // deríti ki: siker = van kapcsolat, 404 (no_spotify_connection) = nincs.
+  // A token az anonim Supabase sessionhöz tartozik, de a paklik stabil
+  // tulajdonosa a Spotify-fiók. Így másik eszközön is ugyanaz a könyvtár nyílik meg.
   const [spotifyStatus, setSpotifyStatus] = useState<"checking" | "connected" | "not_connected">("checking");
+  const [spotifyAccount, setSpotifyAccount] = useState<{
+    spotifyUserId: string;
+    displayName: string | null;
+    product: string | null;
+  } | null>(null);
+  const [spotifyDisconnecting, setSpotifyDisconnecting] = useState(false);
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         await ensureAnonymousSession();
-        await spotifyRefreshToken();
-        if (!cancelled) setSpotifyStatus("connected");
+        const account = await spotifyRefreshToken();
+        if (!account.spotifyUserId) throw new Error("A Spotify-kapcsolatot újra kell csatlakoztatni.");
+        if (!cancelled) {
+          setSpotifyAccount({
+            spotifyUserId: account.spotifyUserId,
+            displayName: account.displayName,
+            product: account.product,
+          });
+          setSpotifyStatus("connected");
+        }
       } catch {
-        if (!cancelled) setSpotifyStatus("not_connected");
+        if (!cancelled) {
+          setSpotifyAccount(null);
+          setSpotifyStatus("not_connected");
+        }
       }
     })();
     return () => {
@@ -88,17 +104,47 @@ export default function HostCreatePage() {
   // S31 (F3, pakli-könyvtár) — a host választhat "Új pakli" (playlist URL-ből
   // generál), "Ajánlott" (tulaj által előre kiválasztott playlist-csomagok,
   // ld. lib/featuredPlaylists.ts) és "Meglévő pakli" (korábban generált
-  // saját/megosztott, a decks RLS-e alapján listázott) között. A
+  // Spotify-fiókhoz tartozó, korábban generált) között. A
   // könyvtárból/ajánlottból választás — ha van már kész pakli rá — azonnal
   // a "report" fázisba ugrik, generálás/pollingozás nélkül.
   const [deckSource, setDeckSource] = useState<"new" | "featured" | "library">("new");
   const [featuredDecks, setFeaturedDecks] = useState<Deck[]>([]);
   const [featuredLoading, setFeaturedLoading] = useState(false);
   const [libraryDecks, setLibraryDecks] = useState<Deck[]>([]);
-  const [libraryLoading, setLibraryLoading] = useState(false);
-  const [currentUid, setCurrentUid] = useState<string | null>(null);
+  const [loadedLibraryOwnerId, setLoadedLibraryOwnerId] = useState<string | null>(null);
   const [renamingDeckId, setRenamingDeckId] = useState<string | null>(null);
   const [deletingDeckId, setDeletingDeckId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (
+      deckSource !== "library" ||
+      !spotifyAccount ||
+      loadedLibraryOwnerId === spotifyAccount.spotifyUserId
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        await ensureAnonymousSession();
+        const decks = await listDecks(spotifyAccount.spotifyUserId);
+        if (!cancelled) {
+          setLibraryDecks(decks);
+          setLoadedLibraryOwnerId(spotifyAccount.spotifyUserId);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Nem sikerült betölteni a pakli-könyvtárat.");
+          setLoadedLibraryOwnerId(spotifyAccount.spotifyUserId);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [deckSource, spotifyAccount, loadedLibraryOwnerId]);
 
   async function handleSelectSource(source: "new" | "featured" | "library") {
     setDeckSource(source);
@@ -114,19 +160,6 @@ export default function HostCreatePage() {
         setFeaturedLoading(false);
       }
     }
-    if (source === "library" && libraryDecks.length === 0) {
-      setLibraryLoading(true);
-      try {
-        await ensureAnonymousSession();
-        const [decks, { data: userData }] = await Promise.all([listDecks(), getSupabaseClient().auth.getUser()]);
-        setLibraryDecks(decks);
-        setCurrentUid(userData.user?.id ?? null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Nem sikerült betölteni a pakli-könyvtárat.");
-      } finally {
-        setLibraryLoading(false);
-      }
-    }
   }
 
   function handleSelectLibraryDeck(selected: Deck) {
@@ -135,13 +168,18 @@ export default function HostCreatePage() {
   }
 
   async function refreshLibraryDecks() {
-    const decks = await listDecks();
+    if (!spotifyAccount) {
+      setLibraryDecks([]);
+      return [];
+    }
+    const decks = await listDecks(spotifyAccount.spotifyUserId);
     setLibraryDecks(decks);
+    setLoadedLibraryOwnerId(spotifyAccount.spotifyUserId);
     return decks;
   }
 
   async function handleRenameLibraryDeck(selected: Deck) {
-    if (selected.ownerId !== currentUid || selected.isFeatured || renamingDeckId) return;
+    if (!spotifyAccount || selected.isFeatured || renamingDeckId) return;
     const nextName = window.prompt("Új paklinév", selected.name)?.trim();
     if (!nextName || nextName === selected.name) return;
 
@@ -163,7 +201,7 @@ export default function HostCreatePage() {
   }
 
   async function handleDeleteLibraryDeck(selected: Deck) {
-    if (selected.ownerId !== currentUid || selected.isFeatured || deletingDeckId) return;
+    if (!spotifyAccount || selected.isFeatured || deletingDeckId) return;
     const confirmed = window.confirm(`Törlöd ezt a paklit?\n\n${selected.name}`);
     if (!confirmed) return;
 
@@ -196,6 +234,24 @@ export default function HostCreatePage() {
       return;
     }
     await startSpotifyLogin(clientId, redirectUri);
+  }
+
+  async function handleDisconnectSpotify() {
+    if (spotifyDisconnecting) return;
+    setSpotifyDisconnecting(true);
+    setError(null);
+    try {
+      await spotifyDisconnect();
+      setSpotifyAccount(null);
+      setSpotifyStatus("not_connected");
+      setLibraryDecks([]);
+      setLoadedLibraryOwnerId(null);
+      if (deckSource === "library") setDeck(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nem sikerült kijelentkezni a Spotify-fiókból.");
+    } finally {
+      setSpotifyDisconnecting(false);
+    }
   }
 
   const playlistUrls = playlistUrl
@@ -254,6 +310,8 @@ export default function HostCreatePage() {
       }
 
       setDeck(result);
+      setLibraryDecks([]);
+      setLoadedLibraryOwnerId(null);
       setPhase("report");
     } catch (err) {
       setPhase("form");
@@ -436,8 +494,12 @@ export default function HostCreatePage() {
                 <div className="mt-3">
                   <DeckLibrary
                     decks={libraryDecks}
-                    loading={libraryLoading}
-                    currentUid={currentUid}
+                    loading={
+                      spotifyStatus === "checking" ||
+                      (spotifyAccount !== null && loadedLibraryOwnerId !== spotifyAccount.spotifyUserId)
+                    }
+                    connected={spotifyStatus === "connected"}
+                    onConnect={handleConnectSpotify}
                     onSelect={handleSelectLibraryDeck}
                     onRename={handleRenameLibraryDeck}
                     onDelete={handleDeleteLibraryDeck}
@@ -503,20 +565,39 @@ export default function HostCreatePage() {
               </div>
             </div>
 
-            {/* S30 — Spotify Premium csatlakoztatás (opcionális, F3). Enélkül a parti
-                a megszokott ingyenes 30 mp-es preview-val indul, semmi nem változik. */}
-            <div className="rounded-[var(--radius-card)] border border-border bg-surface-2 px-4 py-3 flex items-center justify-between gap-3">
-              <div>
-                <p className="font-semibold text-sm">🎧 Spotify Premium</p>
+            {/* A Spotify-kapcsolat ad Premium lejátszást és stabil, eszközök között
+                megosztott tulajdonost a privát paklikönyvtárhoz. */}
+            <div className="rounded-[var(--radius-card)] border border-border bg-surface-2 px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="font-semibold text-sm">🎧 Spotify-fiók</p>
                 <p className="text-text-muted text-xs mt-0.5">
                   {spotifyStatus === "connected"
-                    ? "Csatlakoztatva — ha a playlist-import 403-at jelez, csatlakoztasd újra a Spotifyt az új jogosultságokhoz."
-                    : "Opcionális — enélkül is megy a 30 mp-es ingyenes preview, de a playlist-import 100 számnál megállhat."}
+                    ? `${spotifyAccount?.displayName || "Spotify-fiók"} csatlakoztatva${spotifyAccount?.product === "premium" ? " (Premium)" : ""}. A mentett paklik ehhez a fiókhoz tartoznak.`
+                    : spotifyStatus === "checking"
+                      ? "Spotify-kapcsolat ellenőrzése..."
+                      : "Csatlakozás nélkül a mentett paklik listája üres; az ajánlott paklik továbbra is elérhetők."}
                 </p>
               </div>
-              <AppButton size="sm" variant="secondary" onClick={handleConnectSpotify}>
-                {spotifyStatus === "connected" ? "Újracsatlakoztatás" : "Csatlakoztatás"}
-              </AppButton>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <AppButton
+                  size="sm"
+                  variant="secondary"
+                  disabled={spotifyStatus === "checking" || spotifyDisconnecting}
+                  onClick={handleConnectSpotify}
+                >
+                  {spotifyStatus === "connected" ? "Fiókváltás" : "Csatlakoztatás"}
+                </AppButton>
+                {spotifyStatus === "connected" && (
+                  <AppButton
+                    size="sm"
+                    variant="secondary"
+                    disabled={spotifyDisconnecting}
+                    onClick={handleDisconnectSpotify}
+                  >
+                    {spotifyDisconnecting ? "Kijelentkezés..." : "Kijelentkezés"}
+                  </AppButton>
+                )}
+              </div>
             </div>
 
             {deckSource === "new" && (

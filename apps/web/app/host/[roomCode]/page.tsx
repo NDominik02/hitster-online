@@ -290,6 +290,7 @@ export default function HostRoomPage() {
         await stopPlayback();
         if (rid) await refreshRound(rid);
         await refreshTimelines(roomId);
+        await refreshPlayers(roomId);
       } else if (event === "turn_advanced") {
         const rid = (payload as { roundId?: string })?.roundId;
         if (rid) await refreshRound(rid);
@@ -312,6 +313,7 @@ export default function HostRoomPage() {
         const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
         if (rid) await refreshRound(rid);
         await refreshTimelines(roomId);
+        await refreshPlayers(roomId);
       } else if (event === "turn_auto_skipped") {
         const skipped = (payload as { skipped?: string[] })?.skipped ?? [];
         if (skipped.length > 0) {
@@ -478,6 +480,7 @@ export default function HostRoomPage() {
       await stopPlayback();
       await refreshRound(round.id);
       await refreshTimelines(roomId!);
+      await refreshPlayers(roomId!);
       // F2 (ARCHITECTURE 11.8): a steal-ablak lezárásának jelzése — a round_revealed a
       // meglévő F1 refetch-triggert adja, a steal_window_closed a jövőbeli finomabb
       // steal-specifikus UI-reakciókhoz (jelenleg a kliensek a round_revealed-re is
@@ -532,6 +535,7 @@ export default function HostRoomPage() {
       await overrideGuess(round.id, field, correct);
       await refreshRound(round.id);
       await refreshPlayers(roomId!);
+      await broadcastEvent("round_disputed", { roundId: round.id });
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Nem sikerült módosítani a bemondás eredményét.");
     } finally {

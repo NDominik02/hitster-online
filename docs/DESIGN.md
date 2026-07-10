@@ -587,7 +587,7 @@ Ez a legfontosabb képernyő: **egy kézzel, hüvelykujjal, drag&droppal** kell 
 | **`QRCodePanel`** | QR-kód a `/play/[room]` URL-re + rövid URL. | `joinUrl`, `size` |
 | **`RoomCodeInput`** | 4 karakteres kód-bevitel (player P1). | `value`, `onChange`, `autoUppercase`, `prefilled?` |
 | **`PlayerBadge`** | Játékos-jelvény: szín + monogram/ikon + név (mindenhol). | `name`, `color`, `state: 'online' \| 'offline' \| 'active'`, `size`, ⟨F2⟩`tokens?` |
-| **`ColorPicker`** | 8 szín rácsos választó, foglaltak tiltva. | `colors`, `taken: string[]`, `selected`, `onSelect` |
+| **`ColorPicker`** | 8 szín rácsos választó, a már használt színek darabszámmal és nevekkel jelölve, de újra választhatók. | `colors`, `taken: string[]`, `selected`, `onSelect` |
 | **`PlayerList`** | Csatlakozott játékosok listája (host lobby, player várakozó). | `players[]`, `layout: 'grid' \| 'row'` |
 
 ### 5.3 Host / rendszer komponensek
