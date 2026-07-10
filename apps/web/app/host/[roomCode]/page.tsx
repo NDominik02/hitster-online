@@ -1111,38 +1111,55 @@ export default function HostRoomPage() {
               return (
                 <div className="w-full max-w-3xl text-center space-y-5">
                   {guess && (
-                    <div className="flex flex-col items-center gap-2">
-                      <p className="text-text-muted">
-                        🎤 {players.find((p) => p.id === guess.byPlayerId)?.name ?? "Valaki"} bemondása
-                      </p>
+                    <div className="space-y-4 text-left">
+                      <div>
+                        <p className="text-sm font-semibold uppercase tracking-wide text-text-muted">Bemondás eredménye</p>
+                        <p className="mt-1 text-2xl md:text-3xl font-bold">
+                          {players.find((p) => p.id === guess.byPlayerId)?.name ?? "Valaki"} bemondása
+                        </p>
+                      </div>
                       {/* REDESIGN (2026-07-06) — cím/előadó/évszám egymástól függetlenül pontozott,
                           mindegyik a saját beírt értékét és felülbírálás-gombját kapja, hogy a host
                           lássa, mit tippelt ténylegesen a játékos, és mezőnként dönthessen. */}
-                      {[
-                        { field: "title" as const, label: "Cím", guessed: guess.titleGuess, correct: guess.titleCorrect },
-                        { field: "artist" as const, label: "Előadó", guessed: guess.artistGuess, correct: guess.artistCorrect },
-                        { field: "year" as const, label: "Évszám", guessed: guess.yearGuess, correct: guess.yearCorrect },
-                      ]
-                        .filter((f) => f.correct !== null && !!f.guessed)
-                        .map((f) => (
-                          <div key={f.field} className="flex flex-col items-center gap-0.5">
-                            <p className={f.correct ? "text-success" : "text-text-muted"}>
-                              {f.label}: „{f.guessed}&rdquo; — {f.correct ? "talált (+1 🪙)" : "nem talált"}
-                            </p>
-                            <button
-                              type="button"
-                              className="text-xs text-text-muted underline hover:text-text disabled:opacity-50"
-                              disabled={guessOverrideSaving}
-                              onClick={() => handleOverrideGuess(f.field, !f.correct)}
+                      <div className="grid gap-3">
+                        {[
+                          { field: "title" as const, label: "Cím", guessed: guess.titleGuess, correct: guess.titleCorrect },
+                          { field: "artist" as const, label: "Előadó", guessed: guess.artistGuess, correct: guess.artistCorrect },
+                          { field: "year" as const, label: "Évszám", guessed: guess.yearGuess, correct: guess.yearCorrect },
+                        ]
+                          .filter((f) => f.correct !== null && !!f.guessed)
+                          .map((f) => (
+                            <div
+                              key={f.field}
+                              className={clsx(
+                                "rounded-[var(--radius-card)] border-2 px-5 py-4 shadow-lg",
+                                f.correct ? "border-success bg-success/10" : "border-border bg-surface-2"
+                              )}
                             >
-                              {guessOverrideSaving
-                                ? "Mentés…"
-                                : f.correct
-                                  ? `${f.label}: mégsem talált (−1 🪙)`
-                                  : `${f.label}: elfogadjuk, mégis talált (+1 🪙)`}
-                            </button>
-                          </div>
-                        ))}
+                              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                                <p className="text-sm font-semibold uppercase tracking-wide text-text-muted">{f.label}</p>
+                                <p className={clsx("text-lg md:text-xl font-bold", f.correct ? "text-success" : "text-text-muted")}>
+                                  {f.correct ? "Talált (+1 token)" : "Nem talált"}
+                                </p>
+                              </div>
+                              <p className="mt-1 break-words text-xl md:text-2xl font-semibold">„{f.guessed}&rdquo;</p>
+                              <div className="mt-3">
+                                <button
+                                  type="button"
+                                  className="min-h-11 rounded-[var(--radius-button)] border border-border bg-bg/40 px-4 py-2 text-sm md:text-base font-semibold text-text-muted hover:text-text disabled:opacity-50"
+                                  disabled={guessOverrideSaving}
+                                  onClick={() => handleOverrideGuess(f.field, !f.correct)}
+                                >
+                                  {guessOverrideSaving
+                                    ? "Mentés…"
+                                    : f.correct
+                                      ? `${f.label}: mégsem talált (-1 token)`
+                                      : `${f.label}: elfogadjuk, mégis talált (+1 token)`}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
                     </div>
                   )}
                   {steals.length > 0 && (
