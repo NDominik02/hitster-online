@@ -33,6 +33,7 @@ export interface DrawResult {
 }
 
 const SIGNED_URL_TTL_SEC = 60 * 5; // timeLimitSec (usually 90s) + buffer, capped generously at 5 min
+const PREMIUM_TRACK_DEADLINE_GRACE_SEC = 5;
 
 function pickRandom<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)];
@@ -146,8 +147,18 @@ export async function drawCard(
     .eq('room_id', roomId);
 
   const roundNo = (roundCount ?? 0) + 1;
-  const timeLimitSec = (room.settings as any)?.timeLimitSec ?? 90;
-  const placingDeadline = new Date(Date.now() + timeLimitSec * 1000).toISOString();
+
+  // Resolve playback before creating the round so full-track Spotify Premium games
+  // do not timeout in the middle of a song just because the generic room time limit
+  // is shorter than the current track.
+  const playback = await resolveCardPlayback(supabase, room, card.id);
+  const configuredTimeLimitSec = (room.settings as any)?.timeLimitSec ?? 90;
+  const premiumTrackDurationSec =
+    room.spotify_playback_mode === 'premium' && playback.durationMs
+      ? Math.ceil(playback.durationMs / 1000) + PREMIUM_TRACK_DEADLINE_GRACE_SEC
+      : 0;
+  const placingWindowSec = Math.max(configuredTimeLimitSec, premiumTrackDurationSec);
+  const placingDeadline = new Date(Date.now() + placingWindowSec * 1000).toISOString();
 
   const { data: newRound, error: roundError } = await supabase
     .from('rounds')
@@ -168,11 +179,6 @@ export async function drawCard(
     .from('rooms')
     .update({ deck_cursor: pick.nextCursor, current_round_id: newRound.id, updated_at: new Date().toISOString() })
     .eq('id', roomId);
-
-  // D7/6.4: get the audio_url PATH from deck_cards (service-role bypasses RLS
-  // here — this is the ONLY place the raw path is read) and issue a
-  // short-lived signed URL. This response is only ever returned to the host.
-  const playback = await resolveCardPlayback(supabase, room, card.id);
 
   return {
     ok: true,
