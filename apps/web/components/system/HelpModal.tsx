@@ -33,8 +33,8 @@ export function HelpModal({ onClose }: HelpModalProps) {
             egy titkos számot, és a saját idővonalán megpróbálja jó helyre rakni évszám szerint.
           </p>
           <p>
-            <span className="font-semibold text-text">3. Bemondás.</span> Ha bekapcsolja, előadót és
-            címet is megtippelhet a lerakással együtt — ha mindkettő stimmel, +1 tokent kap.
+            <span className="font-semibold text-text">3. Betippelés.</span> A lerakás előtt címet,
+            előadót és évszámot is írhat extra zsetonért. Mindegyik helyes mező külön +1 tokent ér.
           </p>
           <p>
             <span className="font-semibold text-text">4. Lopás.</span> A többiek 1 tokenért

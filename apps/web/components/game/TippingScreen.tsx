@@ -50,6 +50,7 @@ export function TippingScreen({
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const [expired, setExpired] = useState(false);
   const [nameGuess, setNameGuess] = useState<NameGuessInput | null>(null);
+  const guessCount = [nameGuess?.titleGuess, nameGuess?.artistGuess, nameGuess?.yearGuess].filter((part) => part?.trim()).length;
 
   // Aktivációs késleltetés/távolság (DESIGN 4.1a): a drag csak akkor induljon, ha az ujj
   // elmozdul, hogy a görgetés (pan) ne keveredjen a húzással.
@@ -92,7 +93,10 @@ export function TippingScreen({
 
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         <div className="flex-1 flex flex-col items-center gap-6 px-4 py-6">
-          <p className="text-text-muted text-sm">Húzd a helyére! 👇 (vagy koppints a kártyára, majd egy résre)</p>
+          <div className="text-center">
+            <p className="text-text-muted text-sm">Húzd a helyére! 👇 (vagy koppints a kártyára, majd egy résre)</p>
+            <p className="mt-1 text-sm font-semibold text-accent">Ha felismered, töltsd ki az extra zsetonos tippet is.</p>
+          </div>
 
           <DraggableMysteryCard selected={selectedSlot !== null} />
 
@@ -118,7 +122,13 @@ export function TippingScreen({
           disabled={selectedSlot === null || submitting}
           onClick={() => selectedSlot !== null && !submitting && onConfirm(selectedSlot, nameGuess)}
         >
-          {submitting ? "Lerakás folyamatban…" : selectedSlot === null ? "Húzd egy résbe" : "LERAKOM ✓"}
+          {submitting
+            ? "Lerakás folyamatban…"
+            : selectedSlot === null
+              ? "Húzd egy résbe"
+              : guessCount > 0
+                ? `LERAKOM + ${guessCount} tipp ✓`
+                : "LERAKOM ✓"}
         </AppButton>
       </footer>
 
