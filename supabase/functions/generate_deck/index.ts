@@ -45,6 +45,8 @@ const MB_USER_AGENT = 'HitsterOnline/0.1 (nemethdominik02@gmail.com)';
 const MB_MIN_INTERVAL_MS = 1100; // stay under MusicBrainz's 1 req/s limit
 const ITUNES_INTERVAL_MS = 1500; // kept as tight as the F0 prototype allows
 const ITUNES_MIN_MATCH_SCORE = 0.55;
+const ITUNES_CACHE_VERSION = 'v2';
+const ITUNES_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_USABLE_CARDS = 60; // D4
 const YEAR_DISAGREEMENT_THRESHOLD = 3; // F0-REPORT 4.: |MB - iTunes| >= 3 -> uncertain flag
 // Spotify's playlist item pagination max is 50. Asking for 100 makes the
@@ -63,6 +65,8 @@ const MAX_TRACKS_PREMIUM = 500;
 // slow MusicBrainz response near the boundary doesn't blow the 150s wall.
 const BATCH_TIME_BUDGET_MS = 90_000; // stop picking up new tracks after this much wall time in one invocation
 const SELF_INVOKE_HEADROOM_MS = 5_000; // leave this much slack before actually hitting BATCH_TIME_BUDGET_MS
+const RESOLVE_CONCURRENCY = 4;
+const AUDIO_UPLOAD_CONCURRENCY = 4;
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -355,16 +359,20 @@ function buildMbQuery(title: string, artist: string): string {
 // MusicBrainz and iTunes each get their OWN independent throttle clock, so
 // a track's two lookups can run concurrently (Promise.all in processTrack)
 // instead of stacking sequentially — this is the main per-track speedup.
-let mbLastRequestAt = 0;
-async function mbThrottledFetch(url: string): Promise<Response> {
+let mbNextRequestAt = 0;
+async function reserveMbRequestSlot(): Promise<void> {
   const now = Date.now();
-  const wait = mbLastRequestAt + MB_MIN_INTERVAL_MS - now;
-  if (wait > 0) await sleep(wait);
-  mbLastRequestAt = Date.now();
+  const scheduledAt = Math.max(now, mbNextRequestAt);
+  mbNextRequestAt = scheduledAt + MB_MIN_INTERVAL_MS;
+  if (scheduledAt > now) await sleep(scheduledAt - now);
+}
+
+async function mbThrottledFetch(url: string): Promise<Response> {
+  await reserveMbRequestSlot();
   const res = await fetch(url, { headers: { 'User-Agent': MB_USER_AGENT, Accept: 'application/json' } });
   if (res.status === 503) {
     await sleep(2000);
-    mbLastRequestAt = Date.now();
+    await reserveMbRequestSlot();
     return fetch(url, { headers: { 'User-Agent': MB_USER_AGENT, Accept: 'application/json' } });
   }
   return res;
@@ -440,50 +448,118 @@ interface ItunesMatch {
   matchScore: number;
   releaseYear: number | null;
   artworkUrl: string | null;
+  matchedTitle: string | null;
+  matchedArtist: string | null;
+  status: 'matched' | 'no_match' | 'request_failed';
 }
 
-let itunesLastRequestAt = 0;
-async function itunesThrottledFetch(url: string): Promise<Response> {
+let itunesNextRequestAt = 0;
+async function reserveItunesRequestSlot(): Promise<void> {
   const now = Date.now();
-  const wait = itunesLastRequestAt + ITUNES_INTERVAL_MS - now;
-  if (wait > 0) await sleep(wait);
-  itunesLastRequestAt = Date.now();
-  return fetch(url);
+  const scheduledAt = Math.max(now, itunesNextRequestAt);
+  itunesNextRequestAt = scheduledAt + ITUNES_INTERVAL_MS;
+  if (scheduledAt > now) await sleep(scheduledAt - now);
+}
+
+async function itunesThrottledFetch(url: string): Promise<Response> {
+  let response: Response | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await reserveItunesRequestSlot();
+    response = await fetch(url);
+    if (response.status !== 429 && response.status < 500) return response;
+    if (attempt < 2) await sleep(500 * (attempt + 1));
+  }
+  return response!;
+}
+
+function emptyItunesMatch(status: ItunesMatch['status'], matchScore = 0): ItunesMatch {
+  return {
+    previewUrl: null,
+    matchScore: Math.round(matchScore * 100) / 100,
+    releaseYear: null,
+    artworkUrl: null,
+    matchedTitle: null,
+    matchedArtist: null,
+    status,
+  };
+}
+
+interface ScoredItunesResult {
+  best: any | null;
+  score: number;
+  titleScore: number;
+  artistScore: number;
+}
+
+function pickBestItunesResult(results: any[], title: string, artist: string): ScoredItunesResult {
+  let best: any = null;
+  let bestScore = 0;
+  let bestTitleScore = 0;
+  let bestArtistScore = 0;
+  for (const result of results) {
+    const titleScore = similarity(result.trackName, title);
+    const artistScore = Math.max(similarity(result.artistName, artist), similarity(result.artistName, primaryArtist(artist)));
+    const score = titleScore * 0.6 + artistScore * 0.4;
+    if (score > bestScore) {
+      bestScore = score;
+      bestTitleScore = titleScore;
+      bestArtistScore = artistScore;
+      best = result;
+    }
+  }
+  return { best, score: bestScore, titleScore: bestTitleScore, artistScore: bestArtistScore };
+}
+
+function isAcceptableItunesResult(result: ScoredItunesResult): boolean {
+  return Boolean(
+    result.best?.previewUrl &&
+      result.score >= ITUNES_MIN_MATCH_SCORE &&
+      result.titleScore >= 0.6 &&
+      result.artistScore >= 0.45
+  );
+}
+
+async function fetchItunesResults(term: string, attribute?: 'songTerm'): Promise<any[] | null> {
+  const params = new URLSearchParams({ term, media: 'music', entity: 'song', limit: attribute ? '25' : '10', country: 'HU' });
+  if (attribute) params.set('attribute', attribute);
+  const res = await itunesThrottledFetch(`https://itunes.apple.com/search?${params.toString()}`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.results ?? [];
 }
 
 async function searchItunes(title: string, artist: string): Promise<ItunesMatch> {
-  const term = `${primaryArtist(artist)} ${title}`;
-  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=5`;
   try {
-    const res = await itunesThrottledFetch(url);
-    if (!res.ok) return { previewUrl: null, matchScore: 0, releaseYear: null };
-    const data = await res.json();
-    const results = data.results || [];
-    let best: any = null;
-    let bestScore = 0;
-    for (const r of results) {
-      const score = similarity(r.trackName, title) * 0.6 + similarity(r.artistName, artist) * 0.4;
-      if (score > bestScore) {
-        bestScore = score;
-        best = r;
-      }
+    const primaryResults = await fetchItunesResults(`${primaryArtist(artist)} ${title}`);
+    if (primaryResults === null) return emptyItunesMatch('request_failed');
+
+    let picked = pickBestItunesResult(primaryResults, title, artist);
+    if (!isAcceptableItunesResult(picked)) {
+      const titleResults = await fetchItunesResults(title, 'songTerm');
+      if (titleResults === null) return emptyItunesMatch('request_failed', picked.score);
+      const titlePicked = pickBestItunesResult(titleResults, title, artist);
+      if (titlePicked.score > picked.score) picked = titlePicked;
     }
-    if (!best || bestScore < ITUNES_MIN_MATCH_SCORE) {
-      return { previewUrl: null, matchScore: Math.round(bestScore * 100) / 100, releaseYear: null, artworkUrl: null };
+
+    if (!isAcceptableItunesResult(picked)) {
+      return emptyItunesMatch('no_match', picked.score);
     }
-    const releaseYear = best.releaseDate ? parseInt(String(best.releaseDate).slice(0, 4), 10) : null;
-    // iTunes csak 100x100-as thumbnailt ad vissza alapból (`artworkUrl100`) — a
-    // méret a fájlnévben van kódolva, a "100x100bb" cserével nagyobb (600x600)
-    // változatot kapunk anélkül, hogy külön kérést kellene indítani érte.
-    const artworkUrl = best.artworkUrl100 ? String(best.artworkUrl100).replace('100x100bb', '600x600bb') : null;
+
+    const releaseYear = picked.best.releaseDate ? parseInt(String(picked.best.releaseDate).slice(0, 4), 10) : null;
+    const artworkUrl = picked.best.artworkUrl100
+      ? String(picked.best.artworkUrl100).replace('100x100bb', '600x600bb')
+      : null;
     return {
-      previewUrl: best.previewUrl ?? null,
-      matchScore: Math.round(bestScore * 100) / 100,
+      previewUrl: picked.best.previewUrl,
+      matchScore: Math.round(picked.score * 100) / 100,
       releaseYear: !isNaN(releaseYear as number) ? releaseYear : null,
       artworkUrl,
+      matchedTitle: picked.best.trackName ?? null,
+      matchedArtist: picked.best.artistName ?? null,
+      status: 'matched',
     };
   } catch {
-    return { previewUrl: null, matchScore: 0, releaseYear: null, artworkUrl: null };
+    return emptyItunesMatch('request_failed');
   }
 }
 
@@ -500,16 +576,35 @@ interface ProcessedTrack {
   itunesArtworkUrl: string | null;
   excludeReason: 'no_preview' | 'no_year' | null;
   newCacheEntry?: { norm_key: string; year: number | null; year_source: string; match_score: number | null };
+  newItunesCacheEntry?: {
+    norm_key: string;
+    preview_url: string | null;
+    match_score: number;
+    release_year: number | null;
+    artwork_url: string | null;
+    matched_title: string | null;
+    matched_artist: string | null;
+    cached_at: string;
+  };
 }
 
-async function processTrack(track: RawTrack, mbCacheMap: Map<string, YearResolution>): Promise<ProcessedTrack> {
-  const cacheKey = normalize(track.title) + '|' + normalize(track.artist);
+function itunesCacheKey(title: string, artist: string): string {
+  return `${ITUNES_CACHE_VERSION}|${normalize(title)}|${normalize(artist)}`;
+}
 
-  // KEY SPEEDUP: these two network calls are independent (different APIs,
-  // different throttles) and used to run sequentially — now parallel.
+async function processTrack(
+  track: RawTrack,
+  mbCacheMap: Map<string, YearResolution>,
+  itunesCacheMap: Map<string, ItunesMatch>
+): Promise<ProcessedTrack> {
+  const cacheKey = normalize(track.title) + '|' + normalize(track.artist);
+  const cachedItunes = itunesCacheMap.get(itunesCacheKey(track.title, track.artist));
+
+  // The two providers remain independent. A fresh iTunes cache hit removes
+  // one throttled network request without changing the matching rules.
   const [mbRes, itunesRes] = await Promise.all([
     resolveMbYear(track.title, track.artist, (k) => mbCacheMap.get(k)),
-    searchItunes(track.title, track.artist),
+    cachedItunes ? Promise.resolve(cachedItunes) : searchItunes(track.title, track.artist),
   ]);
 
   let newCacheEntry: ProcessedTrack['newCacheEntry'];
@@ -523,8 +618,23 @@ async function processTrack(track: RawTrack, mbCacheMap: Map<string, YearResolut
     };
   }
 
+  let newItunesCacheEntry: ProcessedTrack['newItunesCacheEntry'];
+  if (!cachedItunes && itunesRes.status !== 'request_failed') {
+    itunesCacheMap.set(itunesCacheKey(track.title, track.artist), itunesRes);
+    newItunesCacheEntry = {
+      norm_key: itunesCacheKey(track.title, track.artist),
+      preview_url: itunesRes.previewUrl,
+      match_score: itunesRes.matchScore,
+      release_year: itunesRes.releaseYear,
+      artwork_url: itunesRes.artworkUrl,
+      matched_title: itunesRes.matchedTitle,
+      matched_artist: itunesRes.matchedArtist,
+      cached_at: new Date().toISOString(),
+    };
+  }
+
   let finalYear: number | null = mbRes.year;
-  let finalYearSource = mbRes.yearSource;
+  let finalYearSource: string = mbRes.yearSource;
   let yearUncertain = false;
 
   if (mbRes.year && itunesRes.releaseYear) {
@@ -565,6 +675,7 @@ async function processTrack(track: RawTrack, mbCacheMap: Map<string, YearResolut
     itunesArtworkUrl: itunesRes.artworkUrl,
     excludeReason,
     newCacheEntry,
+    newItunesCacheEntry,
   };
 }
 
@@ -801,9 +912,18 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
     // Load the global MB year cache for the remaining tracks.
     const remainingTracks = tracks.slice(resumeCursor);
     const cacheKeys = remainingTracks.map((t) => normalize(t.title) + '|' + normalize(t.artist));
-    const { data: cacheRows } = cacheKeys.length
-      ? await supabase.from('mb_year_cache').select('norm_key, year, year_source, match_score').in('norm_key', cacheKeys)
-      : { data: [] as any[] };
+    const itunesCacheKeys = remainingTracks.map((t) => itunesCacheKey(t.title, t.artist));
+    const itunesCacheCutoff = new Date(Date.now() - ITUNES_CACHE_TTL_MS).toISOString();
+    const [{ data: cacheRows }, { data: itunesCacheRows }] = cacheKeys.length
+      ? await Promise.all([
+          supabase.from('mb_year_cache').select('norm_key, year, year_source, match_score').in('norm_key', cacheKeys),
+          supabase
+            .from('itunes_match_cache')
+            .select('norm_key, preview_url, match_score, release_year, artwork_url, matched_title, matched_artist')
+            .in('norm_key', itunesCacheKeys)
+            .gte('cached_at', itunesCacheCutoff),
+        ])
+      : [{ data: [] as any[] }, { data: [] as any[] }];
 
     const mbCacheMap = new Map<string, YearResolution>();
     for (const row of cacheRows ?? []) {
@@ -814,46 +934,68 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
       });
     }
 
+    const itunesCacheMap = new Map<string, ItunesMatch>();
+    for (const row of itunesCacheRows ?? []) {
+      itunesCacheMap.set(row.norm_key, {
+        previewUrl: row.preview_url,
+        matchScore: row.match_score,
+        releaseYear: row.release_year,
+        artworkUrl: row.artwork_url,
+        matchedTitle: row.matched_title,
+        matchedArtist: row.matched_artist,
+        status: row.preview_url ? 'matched' : 'no_match',
+      });
+    }
+
     let cursor = resumeCursor;
     const newCacheEntries: Array<{ norm_key: string; year: number | null; year_source: string; match_score: number | null }> = [];
+    const newItunesCacheEntries: NonNullable<ProcessedTrack['newItunesCacheEntry']>[] = [];
 
-    // Process tracks one at a time (MB+iTunes parallel within a track), but
-    // stop picking up new tracks once we're close to the time budget so this
-    // invocation returns/re-chains well before the 150s wall clock.
+    // A small concurrent window keeps provider requests and response waits
+    // overlapped. The reservation-based throttles above still enforce each
+    // provider's minimum start interval, so this does not create request bursts.
     while (cursor < total) {
-      if (Date.now() - startedAt > BATCH_TIME_BUDGET_MS) break;
+      if (Date.now() - startedAt > BATCH_TIME_BUDGET_MS - SELF_INVOKE_HEADROOM_MS) break;
 
-      const track = tracks[cursor];
-      const processed = await processTrack(track, mbCacheMap);
-      accumulated.push(processed);
-      if (processed.newCacheEntry) newCacheEntries.push(processed.newCacheEntry);
-      cursor++;
+      const chunk = tracks.slice(cursor, Math.min(cursor + RESOLVE_CONCURRENCY, total));
+      const processedChunk = await Promise.all(chunk.map((track) => processTrack(track, mbCacheMap, itunesCacheMap)));
+      for (const processed of processedChunk) {
+        accumulated.push(processed);
+        if (processed.newCacheEntry) newCacheEntries.push(processed.newCacheEntry);
+        if (processed.newItunesCacheEntry) newItunesCacheEntries.push(processed.newItunesCacheEntry);
+      }
+      cursor += processedChunk.length;
 
-      if (cursor % 5 === 0 || cursor === total) {
-        await supabase
-          .from('decks')
-          .update({
-            report: {
-              ...report,
-              processed: cursor,
-              total,
-              step: 'resolving_years',
-              tracksCache: tracks,
-              playlistName,
-              possiblyTruncatedAt100,
-              playlistImportWarning,
-              processedTracks: accumulated,
-            },
-          })
-          .eq('id', deckId);
-        if (newCacheEntries.length > 0) {
-          await supabase.from('mb_year_cache').upsert(newCacheEntries, { onConflict: 'norm_key' });
-          newCacheEntries.length = 0;
-        }
+      await supabase
+        .from('decks')
+        .update({
+          report: {
+            ...report,
+            processed: cursor,
+            total,
+            step: 'resolving_years',
+            tracksCache: tracks,
+            playlistName,
+            possiblyTruncatedAt100,
+            playlistImportWarning,
+            processedTracks: accumulated,
+          },
+        })
+        .eq('id', deckId);
+      if (newCacheEntries.length > 0) {
+        await supabase.from('mb_year_cache').upsert(newCacheEntries, { onConflict: 'norm_key' });
+        newCacheEntries.length = 0;
+      }
+      if (newItunesCacheEntries.length > 0) {
+        await supabase.from('itunes_match_cache').upsert(newItunesCacheEntries, { onConflict: 'norm_key' });
+        newItunesCacheEntries.length = 0;
       }
     }
     if (newCacheEntries.length > 0) {
       await supabase.from('mb_year_cache').upsert(newCacheEntries, { onConflict: 'norm_key' });
+    }
+    if (newItunesCacheEntries.length > 0) {
+      await supabase.from('itunes_match_cache').upsert(newItunesCacheEntries, { onConflict: 'norm_key' });
     }
 
     if (cursor < total) {
@@ -928,6 +1070,100 @@ async function fetchSpotifyOembedArtwork(spotifyUri: string | null): Promise<str
   }
 }
 
+async function uploadTrackCard(
+  supabase: ReturnType<typeof adminClient>,
+  deckId: string,
+  track: ProcessedTrack
+): Promise<{ card: any | null; excluded: any | null; previewFallbackUsed: boolean }> {
+  const cardId = crypto.randomUUID();
+  let artworkUrl = track.itunesArtworkUrl;
+  const fallbackArtwork = artworkUrl ? Promise.resolve(artworkUrl) : fetchSpotifyOembedArtwork(track.raw.uri);
+  const resolveArtwork = async () => artworkUrl ?? (artworkUrl = await fallbackArtwork);
+  const candidates = [track.raw.spotifyPreviewUrl, track.itunesPreviewUrl].filter(
+    (url, index, all): url is string => Boolean(url) && all.indexOf(url) === index
+  );
+  let lastFailure = 'no preview candidate';
+
+  const buildCard = async (audioUrl: string | null, audioSource: 'spotify_embed' | 'itunes' | 'spotify') => ({
+    id: cardId,
+    deck_id: deckId,
+    title: track.raw.title,
+    artist: track.raw.artist,
+    year: track.finalYear,
+    year_source: track.finalYearSource,
+    year_uncertain: track.yearUncertain,
+    audio_url: audioUrl,
+    audio_source: audioSource,
+    artwork_url: await resolveArtwork(),
+    spotify_uri: track.raw.uri,
+    duration_ms: track.raw.durationMs,
+  });
+
+  const tryUpload = async (sourceUrl: string): Promise<{ path: string; audioSource: 'spotify_embed' | 'itunes' } | null> => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const audioRes = await fetch(sourceUrl);
+        if (!audioRes.ok) throw new Error(`audio fetch failed: ${audioRes.status}`);
+        const audioBuf = await audioRes.arrayBuffer();
+        const audioStorage = inferAudioStorage(audioRes.headers.get('content-type'), sourceUrl);
+        const path = `${deckId}/${cardId}.${audioStorage.extension}`;
+        const { error: uploadError } = await supabase.storage
+          .from('deck-audio')
+          .upload(path, audioBuf, { contentType: audioStorage.contentType, upsert: true });
+        if (uploadError) throw uploadError;
+        return { path, audioSource: sourceUrl === track.raw.spotifyPreviewUrl ? 'spotify_embed' : 'itunes' };
+      } catch (err) {
+        lastFailure = String(err);
+        if (attempt === 0) await sleep(350);
+      }
+    }
+    return null;
+  };
+
+  for (const candidate of candidates) {
+    const uploaded = await tryUpload(candidate);
+    if (uploaded) {
+      return {
+        card: await buildCard(uploaded.path, uploaded.audioSource),
+        excluded: null,
+        previewFallbackUsed: false,
+      };
+    }
+  }
+
+  // Cached Apple preview URLs can occasionally expire. Refresh only after a
+  // failed candidate, then retry once; successful generation stays on the
+  // fast cached path.
+  if (candidates.length > 0) {
+    const refreshed = await searchItunes(track.raw.title, track.raw.artist);
+    if (refreshed.artworkUrl) artworkUrl = refreshed.artworkUrl;
+    if (refreshed.previewUrl && !candidates.includes(refreshed.previewUrl)) {
+      const uploaded = await tryUpload(refreshed.previewUrl);
+      if (uploaded) {
+        return {
+          card: await buildCard(uploaded.path, uploaded.audioSource),
+          excluded: null,
+          previewFallbackUsed: false,
+        };
+      }
+    }
+  }
+
+  if (track.raw.uri) {
+    return {
+      card: await buildCard(null, 'spotify'),
+      excluded: null,
+      previewFallbackUsed: candidates.length > 0,
+    };
+  }
+
+  return {
+    card: null,
+    excluded: { title: track.raw.title, artist: track.raw.artist, reason: 'no_preview', detail: lastFailure },
+    previewFallbackUsed: false,
+  };
+}
+
 // Audio upload phase — also time-boxed and self-chaining for large decks,
 // since fetching+uploading ~360KB per track for 100 tracks is itself
 // non-trivial wall-clock time.
@@ -944,7 +1180,7 @@ async function runAudioUploadPhase(
   // utólag, a riport képernyőn beírhassa a helyes évet, és a track kártyaként bekerülhessen
   // a pakliba (ld. add_manual_year_card) — anélkül ez az adat elveszne, mert a normál
   // audio-upload fázis csak a MÁR feloldott évű trackeken fut végig.
-  const excluded = processed
+  const baseExcluded = processed
     .filter((t) => t.excludeReason)
     .map((t) => {
       const sourceUrl = t.raw.spotifyPreviewUrl ?? t.itunesPreviewUrl;
@@ -972,100 +1208,56 @@ async function runAudioUploadPhase(
   const report = (deckRow?.report ?? {}) as any;
   const uploadCursor: number = report.uploadCursor ?? 0;
 
-  let uploaded = uploadCursor;
   const deckCardRows: any[] = report.deckCardRows ?? [];
+  const uploadExcluded: any[] = report.uploadExcluded ?? [];
+  let previewFallbackCount: number = report.previewFallbackCount ?? 0;
 
-  for (let i = uploadCursor; i < usableTracks.length; i++) {
-    if (Date.now() - startedAt > BATCH_TIME_BUDGET_MS) {
+  let cursor = uploadCursor;
+  while (cursor < usableTracks.length) {
+    if (Date.now() - startedAt > BATCH_TIME_BUDGET_MS - SELF_INVOKE_HEADROOM_MS) {
       await supabase
         .from('decks')
         .update({
-          report: { ...report, step: 'uploading_audio', uploadCursor: i, deckCardRows, excluded, total, processed: total },
+          report: {
+            ...report,
+            step: 'uploading_audio',
+            uploadCursor: cursor,
+            deckCardRows,
+            uploadExcluded,
+            previewFallbackCount,
+            total,
+            processed: total,
+          },
         })
         .eq('id', deckId);
-      await invokeNextBatch(deckId, '', -1, { phase: 'upload', deckId, resumeUploadCursor: i });
+      await invokeNextBatch(deckId, '', -1, { phase: 'upload', deckId, resumeUploadCursor: cursor });
       return;
     }
 
-    const t = usableTracks[i];
-    const sourceUrl = t.raw.spotifyPreviewUrl ?? t.itunesPreviewUrl;
-    if (!sourceUrl && !t.raw.uri) {
-      excluded.push({ title: t.raw.title, artist: t.raw.artist, reason: 'no_preview' });
-      continue;
+    const chunk = usableTracks.slice(cursor, Math.min(cursor + AUDIO_UPLOAD_CONCURRENCY, usableTracks.length));
+    const results = await Promise.all(chunk.map((track) => uploadTrackCard(supabase, deckId, track)));
+    for (const result of results) {
+      if (result.card) deckCardRows.push(result.card);
+      if (result.excluded) uploadExcluded.push(result.excluded);
+      if (result.previewFallbackUsed) previewFallbackCount++;
     }
+    cursor += chunk.length;
 
-    const cardId = crypto.randomUUID();
-    const audioSource = t.raw.spotifyPreviewUrl ? 'spotify_embed' : 'itunes';
-
-    if (!sourceUrl) {
-      try {
-        const artworkUrl = t.itunesArtworkUrl ?? (await fetchSpotifyOembedArtwork(t.raw.uri));
-        deckCardRows.push({
-          id: cardId,
-          deck_id: deckId,
-          title: t.raw.title,
-          artist: t.raw.artist,
-          year: t.finalYear,
-          year_source: t.finalYearSource,
-          year_uncertain: t.yearUncertain,
-          audio_url: null,
-          audio_source: 'spotify',
-          artwork_url: artworkUrl,
-          spotify_uri: t.raw.uri,
-          duration_ms: t.raw.durationMs,
-        });
-        uploaded++;
-      } catch {
-        excluded.push({ title: t.raw.title, artist: t.raw.artist, reason: 'no_preview' });
-      }
-      continue;
-    }
-
-    try {
-      // Borítókép: elsődlegesen az iTunes-keresésből (ami amúgy is lefutott minden
-      // trackre, ld. processTrack) — ha onnan nincs (alacsony match score), a
-      // Spotify nyilvános oembed végpontja a fallback (nem igényel authot). A két
-      // kérés párhuzamosan fut az audio letöltésével, nem növeli a wall-clock időt.
-      const [audioRes, artworkUrl] = await Promise.all([
-        fetch(sourceUrl),
-        t.itunesArtworkUrl ? Promise.resolve(t.itunesArtworkUrl) : fetchSpotifyOembedArtwork(t.raw.uri),
-      ]);
-      if (!audioRes.ok) throw new Error(`audio fetch failed: ${audioRes.status}`);
-      const audioBuf = await audioRes.arrayBuffer();
-      const audioStorage = inferAudioStorage(audioRes.headers.get('content-type'), sourceUrl);
-      const path = `${deckId}/${cardId}.${audioStorage.extension}`;
-      const { error: uploadError } = await supabase.storage
-        .from('deck-audio')
-        .upload(path, audioBuf, { contentType: audioStorage.contentType, upsert: true });
-      if (uploadError) throw uploadError;
-
-      deckCardRows.push({
-        id: cardId,
-        deck_id: deckId,
-        title: t.raw.title,
-        artist: t.raw.artist,
-        year: t.finalYear,
-        year_source: t.finalYearSource,
-        year_uncertain: t.yearUncertain,
-        audio_url: path,
-        audio_source: audioSource,
-        artwork_url: artworkUrl,
-        spotify_uri: t.raw.uri,
-        duration_ms: t.raw.durationMs,
-      });
-      uploaded++;
-    } catch {
-      excluded.push({ title: t.raw.title, artist: t.raw.artist, reason: 'no_preview' });
-    }
-
-    if (uploaded % 5 === 0) {
-      await supabase
-        .from('decks')
-        .update({
-          report: { ...report, step: 'uploading_audio', uploadCursor: i + 1, deckCardRows, excluded, total, processed: total },
-        })
-        .eq('id', deckId);
-    }
+    await supabase
+      .from('decks')
+      .update({
+        report: {
+          ...report,
+          step: 'uploading_audio',
+          uploadCursor: cursor,
+          deckCardRows,
+          uploadExcluded,
+          previewFallbackCount,
+          total,
+          processed: total,
+        },
+      })
+      .eq('id', deckId);
   }
 
   // All uploads attempted — finalize the deck.
@@ -1081,6 +1273,7 @@ async function runAudioUploadPhase(
   }
 
   const usableCount = deckCardRows.length;
+  const excluded = [...baseExcluded, ...uploadExcluded];
   const coveragePct = total > 0 ? Math.round((usableCount / total) * 1000) / 10 : 0;
   const uncertainYearCount = deckCardRows.filter((c) => c.year_uncertain).length;
   const spotifyOnlyCount = deckCardRows.filter((c) => c.audio_source === 'spotify').length;
@@ -1099,6 +1292,7 @@ async function runAudioUploadPhase(
         excluded,
         uncertainYearCount,
         spotifyOnlyCount,
+        previewFallbackCount,
         meetsMinimum: usableCount >= MIN_USABLE_CARDS,
       },
     })

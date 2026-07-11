@@ -17,7 +17,10 @@ export function normalize(str: string | null | undefined): string {
   s = s.replace(/\([^)]*\)/g, ' ');
   s = s.replace(/\[[^\]]*\]/g, ' ');
   // remove trailing " - Remastered", " - Live", " - Radio Edit", etc.
-  s = s.replace(/\s*-\s*(remaster(ed)?( \d{4})?|live.*|radio edit|single version|album version|mono|stereo|\d{4} remaster.*|bonus track.*|feat\..*|from .*)$/gi, '');
+  s = s.replace(
+    /\s*-\s*(remaster(ed)?( \d{4})?|live.*|radio edit|single version|album version|original version( \d{4})?|mono|stereo|\d{4} (remaster|remix).*|bonus track.*|feat\..*|from .*)$/gi,
+    ''
+  );
   s = s.replace(/feat\.?.*$/gi, '');
   s = s.replace(/[^a-z0-9 ]/g, ' ');
   s = s.replace(/\s+/g, ' ').trim();
@@ -28,6 +31,13 @@ export function normalize(str: string | null | undefined): string {
 export function similarity(a: string | null | undefined, b: string | null | undefined): number {
   const an = normalize(a);
   const bn = normalize(b);
+  if (!an && !bn) return 1;
+  if (!an || !bn) return 0;
+  if (an === bn) return 1;
+  return Math.max(levenshteinSimilarity(an, bn), levenshteinSimilarity(an.replace(/\s/g, ''), bn.replace(/\s/g, '')));
+}
+
+function levenshteinSimilarity(an: string, bn: string): number {
   if (!an && !bn) return 1;
   if (!an || !bn) return 0;
   if (an === bn) return 1;
