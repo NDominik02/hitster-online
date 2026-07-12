@@ -1,6 +1,7 @@
 "use client";
 
 import { AppButton } from "../system/AppButton";
+import { ActionIconButton } from "../system/ActionIconButton";
 import type { Deck } from "../../lib/game/types";
 
 export interface DeckLibraryProps {
@@ -76,32 +77,36 @@ export function DeckLibrary({
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               {onPreview && (
-                <AppButton size="sm" variant="secondary" onClick={() => onPreview(deck)}>
-                  Megnézem
-                </AppButton>
+                <ActionIconButton
+                  icon="eye"
+                  label="Megnézem"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => onPreview(deck)}
+                />
               )}
               <AppButton size="sm" variant="secondary" onClick={() => onSelect(deck)}>
                 Kiválasztom
               </AppButton>
               {canManage && onRename && (
-                <AppButton
+                <ActionIconButton
+                  icon="pen"
+                  label={renamingDeckId === deck.id ? "Átnevezés folyamatban" : "Átnevezés"}
                   size="sm"
                   variant="secondary"
                   disabled={renamingDeckId === deck.id}
                   onClick={() => onRename(deck)}
-                >
-                  {renamingDeckId === deck.id ? "Mentés..." : "Átnevezés"}
-                </AppButton>
+                />
               )}
               {canManage && onDelete && (
-                <AppButton
+                <ActionIconButton
+                  icon="trash"
+                  label={deletingDeckId === deck.id ? "Törlés folyamatban" : "Törlés"}
                   size="sm"
                   variant="danger"
                   disabled={deletingDeckId === deck.id}
                   onClick={() => onDelete(deck)}
-                >
-                  {deletingDeckId === deck.id ? "Törlés..." : "Törlés"}
-                </AppButton>
+                />
               )}
             </div>
           </div>

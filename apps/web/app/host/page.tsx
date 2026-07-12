@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppButton } from "@/components/system/AppButton";
+import { ActionIconButton } from "@/components/system/ActionIconButton";
 import { SegmentedControl } from "@/components/system/SegmentedControl";
 import { GenerationProgress } from "@/components/game/GenerationProgress";
 import { CoverageReport } from "@/components/game/CoverageReport";
@@ -501,9 +502,13 @@ export default function HostCreatePage() {
                             </p>
                           </div>
                           <div className="flex shrink-0 flex-wrap items-center gap-2">
-                            <AppButton size="sm" variant="secondary" onClick={() => setPreviewDeck(pl)}>
-                              Megnézem
-                            </AppButton>
+                            <ActionIconButton
+                              icon="eye"
+                              label="Megnézem"
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => setPreviewDeck(pl)}
+                            />
                             <AppButton size="sm" variant="secondary" onClick={() => handleSelectFeatured(pl)}>
                               Kiválasztom
                             </AppButton>
