@@ -107,6 +107,7 @@ export const mockRound: RoundPublic = {
   outcome: null,
   placingDeadline: new Date(Date.now() + 47_000).toISOString(),
   stealDeadline: null,
+  nextReadyPlayerIds: [],
   revealedCard: null,
 };
 

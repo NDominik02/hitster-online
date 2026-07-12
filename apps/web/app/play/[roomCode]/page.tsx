@@ -22,11 +22,13 @@ import {
   joinRoom,
   placeCard,
   registerSteal,
+  readyNextRound,
   leaveRoom,
   fetchPlayers,
   fetchRoundPublic,
   getTimeline,
 } from "@/lib/supabase/functions";
+import type { ReadyNextRoundResponse } from "@/lib/supabase/functions";
 import { adaptRoundPublic } from "@/lib/supabase/adapters";
 import { useRoomChannel } from "@/lib/game/useRoomChannel";
 import { vibrateOutcome } from "@/lib/haptics";
@@ -94,6 +96,8 @@ export default function PlayRoomPage() {
   const [stealSubmitting, setStealSubmitting] = useState(false);
   const [stealError, setStealError] = useState<string | null>(null);
   const [stealCount, setStealCount] = useState(0);
+  const [nextReadySubmitting, setNextReadySubmitting] = useState(false);
+  const [nextReadyError, setNextReadyError] = useState<string | null>(null);
 
   // F2 (S25, AC25.5) — "Anna kimaradt, mert lecsatlakozott" jelzés a turn_auto_skipped eventből.
   const [autoSkipBanner, setAutoSkipBanner] = useState<string[] | null>(null);
@@ -212,6 +216,14 @@ export default function PlayRoomPage() {
       if (!roomId) return;
       if (event === "player_joined") {
         await refreshPlayers(roomId);
+      } else if (event === "player_kicked") {
+        const kickedPlayerId = (payload as { playerId?: string })?.playerId;
+        if (kickedPlayerId === me?.id) {
+          window.alert("A host eltávolított ebből a szobából.");
+          router.push("/");
+          return;
+        }
+        await refreshPlayers(roomId);
       } else if (event === "game_started" || event === "round_started" || event === "turn_advanced") {
         await refreshPlayers(roomId);
         const rid = (payload as { roundId?: string })?.roundId;
@@ -222,6 +234,8 @@ export default function PlayRoomPage() {
           setStealCount(0);
           setStealSubmittedForRound(null);
           setStealError(null);
+          setNextReadySubmitting(false);
+          setNextReadyError(null);
           if (me) setMyTimeline(await refreshTimelineFor(roomId, me.id));
           if (r) setActiveTimeline(await refreshTimelineFor(roomId, r.activePlayerId));
         }
@@ -247,6 +261,13 @@ export default function PlayRoomPage() {
         // kliensek élesben "beragadtak" a régi eredménynél) — ugyanúgy frissítünk, mint reveal-nél.
         const rid = (payload as { roundId?: string })?.roundId ?? round?.id;
         if (rid) await applyRevealedRound(rid);
+      } else if (event === "next_ready_updated") {
+        const readyPayload = payload as { roundId?: string; readyPlayerIds?: string[] };
+        if (!readyPayload.roundId || !readyPayload.readyPlayerIds) return;
+        setRound((current) => {
+          if (!current || current.id !== readyPayload.roundId) return current;
+          return { ...current, nextReadyPlayerIds: readyPayload.readyPlayerIds ?? [] };
+        });
       } else if (event === "game_finished") {
         setRoomFinished(true);
         await refreshPlayers(roomId);
@@ -389,6 +410,59 @@ export default function PlayRoomPage() {
     }
   }
 
+  async function applyReadyAdvance(advance: NonNullable<ReadyNextRoundResponse["advance"]>) {
+    if (!roomId) return;
+    if (advance.next === "finished") {
+      setRoomFinished(true);
+      setWinnerPlayerIds(advance.winnerPlayerIds);
+      setGameStats(advance.stats ?? []);
+      await refreshPlayers(roomId);
+      await broadcastEvent("game_finished", { winnerPlayerIds: advance.winnerPlayerIds, stats: advance.stats ?? [] });
+      return;
+    }
+    if (advance.next === "paused") {
+      setNextReadyError("A szerver szerint nincs jelen aktív játékos. A host újra tudja próbálni.");
+      return;
+    }
+
+    if (advance.skipped && advance.skipped.length > 0) {
+      await broadcastEvent("turn_auto_skipped", { skipped: advance.skipped });
+    }
+    await broadcastEvent("turn_advanced", { roundId: advance.roundId, activePlayerId: advance.activePlayerId });
+    await refreshPlayers(roomId);
+    const r = await refreshRound(advance.roundId);
+    setPlacedOutcome(null);
+    setPlacingSubmitting(false);
+    setStealCount(0);
+    setStealSubmittedForRound(null);
+    setStealError(null);
+    setNextReadyError(null);
+    if (me) setMyTimeline(await refreshTimelineFor(roomId, me.id));
+    if (r) setActiveTimeline(await refreshTimelineFor(roomId, r.activePlayerId));
+  }
+
+  async function handleReadyNextRound() {
+    if (!roomId || !round || round.phase !== "reveal" || nextReadySubmitting) return;
+    setNextReadySubmitting(true);
+    setNextReadyError(null);
+    try {
+      const result = await readyNextRound(roomId, round.id);
+      setRound((current) =>
+        current?.id === round.id ? { ...current, nextReadyPlayerIds: result.readyPlayerIds } : current
+      );
+      await broadcastEvent("next_ready_updated", {
+        roundId: round.id,
+        readyPlayerIds: result.readyPlayerIds,
+        waitingPlayerIds: result.waitingPlayerIds,
+      });
+      if (result.advance) await applyReadyAdvance(result.advance);
+    } catch (err) {
+      setNextReadyError(err instanceof Error ? err.message : "Nem sikerült jelezni, hogy készen állsz.");
+    } finally {
+      setNextReadySubmitting(false);
+    }
+  }
+
   async function handleLeaveToMenu() {
     if (round && round.phase !== "reveal" && round.phase !== "done" && !window.confirm("Biztosan kilépsz a szobából?")) return;
     if (roomId) {
@@ -501,6 +575,12 @@ export default function PlayRoomPage() {
         ? round.revealedCard.guess
         : null;
     const myStealResult = round.revealedCard.steals?.find((s) => s.playerId === me.id) ?? null;
+    const readyPlayerIds = new Set(round.nextReadyPlayerIds ?? []);
+    const activePlayers = players;
+    const waitingPlayers = activePlayers.filter((player) => !readyPlayerIds.has(player.id));
+    const readyCount = activePlayers.filter((player) => readyPlayerIds.has(player.id)).length;
+    const iAmReady = readyPlayerIds.has(me.id);
+    const waitingNames = waitingPlayers.map((player) => player.id === me.id ? "te" : player.name).join(", ");
     return (
       <div className="flex flex-col flex-1 min-h-screen">
         <div className="flex-1 flex flex-col items-center justify-center px-6 py-8 gap-6 max-w-sm mx-auto w-full text-center">
@@ -549,7 +629,31 @@ export default function PlayRoomPage() {
             <h2 className="eyebrow mb-2">A te idővonalad</h2>
             <Timeline cards={myTimeline} />
           </div>
-          <p className="text-text-muted text-sm" aria-live="polite">
+          <div className="w-full rounded-[var(--radius-card)] border-2 border-border bg-surface-2 px-4 py-4 text-left">
+            <div className="flex items-center justify-between gap-3">
+              <p className="font-semibold">Következő kör</p>
+              <p className="text-sm text-text-muted" aria-live="polite">
+                {readyCount}/{activePlayers.length} kész
+              </p>
+            </div>
+            <AppButton
+              className="mt-3"
+              fullWidth
+              disabled={iAmReady || nextReadySubmitting}
+              onClick={handleReadyNextRound}
+            >
+              {nextReadySubmitting ? "Jelzés..." : iAmReady ? "Készen állsz" : "Kész vagyok, jöhet ▶"}
+            </AppButton>
+            <p className="mt-3 text-sm text-text-muted" aria-live="polite">
+              {waitingPlayers.length === 0 ? "Mindenki kész, indul a következő kör..." : `Várunk még: ${waitingNames}`}
+            </p>
+            {nextReadyError && (
+              <p role="alert" className="mt-2 text-sm text-danger">
+                {nextReadyError}
+              </p>
+            )}
+          </div>
+          <p className="hidden" aria-hidden="true">
             «következő kör…»
           </p>
         </div>
@@ -615,7 +719,7 @@ export default function PlayRoomPage() {
         <div className="flex-1 flex flex-col px-6 py-6 gap-6 max-w-sm mx-auto w-full">
           <div className="flex items-center justify-between">
             <div>
-              <PlayerBadge name={activePlayer.name} color={activePlayer.color} state="active" tokens={activePlayer.tokens} />
+              <PlayerBadge name={activePlayer.name} color={activePlayer.color} state="active" />
               <p className="text-text-muted text-sm mt-1">
                 {stealing ? "«lerakta a kártyát»" : "«húzza a kártyát…»"}
               </p>

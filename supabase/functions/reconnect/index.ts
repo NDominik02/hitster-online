@@ -1,8 +1,4 @@
-// reconnect — ARCHITECTURE.md 3.10 + 7.
-// Caller: player (or host, using the room code they created).
-// Looks up an existing players row by (room, auth_uid). No new row is ever
-// created here (AC15.3: no duplicates) — if there's no existing player, the
-// client is told to go through join_room instead.
+// reconnect - room-code based host/player resume.
 
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
@@ -19,10 +15,10 @@ Deno.serve(async (req: Request) => {
   try {
     body = await req.json();
   } catch {
-    return errorResponse('invalid_body', 'Érvénytelen kérés.', 400);
+    return errorResponse('invalid_body', 'Ervenytelen keres.', 400);
   }
   const code = (body.code ?? '').toUpperCase().trim();
-  if (!code || code.length !== 4) return errorResponse('invalid_code', 'Érvénytelen szobakód.', 400);
+  if (!code || code.length !== 4) return errorResponse('invalid_code', 'Ervenytelen szobakod.', 400);
 
   const supabase = adminClient();
 
@@ -33,10 +29,14 @@ Deno.serve(async (req: Request) => {
     .neq('status', 'finished')
     .maybeSingle();
 
-  if (roomError || !room) return errorResponse('room_not_found', 'Nem található ilyen kódú szoba.', 404);
+  if (roomError || !room) return errorResponse('room_not_found', 'Nem talalhato ilyen kodu szoba.', 404);
 
-  // Is the caller the host?
-  const { data: hostRoom } = await supabase.from('rooms').select('id').eq('id', room.id).eq('host_uid', callerUid).maybeSingle();
+  const { data: hostRoom } = await supabase
+    .from('rooms')
+    .select('id')
+    .eq('id', room.id)
+    .eq('host_uid', callerUid)
+    .maybeSingle();
 
   if (hostRoom) {
     return jsonResponse({
@@ -54,8 +54,9 @@ Deno.serve(async (req: Request) => {
     .eq('auth_uid', callerUid)
     .maybeSingle();
 
-  if (playerError) return errorResponse('db_error', 'Hiba a lekérdezés közben.', 500);
-  if (!player) return errorResponse('not_a_member', 'Ehhez a szobához még nem csatlakoztál.', 404);
+  if (playerError) return errorResponse('db_error', 'Hiba a lekerdezes kozben.', 500);
+  if (!player) return errorResponse('not_a_member', 'Ehhez a szobahoz meg nem csatlakoztal.', 404);
+  if (player.kicked_at) return errorResponse('player_kicked', 'A host eltavolitott ebbol a szobabol.', 403);
 
   await supabase
     .from('players')

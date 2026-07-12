@@ -61,6 +61,7 @@ Deno.serve(async (req: Request) => {
     .update({ connected: body.connected, last_seen_at: new Date().toISOString() })
     .eq('id', body.playerId)
     .eq('room_id', body.roomId)
+    .is('kicked_at', null)
     .select('id, connected')
     .maybeSingle();
 

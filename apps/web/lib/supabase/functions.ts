@@ -25,6 +25,17 @@ import type {
   TimelineCardPublic,
 } from "../game/types";
 
+export type ReadyNextRoundResponse = {
+  ok: true;
+  readyPlayerIds: string[];
+  waitingPlayerIds: string[];
+  allReady: boolean;
+  advance?:
+    | { ok: true; next: "draw"; roundId: string; activePlayerId?: string; skipped?: string[] }
+    | { ok: true; next: "finished"; winnerPlayerIds: string[]; stats?: PlayerGameStats[] }
+    | { ok: true; next: "paused"; reason: string };
+};
+
 async function invoke<T>(name: string, body: Record<string, unknown>): Promise<T> {
   const client = getSupabaseClient();
   const { data, error } = await client.functions.invoke(name, { body });
@@ -345,6 +356,10 @@ export async function nextTurn(roomId: string) {
   >("next_turn", { roomId });
 }
 
+export async function readyNextRound(roomId: string, roundId: string): Promise<ReadyNextRoundResponse> {
+  return invoke<ReadyNextRoundResponse>("ready_next_round", { roomId, roundId });
+}
+
 /**
  * set_presence (ARCHITECTURE 11.6.6, F2-D9) — HOST-ONLY. A host figyeli a Supabase Realtime
  * Presence-t minden játékosra, és amikor valakinek a jelenléte ~15 mp-ig hiányzik, ezt hívja
@@ -358,6 +373,13 @@ export async function setPresence(
   connected: boolean
 ): Promise<{ ok: true; playerId: string; connected: boolean }> {
   return invoke("set_presence", { roomId, playerId, connected });
+}
+
+export async function kickPlayer(
+  roomId: string,
+  playerId: string
+): Promise<{ ok: true; playerId: string; kickedAt?: string; alreadyKicked?: boolean; roundResolved?: boolean; roundId?: string | null }> {
+  return invoke("kick_player", { roomId, playerId });
 }
 
 /** reconnect (ARCHITECTURE 3.10 / 7.2 / BACKEND-NOTES 3.) */
@@ -454,6 +476,7 @@ export async function fetchPlayers(roomId: string): Promise<Player[]> {
     .from("players")
     .select("*")
     .eq("room_id", roomId)
+    .is("kicked_at", null)
     .order("seat_order", { ascending: true });
   if (error) throw error;
   return (data ?? []).map(adaptPlayer);

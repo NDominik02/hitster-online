@@ -49,6 +49,7 @@ Deno.serve(async (req: Request) => {
     .from('players')
     .select('id, seat_order')
     .eq('room_id', room.id)
+    .is('kicked_at', null)
     .order('seat_order', { ascending: true });
 
   if (playersError || !players) return errorResponse('db_error', 'Nem sikerült a játékosok lekérdezése.', 500);
@@ -92,7 +93,8 @@ Deno.serve(async (req: Request) => {
   await supabase
     .from('players')
     .update({ tokens: 2 })
-    .eq('room_id', room.id);
+    .eq('room_id', room.id)
+    .is('kicked_at', null);
 
   const firstPlayerId = players[0].id;
   const draw = await drawCard(supabase, room.id, firstPlayerId);

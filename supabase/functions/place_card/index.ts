@@ -65,6 +65,7 @@ Deno.serve(async (req: Request) => {
     .from('players')
     .select('auth_uid')
     .eq('id', round.active_player_id)
+    .is('kicked_at', null)
     .single();
 
   if (!activePlayer || activePlayer.auth_uid !== callerUid) {

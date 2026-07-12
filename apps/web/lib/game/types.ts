@@ -39,6 +39,7 @@ export interface Player {
   color: PlayerColorId;
   seatOrder: number;
   connected: boolean;
+  kickedAt?: string | null;
   /** F2-kész mező, F1-ben nem jelenítjük meg (DESIGN ⟨F2⟩) */
   tokens?: number;
 }
@@ -81,6 +82,7 @@ export interface RoundPublic {
   outcome: CardOutcome | null;
   placingDeadline: string | null; // ISO timestamp
   stealDeadline: string | null;
+  nextReadyPlayerIds: string[];
   /** Csak reveal/done fázisban töltött — a szerver oldali round_public view logikáját tükrözi. */
   revealedCard: RevealedCard | null;
 }

@@ -6,7 +6,6 @@ import { useParams, useRouter } from "next/navigation";
 import { AppButton } from "@/components/system/AppButton";
 import { RoomCodeBadge } from "@/components/lobby/RoomCodeBadge";
 import { QRCodePanel } from "@/components/lobby/QRCodePanel";
-import { PlayerList } from "@/components/lobby/PlayerList";
 import { MysteryCard } from "@/components/game/MysteryCard";
 import { AudioProgressBar } from "@/components/game/AudioProgressBar";
 import { AudioUnlockOverlay } from "@/components/game/AudioUnlockOverlay";
@@ -28,6 +27,7 @@ import {
   disputeRound,
   overrideGuess,
   setPresence,
+  kickPlayer,
   nextTurn,
   fetchPlayers,
   fetchRoundPublic,
@@ -141,6 +141,9 @@ export default function HostRoomPage() {
 
   // F2 (S25, AC25.5) — "Anna kimaradt, mert lecsatlakozott" toast a turn_auto_skipped eventből.
   const [autoSkipNames, setAutoSkipNames] = useState<string[] | null>(null);
+  const lastHostAdvancedRoundRef = useRef<string | null>(null);
+  const [kickCandidate, setKickCandidate] = useState<Player | null>(null);
+  const [kickSubmitting, setKickSubmitting] = useState(false);
 
   // F2 (S25, F2-D9/F2-D10) — presence-alapú auto-skip bekötése. A `players` state-et ref-ben is
   // tartjuk (a setInterval closure elavulna a puszta state-re hivatkozva — ugyanaz a minta, mint
@@ -264,6 +267,9 @@ export default function HostRoomPage() {
       if (!roomId) return;
       if (event === "player_joined") {
         await refreshPlayers(roomId);
+      } else if (event === "player_kicked") {
+        await refreshPlayers(roomId);
+        await refreshTimelines(roomId);
       } else if (event === "game_started" || event === "round_started") {
         setRoomStatus("playing");
         const rid = (payload as { roundId?: string })?.roundId;
@@ -293,7 +299,25 @@ export default function HostRoomPage() {
         await refreshPlayers(roomId);
       } else if (event === "turn_advanced") {
         const rid = (payload as { roundId?: string })?.roundId;
-        if (rid) await refreshRound(rid);
+        if (rid) {
+          if (lastHostAdvancedRoundRef.current === rid) {
+            lastHostAdvancedRoundRef.current = null;
+            return;
+          }
+          await stopPlayback();
+          setAudioUrl(null);
+          setPreviewPlaying(false);
+          setCurrentPlaybackSec(0);
+          setDragGhostIndex(null);
+          await beginRound(rid);
+        }
+      } else if (event === "next_ready_updated") {
+        const readyPayload = payload as { roundId?: string; readyPlayerIds?: string[] };
+        if (!readyPayload.roundId || !readyPayload.readyPlayerIds) return;
+        setRound((current) => {
+          if (!current || current.id !== readyPayload.roundId) return current;
+          return { ...current, nextReadyPlayerIds: readyPayload.readyPlayerIds ?? [] };
+        });
       } else if (event === "game_finished") {
         setRoomStatus("finished");
         const finishedPayload = payload as { winnerPlayerIds?: string[]; stats?: PlayerGameStats[] };
@@ -492,6 +516,28 @@ export default function HostRoomPage() {
     }
   }
 
+  async function handleConfirmKickPlayer() {
+    if (!roomId || !kickCandidate || kickSubmitting) return;
+    setKickSubmitting(true);
+    try {
+      const result = await kickPlayer(roomId, kickCandidate.id);
+      await refreshPlayers(roomId);
+      await refreshTimelines(roomId);
+      await broadcastEvent("player_kicked", { playerId: kickCandidate.id });
+      if (result.roundResolved && result.roundId) {
+        await stopPlayback();
+        await refreshRound(result.roundId);
+        await broadcastEvent("round_revealed", { roundId: result.roundId });
+        await broadcastEvent("steal_window_closed", { roundId: result.roundId });
+      }
+      setKickCandidate(null);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Nem sikerult kidobni a jatekost.");
+    } finally {
+      setKickSubmitting(false);
+    }
+  }
+
   /**
    * F2-D12 (2026-07-04) — a host beírja a szám tényleges évét, a szerver újraértékeli ez ellen
    * a kört (kié legyen a kártya), a kör MARAD reveal fázisban. A "Következő kör" gomb ezután a
@@ -575,6 +621,7 @@ export default function HostRoomPage() {
           setAutoSkipNames(names);
           await broadcastEvent("turn_auto_skipped", { skipped: res.skipped });
         }
+        lastHostAdvancedRoundRef.current = res.roundId;
         await broadcastEvent("turn_advanced", { roundId: res.roundId });
         await stopPlayback();
         setAudioUrl(null);
@@ -620,7 +667,7 @@ export default function HostRoomPage() {
         console.warn("[host round-state check]", err);
       }
     },
-    [round?.phase, round?.placement, round?.stealDeadline, roomId, refreshRound, refreshTimelines]
+    [round, roomId, refreshRound, refreshTimelines]
   );
 
   useEffect(() => {
@@ -924,6 +971,28 @@ export default function HostRoomPage() {
          */}
         <audio ref={audioRef} className="hidden" />
 
+        {kickCandidate && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4" role="dialog" aria-modal="true">
+            <div className="w-full max-w-md rounded-[var(--radius-card)] border-2 border-border bg-surface px-6 py-5 shadow-2xl">
+              <h2 className="text-xl font-bold">Játékos kidobása</h2>
+              <p className="mt-3 text-text-muted">
+                Biztosan kidobod őt: <span className="font-semibold text-text">{kickCandidate.name}</span>?
+              </p>
+              <p className="mt-2 text-sm text-text-muted">
+                Ezután nem kerül sorra, és a körváltás már nélküle folytatódik.
+              </p>
+              <div className="mt-5 flex flex-wrap justify-end gap-3">
+                <AppButton variant="secondary" disabled={kickSubmitting} onClick={() => setKickCandidate(null)}>
+                  Mégse
+                </AppButton>
+                <AppButton variant="danger" disabled={kickSubmitting} onClick={handleConfirmKickPlayer}>
+                  {kickSubmitting ? "Kidobás..." : "Igen, kidobom"}
+                </AppButton>
+              </div>
+            </div>
+          </div>
+        )}
+
         {roomStatus === "lobby" && (
           <section className="space-y-8 text-center">
             <h1 className="text-2xl font-bold">CSATLAKOZZ A JÁTÉKHOZ!</h1>
@@ -953,7 +1022,21 @@ export default function HostRoomPage() {
               <h2 className="eyebrow mb-3">
                 Csatlakozott játékosok ({players.length})
               </h2>
-              <PlayerList players={players} layout="grid" />
+              <ul className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {players.map((player) => (
+                  <li key={player.id} className="flex flex-col items-center gap-2 rounded-[var(--radius-card)] bg-surface-2 px-3 py-3">
+                    <PlayerBadge
+                      name={player.name}
+                      color={player.color}
+                      state={!player.connected ? "offline" : "online"}
+                      size="md"
+                    />
+                    <AppButton size="sm" variant="danger" onClick={() => setKickCandidate(player)}>
+                      Kidobás
+                    </AppButton>
+                  </li>
+                ))}
+              </ul>
             </div>
 
             <div>
@@ -1049,13 +1132,17 @@ export default function HostRoomPage() {
               <h2 className="eyebrow mb-3">Játékosok idővonalai</h2>
               <div className="space-y-2">
                 {players.map((p) => (
-                  <PlayerTimelineRow
-                    key={p.id}
-                    player={p}
-                    cards={timelines[p.id] ?? []}
-                    isActive={p.id === activePlayer?.id}
-                    ghostSlotIndex={p.id === activePlayer?.id ? dragGhostIndex : null}
-                  />
+                  <div key={p.id} className="grid gap-2 md:grid-cols-[1fr_auto] md:items-center">
+                    <PlayerTimelineRow
+                      player={p}
+                      cards={timelines[p.id] ?? []}
+                      isActive={p.id === activePlayer?.id}
+                      ghostSlotIndex={p.id === activePlayer?.id ? dragGhostIndex : null}
+                    />
+                    <AppButton size="sm" variant="danger" onClick={() => setKickCandidate(p)}>
+                      Kidobás
+                    </AppButton>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1208,7 +1295,28 @@ export default function HostRoomPage() {
               );
             })()}
 
-            <p className="text-text-muted text-sm" aria-live="polite">
+            {(() => {
+              const readyIds = new Set(round.nextReadyPlayerIds ?? []);
+              const activePlayers = players;
+              const readyPlayers = activePlayers.filter((player) => readyIds.has(player.id));
+              const waitingPlayers = activePlayers.filter((player) => !readyIds.has(player.id));
+              const waitingText = waitingPlayers.length > 0 ? waitingPlayers.map((player) => player.name).join(", ") : "senkire";
+              return (
+                <div className="w-full max-w-3xl rounded-[var(--radius-card)] border-2 border-border bg-surface-2 px-6 py-5 text-left">
+                  <div className="flex flex-wrap items-baseline justify-between gap-3">
+                    <p className="text-xl md:text-2xl font-bold">Játékosok készen: {readyPlayers.length}/{activePlayers.length}</p>
+                    <p className="text-sm md:text-base text-text-muted" aria-live="polite">
+                      Host gombbal azonnal mehet tovább.
+                    </p>
+                  </div>
+                  <p className="mt-2 text-lg md:text-xl text-text-muted">
+                    Várunk még: <span className="font-semibold text-text">{waitingText}</span>
+                  </p>
+                </div>
+              );
+            })()}
+
+            <p className="hidden" aria-hidden="true">
               «következő kör…»
             </p>
 
@@ -1270,12 +1378,11 @@ export default function HostRoomPage() {
 
         {roomStatus === "paused" && (
           <section className="flex flex-col items-center gap-6 py-12 text-center">
-            <h2 className="text-2xl font-bold">⏸ A parti szünetel</h2>
             <p className="text-text-muted max-w-md">
-              A szerver úgy látja, senki nincs jelen épp — várd meg, amíg a játékosok
-              visszatérnek (a jelzés magától frissül néhány másodperc múlva), vagy próbáld
-              újra most.
+              Nincs aktiv jatekos, akinek tovabb lehetne adni a kort. Hivj vissza valakit,
+              vagy folytasd akkor, ha maradt legalabb egy nem kidobott jatekos.
             </p>
+            <h2 className="text-2xl font-bold">⏸ A parti szünetel</h2>
             <AppButton disabled={advancingTurn} onClick={handleNextTurn}>
               {advancingTurn ? "Próbálkozás…" : "Újrapróbálom ▶"}
             </AppButton>

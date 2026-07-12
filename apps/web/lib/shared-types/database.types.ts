@@ -152,6 +152,7 @@ export type Database = {
           connected: boolean
           id: string
           joined_at: string
+          kicked_at: string | null
           last_seen_at: string
           missed_turns: number
           name: string
@@ -165,6 +166,7 @@ export type Database = {
           connected?: boolean
           id?: string
           joined_at?: string
+          kicked_at?: string | null
           last_seen_at?: string
           missed_turns?: number
           name: string
@@ -178,6 +180,7 @@ export type Database = {
           connected?: boolean
           id?: string
           joined_at?: string
+          kicked_at?: string | null
           last_seen_at?: string
           missed_turns?: number
           name?: string
@@ -269,6 +272,7 @@ export type Database = {
           created_at: string
           id: string
           name_guess: Json | null
+          next_ready_player_ids: string[]
           outcome: Database["public"]["Enums"]["card_outcome"] | null
           phase: Database["public"]["Enums"]["round_phase"]
           placement: number | null
@@ -285,6 +289,7 @@ export type Database = {
           created_at?: string
           id?: string
           name_guess?: Json | null
+          next_ready_player_ids?: string[]
           outcome?: Database["public"]["Enums"]["card_outcome"] | null
           phase?: Database["public"]["Enums"]["round_phase"]
           placement?: number | null
@@ -301,6 +306,7 @@ export type Database = {
           created_at?: string
           id?: string
           name_guess?: Json | null
+          next_ready_player_ids?: string[]
           outcome?: Database["public"]["Enums"]["card_outcome"] | null
           phase?: Database["public"]["Enums"]["round_phase"]
           placement?: number | null
@@ -428,6 +434,7 @@ export type Database = {
         Row: {
           active_player_id: string | null
           id: string | null
+          next_ready_player_ids: string[] | null
           outcome: Database["public"]["Enums"]["card_outcome"] | null
           phase: Database["public"]["Enums"]["round_phase"] | null
           placement: number | null
@@ -440,6 +447,7 @@ export type Database = {
         Insert: {
           active_player_id?: string | null
           id?: string | null
+          next_ready_player_ids?: string[] | null
           outcome?: Database["public"]["Enums"]["card_outcome"] | null
           phase?: Database["public"]["Enums"]["round_phase"] | null
           placement?: number | null
@@ -452,6 +460,7 @@ export type Database = {
         Update: {
           active_player_id?: string | null
           id?: string | null
+          next_ready_player_ids?: string[] | null
           outcome?: Database["public"]["Enums"]["card_outcome"] | null
           phase?: Database["public"]["Enums"]["round_phase"] | null
           placement?: number | null
@@ -501,6 +510,10 @@ export type Database = {
       }
       is_room_host: { Args: { p_room_id: string }; Returns: boolean }
       is_room_member: { Args: { p_room_id: string }; Returns: boolean }
+      mark_next_round_ready: {
+        Args: { p_round_id: string; p_player_id: string }
+        Returns: string[]
+      }
     }
     Enums: {
       card_outcome: "correct" | "wrong" | "timeout" | "disputed"

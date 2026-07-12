@@ -20,10 +20,12 @@ import type { DragBroadcastPayload } from "./types";
 
 export type RoomChannelEvent =
   | "player_joined"
+  | "player_kicked"
   | "game_started"
   | "round_started"
   | "card_placed"
   | "round_revealed"
+  | "next_ready_updated"
   | "turn_advanced"
   | "game_finished"
   // F2 (ARCHITECTURE 11.8) — a 15 mp-es steal-ablak eventjei. A payloadok SOSEM tartalmaznak

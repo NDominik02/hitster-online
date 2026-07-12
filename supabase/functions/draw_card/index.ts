@@ -63,6 +63,7 @@ Deno.serve(async (req: Request) => {
     .from('players')
     .select('id, seat_order')
     .eq('room_id', room.id)
+    .is('kicked_at', null)
     .order('seat_order', { ascending: true });
 
   if (!players || players.length === 0) return errorResponse('no_players', 'Nincsenek játékosok.', 422);

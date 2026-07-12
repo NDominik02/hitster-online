@@ -61,6 +61,9 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (existingPlayer) {
+      if (existingPlayer.kicked_at) {
+        return errorResponse('player_kicked', 'A host eltavolitott ebbol a szobabol.', 403);
+      }
       return jsonResponse({
         roomId: room.id,
         playerId: existingPlayer.id,
@@ -73,7 +76,8 @@ Deno.serve(async (req: Request) => {
   const { count: playerCount } = await supabase
     .from('players')
     .select('id', { count: 'exact', head: true })
-    .eq('room_id', room.id);
+    .eq('room_id', room.id)
+    .is('kicked_at', null);
 
   const maxPlayers = isPassAndPlay ? MAX_PLAYERS_PASS_AND_PLAY : MAX_PLAYERS;
 

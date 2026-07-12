@@ -60,6 +60,7 @@ Deno.serve(async (req: Request) => {
     .select('id, seat_order, auth_uid')
     .eq('room_id', round.room_id)
     .eq('auth_uid', callerUid)
+    .is('kicked_at', null)
     .maybeSingle();
 
   if (!callerPlayer) return errorResponse('not_a_player', 'Csak a szoba játékosai lophatnak.', 403);

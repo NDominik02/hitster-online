@@ -110,6 +110,7 @@ export function adaptPlayer(row: PlayerRow): Player {
     color: row.color as PlayerColorId,
     seatOrder: row.seat_order,
     connected: row.connected,
+    kickedAt: row.kicked_at,
     tokens: row.tokens,
   };
 }
@@ -132,6 +133,7 @@ export function adaptRoundPublic(row: RoundPublicRow): RoundPublic | null {
     outcome: row.outcome,
     placingDeadline: row.placing_deadline,
     stealDeadline: row.steal_deadline,
+    nextReadyPlayerIds: row.next_ready_player_ids ?? [],
     revealedCard: revealed,
   };
 }

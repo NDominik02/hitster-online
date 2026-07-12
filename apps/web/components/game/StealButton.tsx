@@ -63,6 +63,10 @@ export function StealButton({
         🕵️ {activePlayerName} 📍-vel jelölt helye szerinted rossz? Lopd el!
       </p>
 
+      <p className="text-center text-sm font-semibold text-text">
+        Neked {tokens} zsetonod van. Lopas ara: 1 zseton.
+      </p>
+
       {tokens < 1 && (
         <p className="text-xs text-warning text-center">Nincs elég tokened a lopáshoz (1 🪙 kell).</p>
       )}

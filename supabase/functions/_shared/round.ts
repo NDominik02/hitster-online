@@ -198,7 +198,7 @@ export async function checkWinnersAndFinish(
   const { data: room } = await supabase.from('rooms').select('settings').eq('id', roomId).single();
   const winTarget = (room?.settings as any)?.winTarget ?? 10;
 
-  const { data: players } = await supabase.from('players').select('id').eq('room_id', roomId);
+  const { data: players } = await supabase.from('players').select('id').eq('room_id', roomId).is('kicked_at', null);
   if (!players || players.length === 0) return { finished: false };
 
   const counts = await Promise.all(
@@ -229,7 +229,7 @@ export async function finishByDeckExhaustion(
   supabase: SupabaseClient,
   roomId: string
 ): Promise<{ winnerPlayerIds: string[] }> {
-  const { data: players } = await supabase.from('players').select('id').eq('room_id', roomId);
+  const { data: players } = await supabase.from('players').select('id').eq('room_id', roomId).is('kicked_at', null);
   const counts = await Promise.all(
     (players ?? []).map(async (p: { id: string }) => {
       const { count } = await supabase
@@ -620,6 +620,7 @@ export async function getNextPlayerId(supabase: SupabaseClient, roomId: string, 
     .from('players')
     .select('id, seat_order')
     .eq('room_id', roomId)
+    .is('kicked_at', null)
     .order('seat_order', { ascending: true });
 
   if (!players || players.length === 0) return null;
