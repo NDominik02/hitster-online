@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { TimelineCardPublic } from "@/lib/game/types";
 import { Timeline } from "./Timeline";
+import { TokenCounter } from "./TokenCounter";
 import { AppButton } from "../system/AppButton";
 
 export interface StealButtonProps {
@@ -63,9 +64,9 @@ export function StealButton({
         🕵️ {activePlayerName} 📍-vel jelölt helye szerinted rossz? Lopd el!
       </p>
 
-      <p className="text-center text-sm font-semibold text-text">
-        Neked {tokens} zsetonod van. Lopas ara: 1 zseton.
-      </p>
+      <div className="flex items-center justify-center" aria-label={`Saját zsetonjaid: ${tokens}`}>
+        <TokenCounter tokens={tokens} size="lg" />
+      </div>
 
       {tokens < 1 && (
         <p className="text-xs text-warning text-center">Nincs elég tokened a lopáshoz (1 🪙 kell).</p>

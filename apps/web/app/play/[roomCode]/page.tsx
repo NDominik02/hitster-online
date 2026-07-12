@@ -642,7 +642,7 @@ export default function PlayRoomPage() {
               disabled={iAmReady || nextReadySubmitting}
               onClick={handleReadyNextRound}
             >
-              {nextReadySubmitting ? "Jelzés..." : iAmReady ? "Készen állsz" : "Kész vagyok, jöhet ▶"}
+              {nextReadySubmitting ? "Jelzés..." : iAmReady ? "Készen állsz" : "Kész vagyok ▶"}
             </AppButton>
             <p className="mt-3 text-sm text-text-muted" aria-live="polite">
               {waitingPlayers.length === 0 ? "Mindenki kész, indul a következő kör..." : `Várunk még: ${waitingNames}`}
