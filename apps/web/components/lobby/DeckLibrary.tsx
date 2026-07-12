@@ -9,6 +9,7 @@ export interface DeckLibraryProps {
   connected: boolean;
   onConnect: () => void;
   onSelect: (deck: Deck) => void;
+  onPreview?: (deck: Deck) => void;
   onRename?: (deck: Deck) => void;
   onDelete?: (deck: Deck) => void;
   renamingDeckId?: string | null;
@@ -25,13 +26,14 @@ export function DeckLibrary({
   connected,
   onConnect,
   onSelect,
+  onPreview,
   onRename,
   onDelete,
   renamingDeckId,
   deletingDeckId,
 }: DeckLibraryProps) {
   if (loading) {
-    return <p className="text-text-muted text-sm text-center py-8">Paklik betöltése...</p>;
+    return <p className="text-text-muted py-8 text-center text-sm">Paklik betöltése...</p>;
   }
 
   if (!connected) {
@@ -49,7 +51,7 @@ export function DeckLibrary({
 
   if (decks.length === 0) {
     return (
-      <p className="text-text-muted text-sm text-center py-8">
+      <p className="py-8 text-center text-sm text-text-muted">
         Még nincs mentett pakli. Generálj egyet playlist linkből, utána itt is megjelenik.
       </p>
     );
@@ -65,12 +67,19 @@ export function DeckLibrary({
             className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-surface-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
           >
             <div className="min-w-0">
-              <p className="font-semibold truncate">{deck.name}</p>
-              <p className="text-text-muted text-xs mt-0.5">
-                {deck.usableCount} kártya - {deck.coveragePct.toFixed(0)}% lefedettség - saját
+              <p className="truncate font-semibold">{deck.name}</p>
+              <p className="mt-0.5 text-xs text-text-muted">
+                {deck.usableCount} kártya
+                {deck.totalTracks !== deck.usableCount ? ` / ${deck.totalTracks} szám` : ""} -{" "}
+                {deck.coveragePct.toFixed(0)}% lefedettség - {deck.isFeatured ? "ajánlott" : "saját"}
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {onPreview && (
+                <AppButton size="sm" variant="secondary" onClick={() => onPreview(deck)}>
+                  Megnézem
+                </AppButton>
+              )}
               <AppButton size="sm" variant="secondary" onClick={() => onSelect(deck)}>
                 Kiválasztom
               </AppButton>

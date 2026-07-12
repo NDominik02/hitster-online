@@ -9,6 +9,7 @@ import { CoverageReport } from "@/components/game/CoverageReport";
 import { ModeCard } from "@/components/lobby/ModeCard";
 import { HelpModal } from "@/components/system/HelpModal";
 import { DeckLibrary } from "@/components/lobby/DeckLibrary";
+import { DeckPreviewModal } from "@/components/lobby/DeckPreviewModal";
 import { RosterBuilder, type RosterEntry } from "@/components/pass-and-play/RosterBuilder";
 import { ensureAnonymousSession } from "@/lib/supabase/client";
 import {
@@ -112,6 +113,7 @@ export default function HostCreatePage() {
   const [featuredLoading, setFeaturedLoading] = useState(false);
   const [libraryDecks, setLibraryDecks] = useState<Deck[]>([]);
   const [loadedLibraryOwnerId, setLoadedLibraryOwnerId] = useState<string | null>(null);
+  const [previewDeck, setPreviewDeck] = useState<Deck | null>(null);
   const [renamingDeckId, setRenamingDeckId] = useState<string | null>(null);
   const [deletingDeckId, setDeletingDeckId] = useState<string | null>(null);
 
@@ -163,6 +165,12 @@ export default function HostCreatePage() {
   }
 
   function handleSelectLibraryDeck(selected: Deck) {
+    setDeck(selected);
+    setPhase("report");
+  }
+
+  function handleSelectPreviewDeck(selected: Deck) {
+    setPreviewDeck(null);
     setDeck(selected);
     setPhase("report");
   }
@@ -396,6 +404,14 @@ export default function HostCreatePage() {
         </header>
 
         {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+        {previewDeck && (
+          <DeckPreviewModal
+            key={previewDeck.id}
+            deck={previewDeck}
+            onClose={() => setPreviewDeck(null)}
+            onSelect={handleSelectPreviewDeck}
+          />
+        )}
 
         {phase === "mode" && (
           <div className="space-y-4">
@@ -472,18 +488,27 @@ export default function HostCreatePage() {
                     featuredDeckList.map((pl) => {
                       const key = pl.id;
                       return (
-                        <button
+                        <div
                           key={key}
-                          type="button"
-                          disabled={featuredLoading}
-                          onClick={() => handleSelectFeatured(pl)}
-                          className="w-full min-h-11 rounded-[var(--radius-button)] bg-surface-2 border-2 border-border hover:border-accent px-4 py-3 text-left disabled:opacity-50"
+                          className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-surface-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
                         >
-                          <span className="font-semibold">{pl.name}</span>
-                          {featuredLoading && (
-                            <span className="text-text-muted text-sm ml-2">betöltés…</span>
-                          )}
-                        </button>
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold">{pl.name}</p>
+                            <p className="mt-0.5 text-xs text-text-muted">
+                              {pl.usableCount} kártya
+                              {pl.totalTracks !== pl.usableCount ? ` / ${pl.totalTracks} szám` : ""} -{" "}
+                              {pl.coveragePct.toFixed(0)}% lefedettség - ajánlott
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap items-center gap-2">
+                            <AppButton size="sm" variant="secondary" onClick={() => setPreviewDeck(pl)}>
+                              Megnézem
+                            </AppButton>
+                            <AppButton size="sm" variant="secondary" onClick={() => handleSelectFeatured(pl)}>
+                              Kiválasztom
+                            </AppButton>
+                          </div>
+                        </div>
                       );
                     })
                   )}
@@ -501,6 +526,7 @@ export default function HostCreatePage() {
                     connected={spotifyStatus === "connected"}
                     onConnect={handleConnectSpotify}
                     onSelect={handleSelectLibraryDeck}
+                    onPreview={setPreviewDeck}
                     onRename={handleRenameLibraryDeck}
                     onDelete={handleDeleteLibraryDeck}
                     renamingDeckId={renamingDeckId}

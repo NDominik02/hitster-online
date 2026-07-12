@@ -15,6 +15,7 @@ import { adaptDeck, adaptPlayer, adaptRoom, adaptTimelineCard } from "./adapters
 import type {
   CoverageExcludedTrack,
   Deck,
+  DeckCardPreviewPage,
   DrawCardResponse,
   Player,
   PlayerGameStats,
@@ -108,6 +109,18 @@ export async function listFeaturedDecks(limit = 30): Promise<Deck[]> {
 /** Saját, már nem használt pakli törlése a hozzá tartozó hangfájlokkal együtt. */
 export async function deleteDeck(deckId: string): Promise<{ ok: true; mode?: "hidden" }> {
   return invoke("delete_deck", { deckId });
+}
+
+export async function listDeckCards(
+  deckId: string,
+  options?: { page?: number; pageSize?: number; query?: string }
+): Promise<DeckCardPreviewPage> {
+  return invoke("list_deck_cards", {
+    deckId,
+    page: options?.page ?? 1,
+    pageSize: options?.pageSize ?? 50,
+    query: options?.query ?? "",
+  });
 }
 
 export async function renameDeck(deckId: string, name: string): Promise<{ ok: true; name: string }> {

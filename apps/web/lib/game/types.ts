@@ -181,6 +181,25 @@ export interface Deck {
   };
 }
 
+export interface DeckCardPreview {
+  id: string;
+  title: string;
+  artist: string;
+  year: number;
+  artworkUrl?: string | null;
+  audioSource: string;
+  spotifyOnly: boolean;
+  yearUncertain: boolean;
+}
+
+export interface DeckCardPreviewPage {
+  items: DeckCardPreview[];
+  page: number;
+  pageSize: number;
+  total: number;
+  query: string;
+}
+
 /** A host draw_card válasza — KIZÁRÓLAG a host kliens kapja meg (D7 anti-leak). */
 export interface DrawCardResponse {
   roundId: string;
