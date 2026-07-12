@@ -1422,7 +1422,15 @@ export default function HostRoomPage() {
                 </h2>
                 <div className="flex gap-2 flex-wrap justify-center">
                   {(timelines[winners[0].id] ?? []).map((c) => (
-                    <TimelineCard key={c.id} year={c.year} state="revealed" size="sm" />
+                    <TimelineCard
+                      key={c.id}
+                      year={c.year}
+                      title={c.title}
+                      artist={c.artist}
+                      artworkUrl={c.artworkUrl}
+                      state="revealed"
+                      size="sm"
+                    />
                   ))}
                 </div>
               </div>

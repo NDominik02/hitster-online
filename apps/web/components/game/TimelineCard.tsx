@@ -11,6 +11,7 @@ export interface TimelineCardProps {
   year: number;
   title?: string;
   artist?: string;
+  artworkUrl?: string;
   state?: TimelineCardState;
   size?: "sm" | "md" | "lg";
   color?: PlayerColorId;
@@ -28,12 +29,22 @@ const yearSize = {
   lg: "text-3xl",
 };
 
-export function TimelineCard({ year, title, artist, state = "placed", size = "md", color }: TimelineCardProps) {
+export function TimelineCard({
+  year,
+  title,
+  artist,
+  artworkUrl,
+  state = "placed",
+  size = "md",
+  color,
+}: TimelineCardProps) {
   const isGhost = state === "ghost";
+  const showArtwork = Boolean(artworkUrl && !isGhost && state !== "unknown");
+  const showFallbackMark = !showArtwork && !isGhost;
   const [detailsOpen, setDetailsOpen] = useState(false);
   const hasDetails = Boolean(title && size !== "sm" && !isGhost);
   const detailsLabel = title ? (artist ? `${artist} - ${title}` : title) : "";
-  const ariaLabel = hasDetails ? `${detailsLabel}, ${year}` : String(year);
+  const ariaLabel = detailsLabel ? `${detailsLabel}, ${year}` : String(year);
 
   return (
     <button
@@ -55,10 +66,21 @@ export function TimelineCard({ year, title, artist, state = "placed", size = "md
       }}
     >
       <span
-        className="mb-1.5 flex aspect-square w-full items-center justify-center rounded-md"
+        className="mb-1.5 flex aspect-square w-full items-center justify-center overflow-hidden rounded-md"
         style={{ background: "var(--surface-2)" }}
       >
-        {!isGhost && (
+        {showArtwork && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={artworkUrl}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className="h-full w-full object-cover"
+            draggable={false}
+          />
+        )}
+        {showFallbackMark && (
           <span
             className="block rounded-full"
             style={{

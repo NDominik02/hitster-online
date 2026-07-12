@@ -51,7 +51,14 @@ export function Timeline({
         )}
         {sorted.map((card, i) => (
           <div key={card.id} className="flex items-center gap-1">
-            <TimelineCard year={card.year} title={card.title} artist={card.artist} state="revealed" size="md" />
+            <TimelineCard
+              year={card.year}
+              title={card.title}
+              artist={card.artist}
+              artworkUrl={card.artworkUrl}
+              state="revealed"
+              size="md"
+            />
             {slots && (
               <TimelineSlot
                 index={i + 1}

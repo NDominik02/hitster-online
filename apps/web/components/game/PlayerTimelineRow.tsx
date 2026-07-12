@@ -54,6 +54,9 @@ export function PlayerTimelineRow({ player, cards, isActive, ghostSlotIndex, tok
             <TimelineCard
               key={item.card.id}
               year={item.card.year}
+              title={item.card.title}
+              artist={item.card.artist}
+              artworkUrl={item.card.artworkUrl}
               state="revealed"
               size="sm"
             />
