@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useState } from "react";
 import clsx from "clsx";
 import type { NameGuessInput } from "@/lib/game/types";
 
@@ -29,9 +29,11 @@ export interface GuessInputProps {
  */
 export function GuessInput({ value, onChange, disabled }: GuessInputProps) {
   const headingId = useId();
+  const contentId = useId();
   const artistId = useId();
   const titleId = useId();
   const yearId = useId();
+  const [expanded, setExpanded] = useState(true);
 
   const filledCount = [value?.titleGuess, value?.artistGuess, value?.yearGuess].filter((part) => part?.trim()).length;
   const hasGuess = filledCount > 0;
@@ -76,6 +78,16 @@ export function GuessInput({ value, onChange, disabled }: GuessInputProps) {
           >
             {filledCount}/3
           </span>
+          <button
+            type="button"
+            aria-controls={contentId}
+            aria-expanded={expanded}
+            onClick={() => setExpanded((open) => !open)}
+            className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-[var(--radius-pill)] border border-border px-3 py-1 text-sm font-bold text-text-muted hover:text-text"
+          >
+            <span className="sr-only">{expanded ? "Betippelés összecsukása" : "Betippelés kinyitása"}</span>
+            <span aria-hidden>{expanded ? "▾" : "▸"}</span>
+          </button>
           {hasGuess && (
             <button
               type="button"
@@ -89,39 +101,43 @@ export function GuessInput({ value, onChange, disabled }: GuessInputProps) {
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_120px]">
-        <GuessField
-          id={titleId}
-          label="Cím"
-          value={value?.titleGuess ?? ""}
-          placeholder="pl. Delilah"
-          disabled={disabled}
-          onChange={(next) => updateField("titleGuess", next)}
-        />
-        <GuessField
-          id={artistId}
-          label="Előadó"
-          value={value?.artistGuess ?? ""}
-          placeholder="pl. Tom Jones"
-          disabled={disabled}
-          onChange={(next) => updateField("artistGuess", next)}
-        />
-        <GuessField
-          id={yearId}
-          label="Év"
-          type="number"
-          inputMode="numeric"
-          value={value?.yearGuess ?? ""}
-          placeholder="1965"
-          disabled={disabled}
-          onChange={(next) => updateField("yearGuess", next)}
-        />
-      </div>
+      {expanded && (
+        <div id={contentId}>
+          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_120px]">
+            <GuessField
+              id={titleId}
+              label="Cím"
+              value={value?.titleGuess ?? ""}
+              placeholder="pl. Delilah"
+              disabled={disabled}
+              onChange={(next) => updateField("titleGuess", next)}
+            />
+            <GuessField
+              id={artistId}
+              label="Előadó"
+              value={value?.artistGuess ?? ""}
+              placeholder="pl. Tom Jones"
+              disabled={disabled}
+              onChange={(next) => updateField("artistGuess", next)}
+            />
+            <GuessField
+              id={yearId}
+              label="Év"
+              type="number"
+              inputMode="numeric"
+              value={value?.yearGuess ?? ""}
+              placeholder="1965"
+              disabled={disabled}
+              onChange={(next) => updateField("yearGuess", next)}
+            />
+          </div>
 
-      <div className="mt-3 flex items-center justify-between gap-3 text-xs text-text-muted">
-        <span>{hasGuess ? "Betippelés aktív" : "Üresen hagyható"}</span>
-        <span className="text-right">A lerakással együtt megy be</span>
-      </div>
+          <div className="mt-3 flex items-center justify-between gap-3 text-xs text-text-muted">
+            <span>{hasGuess ? "Betippelés aktív" : "Üresen hagyható"}</span>
+            <span className="text-right">A lerakással együtt megy be</span>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
