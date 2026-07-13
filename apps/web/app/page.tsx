@@ -57,7 +57,9 @@ const featuredTracks = [
   },
 ];
 
-const timelineTracks = [...featuredTracks].sort((a, b) => Number(a.year) - Number(b.year));
+const timelineTracks = [...featuredTracks].sort(
+  (a, b) => Number(a.year) - Number(b.year),
+);
 
 /** Belépő oldal: új játék indítása vagy csatlakozás szobakóddal. */
 export default function Home() {
@@ -70,7 +72,7 @@ export default function Home() {
   }
 
   return (
-    <main className="relative flex min-h-screen flex-1 overflow-hidden px-5 py-5 sm:px-8">
+    <main className="relative flex min-h-screen flex-1 overflow-x-hidden overflow-y-auto px-5 py-5 sm:px-8">
       <style>{`
         .landing-track-card {
           --landing-rotate: 0deg;
@@ -177,14 +179,16 @@ export default function Home() {
           <div
             key={track.title}
             className="landing-track-card absolute hidden h-48 w-36 overflow-hidden rounded-[18px] border border-white/10 bg-surface shadow-2xl sm:block"
-            style={{
-              top: track.top,
-              left: track.left,
-              "--landing-rotate": track.rotate,
-              "--landing-float-x": track.floatX,
-              "--landing-float-y": track.floatY,
-              animationDelay: `${index * -1.35}s`,
-            } as CSSProperties}
+            style={
+              {
+                top: track.top,
+                left: track.left,
+                "--landing-rotate": track.rotate,
+                "--landing-float-x": track.floatX,
+                "--landing-float-y": track.floatY,
+                animationDelay: `${index * -1.35}s`,
+              } as CSSProperties
+            }
           >
             <div
               className="h-36 w-full bg-cover bg-center"
@@ -198,10 +202,16 @@ export default function Home() {
             />
             <div className="absolute inset-x-0 bottom-0 space-y-1 bg-bg/86 px-3 py-2 backdrop-blur">
               <div className="flex items-center justify-between gap-2">
-                <p className="truncate text-sm font-black text-text">{track.title}</p>
-                <span className="font-numeric text-xs font-black text-accent">{track.year}</span>
+                <p className="truncate text-sm font-black text-text">
+                  {track.title}
+                </p>
+                <span className="font-numeric text-xs font-black text-accent">
+                  {track.year}
+                </span>
               </div>
-              <p className="truncate text-xs font-semibold text-text-muted">{track.artist}</p>
+              <p className="truncate text-xs font-semibold text-text-muted">
+                {track.artist}
+              </p>
             </div>
           </div>
         ))}
@@ -218,8 +228,12 @@ export default function Home() {
                 style={{ backgroundImage: `url(${track.image})` }}
               />
               <div className="px-2 pb-2">
-                <p className="truncate text-[10px] font-bold text-text-muted">{track.title}</p>
-                <span className="font-numeric text-xl font-black text-text">{track.year}</span>
+                <p className="truncate text-[10px] font-bold text-text-muted">
+                  {track.title}
+                </p>
+                <span className="font-numeric text-xl font-black text-text">
+                  {track.year}
+                </span>
               </div>
             </div>
           ))}
@@ -240,7 +254,9 @@ export default function Home() {
               priority
               className="h-10 w-10 rounded-[10px] shadow-[0_0_28px_rgba(245,182,46,0.32)]"
             />
-            <span className="text-sm font-black uppercase tracking-[0.22em] text-text-muted">browser party game</span>
+            <span className="text-sm font-black uppercase tracking-[0.22em] text-text-muted">
+              browser party game
+            </span>
           </div>
         </header>
 
@@ -257,12 +273,20 @@ export default function Home() {
             <div className="grid gap-4 md:grid-cols-[1fr_auto_1fr] md:items-stretch">
               <div className="flex flex-col justify-between text-left">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wide text-accent">Host</p>
+                  <p className="text-xs font-bold uppercase tracking-wide text-accent">
+                    Host
+                  </p>
                   <p className="mt-2 text-sm text-text-muted">
-                    Te vagy a Host? Illessz be egy Spotify playlistet, és állítsd be a partit.
+                    Te vagy a Host? Illessz be egy Spotify playlistet, és
+                    állítsd be a partit.
                   </p>
                 </div>
-                <AppButton className="mt-4" size="lg" fullWidth onClick={() => router.push("/host")}>
+                <AppButton
+                  className="mt-4"
+                  size="lg"
+                  fullWidth
+                  onClick={() => router.push("/host")}
+                >
                   Szoba létrehozása ▶
                 </AppButton>
               </div>
@@ -276,14 +300,23 @@ export default function Home() {
 
               <div>
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-success">Csatlakozás</p>
-                  <span className="font-code text-xs text-text-faint">4 karakter</span>
+                  <p className="text-xs font-bold uppercase tracking-wide text-success">
+                    Csatlakozás
+                  </p>
+                  <span className="font-code text-xs text-text-faint">
+                    4 karakter
+                  </span>
                 </div>
                 <div className="mt-4 flex justify-center">
                   <RoomCodeInput value={joinCode} onChange={setJoinCode} />
                 </div>
-                <p className="mt-3 min-h-5 text-center text-sm text-text-muted" aria-live="polite">
-                  {joinCode.length === 4 ? "Kész, beléphetsz." : "Írd be a szobakódot."}
+                <p
+                  className="mt-3 min-h-5 text-center text-sm text-text-muted"
+                  aria-live="polite"
+                >
+                  {joinCode.length === 4
+                    ? "Kész, beléphetsz."
+                    : "Írd be a szobakódot."}
                 </p>
                 <AppButton
                   className="mt-2"
