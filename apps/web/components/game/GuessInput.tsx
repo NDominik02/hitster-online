@@ -62,32 +62,30 @@ export function GuessInput({ value, onChange, disabled }: GuessInputProps) {
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="eyebrow mb-1">extra zseton</div>
-          <h2 id={headingId} className="text-xl font-black leading-tight text-text">
-            Tudod mi szól?
-          </h2>
-          <p className="mt-1 text-sm text-text-muted">Cím, előadó vagy évszám: minden találat +1 🪙.</p>
-        </div>
-        <div className="flex items-center gap-2">
+        <button
+          type="button"
+          aria-controls={contentId}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((open) => !open)}
+          className="flex min-w-0 flex-1 items-start justify-between gap-3 rounded-[var(--radius-button)] text-left hover:bg-surface-2 focus-visible:bg-surface-2"
+        >
+          <span className="min-w-0 px-1 py-1">
+            <span className="eyebrow mb-1 block">extra zseton</span>
+            <span id={headingId} className="block text-xl font-black leading-tight text-text">
+              Tudod mi szól?
+            </span>
+            <span className="mt-1 block text-sm text-text-muted">Cím, előadó vagy évszám: minden találat +1 🪙.</span>
+          </span>
           <span
             className={clsx(
-              "rounded-[var(--radius-pill)] border px-3 py-1 text-sm font-bold",
+              "mt-1 shrink-0 rounded-[var(--radius-pill)] border px-3 py-1 text-sm font-bold",
               hasGuess ? "border-accent text-accent" : "border-border text-text-muted"
             )}
           >
             {filledCount}/3
           </span>
-          <button
-            type="button"
-            aria-controls={contentId}
-            aria-expanded={expanded}
-            onClick={() => setExpanded((open) => !open)}
-            className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-[var(--radius-pill)] border border-border px-3 py-1 text-sm font-bold text-text-muted hover:text-text"
-          >
-            <span className="sr-only">{expanded ? "Betippelés összecsukása" : "Betippelés kinyitása"}</span>
-            <span aria-hidden>{expanded ? "▾" : "▸"}</span>
-          </button>
+        </button>
+        <div className="flex items-center gap-2">
           {hasGuess && (
             <button
               type="button"
