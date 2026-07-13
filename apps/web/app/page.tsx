@@ -95,7 +95,9 @@ export default function Home() {
               <div className="flex flex-col justify-between text-left">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wide text-accent">Host</p>
-                  <p className="mt-2 text-sm text-text-muted">Pakli, szabályok, szoba.</p>
+                  <p className="mt-2 text-sm text-text-muted">
+                    Te vagy a Host? Illessz be egy Spotify playlistet, és állítsd be a partit.
+                  </p>
                 </div>
                 <AppButton className="mt-4" size="lg" fullWidth onClick={() => router.push("/host")}>
                   Szoba létrehozása ▶
