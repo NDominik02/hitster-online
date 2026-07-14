@@ -18,7 +18,7 @@ Deno.serve(async (req: Request) => {
   const { data, error } = await supabase
     .from('decks')
     .select('id, name, source_playlist_id, source_playlist_url, total_tracks, usable_count, coverage_pct, status, is_public, owner_id, spotify_owner_id, report, created_at')
-    .neq('status', 'deleted')
+    .in('status', ['ready', 'generating'])
     .order('created_at', { ascending: false })
     .limit(80);
 
@@ -38,6 +38,7 @@ Deno.serve(async (req: Request) => {
         status: deck.status,
         isPublic: deck.is_public,
         isFeatured: report.featured === true,
+        isStarred: report.starred === true || report.audioPipeline === 'verified_audio',
         audioPipeline: typeof report.audioPipeline === 'string' ? report.audioPipeline : null,
         qualityStatus: typeof report.qualityStatus === 'string' ? report.qualityStatus : null,
         spotifyOnlyCount: typeof report.spotifyOnlyCount === 'number' ? report.spotifyOnlyCount : null,

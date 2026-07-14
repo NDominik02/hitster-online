@@ -102,6 +102,7 @@ function finalGenerationDiagnostics(report: Record<string, any>): Record<string,
   return {
     ...(typeof report.audioPipeline === 'string' ? { audioPipeline: report.audioPipeline } : {}),
     ...(typeof report.qualityStatus === 'string' ? { qualityStatus: report.qualityStatus } : {}),
+    ...(report.starred === true ? { starred: true } : {}),
     ...(report.playlistName ? { playlistName: report.playlistName } : {}),
     ...(Array.isArray(report.sourcePlaylistIds) ? { sourcePlaylistIds: report.sourcePlaylistIds } : {}),
     ...(Array.isArray(report.sourceReports) ? { sourceReports: report.sourceReports } : {}),
@@ -1031,6 +1032,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
             report: {
               audioPipeline,
               qualityStatus: 'verified',
+              starred: true,
               processed: 0,
               total: tracks.length,
               step: 'resolving_years',
@@ -1116,6 +1118,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
           report: {
             audioPipeline,
             qualityStatus: 'verified',
+            starred: true,
             processed: 0,
             total: tracks.length,
             step: 'resolving_years',
@@ -1703,6 +1706,7 @@ Deno.serve(async (req: Request) => {
         deckName,
         audioPipeline,
         qualityStatus: audioPipeline === 'spotify_only' ? 'fast_spotify' : 'verified',
+        starred: audioPipeline === 'verified_audio',
         ...(curationSourceDeckId ? { promotedFromDeckId: curationSourceDeckId } : {}),
       },
     })

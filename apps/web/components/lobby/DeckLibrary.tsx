@@ -61,6 +61,7 @@ export function DeckLibrary({
   return (
     <div className="space-y-2">
       {decks.map((deck) => {
+        const kindLabel = deck.isStarred ? "csillagozott" : "Spotify-only";
         return (
           <div
             key={deck.id}
@@ -71,7 +72,8 @@ export function DeckLibrary({
               <p className="mt-0.5 text-xs text-text-muted">
                 {deck.usableCount} kártya
                 {deck.totalTracks !== deck.usableCount ? ` / ${deck.totalTracks} szám` : ""} -{" "}
-                {deck.coveragePct.toFixed(0)}% lefedettség - {deck.isFeatured ? "ajánlott" : "saját"}
+                {deck.coveragePct.toFixed(0)}% lefedettség - {kindLabel}
+                {deck.isFeatured ? " - ajánlott" : ""}
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">

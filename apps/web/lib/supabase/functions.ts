@@ -103,6 +103,7 @@ export interface AdminDeck {
   status: string;
   isPublic: boolean;
   isFeatured: boolean;
+  isStarred: boolean;
   audioPipeline: string | null;
   qualityStatus: string | null;
   spotifyOnlyCount: number | null;
@@ -156,7 +157,7 @@ export async function listFeaturedDecks(limit = 30): Promise<Deck[]> {
     .select("*")
     .eq("status", "ready")
     .eq("is_public", true)
-    .contains("report", { featured: true })
+    .contains("report", { featured: true, starred: true })
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;

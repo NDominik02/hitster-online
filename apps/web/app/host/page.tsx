@@ -129,6 +129,7 @@ export default function HostCreatePage() {
   const [adminDecks, setAdminDecks] = useState<AdminDeck[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminBusyDeckId, setAdminBusyDeckId] = useState<string | null>(null);
+  const [newDeckKind, setNewDeckKind] = useState<"spotify_only" | "starred">("spotify_only");
 
   useEffect(() => {
     if (spotifyStatus !== "connected") {
@@ -300,7 +301,7 @@ export default function HostCreatePage() {
       return;
     }
     const confirmed = window.confirm(
-      `Ajánlott verziót készítesz ebből a pakliból?\n\n${selected.name}\n\nEz külön, pontosított másolatot generál, és feltölti a preview hangokat.`
+      `Csillagozott verziót készítesz ebből a pakliból?\n\n${selected.name}\n\nEz külön, pontosított másolatot generál, és feltölti a preview hangokat.`
     );
     if (!confirmed) return;
 
@@ -309,7 +310,7 @@ export default function HostCreatePage() {
     try {
       const { deckId } = await generateDeck(urls[0], {
         playlistUrls: urls.length > 1 ? urls : undefined,
-        sourceKey: `featured-${selected.id}`,
+        sourceKey: `starred-${selected.id}`,
         deckName: selected.name,
         audioPipeline: "verified_audio",
         curationSourceDeckId: selected.id,
@@ -402,6 +403,7 @@ export default function HostCreatePage() {
       sourceKey?: string;
       deckName?: string;
       audioPipeline?: "spotify_only" | "verified_audio";
+      curationSourceDeckId?: string;
     }
   ) {
     const url = (urlOverride ?? playlistUrl).trim();
@@ -424,12 +426,14 @@ export default function HostCreatePage() {
 
     try {
       await ensureAnonymousSession();
+      const requestedAudioPipeline =
+        options?.audioPipeline ?? (!urlOverride && adminStatus?.isAdmin && newDeckKind === "starred" ? "verified_audio" : "spotify_only");
 
       // A HTTP hívás azonnal visszatér a deckId-vel, a feldolgozás a szerveren fut tovább.
       const { deckId } = await generateDeck(urls[0] ?? url, {
         ...options,
         playlistUrls: urls.length > 1 ? urls : options?.playlistUrls,
-        audioPipeline: options?.audioPipeline ?? "spotify_only",
+        audioPipeline: requestedAudioPipeline,
       });
 
       // Pollingozzuk a decks táblát ~2 mp-enként, amíg ready/failed nem lesz (BACKEND-NOTES 4.).
@@ -614,6 +618,23 @@ export default function HostCreatePage() {
                   <p id="playlist-url-help" className="text-sm text-text-muted mt-1">
                     › Egy vagy több Spotify playlist link, soronként külön. Több linkből egy közös, deduplikált pakli készül.
                   </p>
+                  {adminStatus?.isAdmin && (
+                    <div className="mt-4">
+                      <SegmentedControl
+                        label="Generálás módja"
+                        ariaLabel="Generálás módja"
+                        value={newDeckKind}
+                        onChange={setNewDeckKind}
+                        options={[
+                          { value: "spotify_only", label: "Spotify-only" },
+                          { value: "starred", label: "Csillagozott" },
+                        ]}
+                      />
+                      <p className="mt-1 text-sm text-text-muted">
+                        A csillagozott pakli pontosabb és preview hangokat tárol, ezért csak adminok készíthetik.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -693,17 +714,12 @@ export default function HostCreatePage() {
                   ) : (
                     adminDecks.map((adminDeck) => {
                       const busy = adminBusyDeckId === adminDeck.id;
-                      const pipelineLabel =
-                        adminDeck.audioPipeline === "spotify_only"
-                          ? "Spotify-only"
-                          : adminDeck.audioPipeline === "verified_audio"
-                            ? "Verified audio"
-                            : "Legacy";
-                      const canPrepare = adminDeck.status === "ready" && adminDeck.audioPipeline !== "verified_audio";
+                      const pipelineLabel = adminDeck.isStarred ? "csillagozott" : "Spotify-only";
+                      const canPrepare = adminDeck.status === "ready" && !adminDeck.isStarred;
                       const canPublish =
                         adminDeck.status === "ready" &&
                         !adminDeck.isFeatured &&
-                        adminDeck.audioPipeline !== "spotify_only";
+                        adminDeck.isStarred;
 
                       return (
                         <div
@@ -726,10 +742,10 @@ export default function HostCreatePage() {
                                 size="sm"
                                 variant="secondary"
                                 disabled={busy}
-                                title="Külön, ellenőrzött, preview hangos másolatot készít ebből a pakliból."
+                                title="Külön, ellenőrzött, preview hangos csillagozott másolatot készít ebből a pakliból."
                                 onClick={() => handlePrepareFeaturedDeck(adminDeck)}
                               >
-                                {busy ? "Verzió készül..." : "Ajánlott verzió készítése"}
+                                {busy ? "Verzió készül..." : "Csillagozott verzió készítése"}
                               </AppButton>
                             )}
                             {canPublish && (
@@ -870,7 +886,9 @@ export default function HostCreatePage() {
               currentStep={stepLabel(progress.step)}
             />
             <p className="text-text-muted text-sm">
-              Saját paklinál Spotify-only módot használunk, ezért nincs Supabase hangfájl-feltöltés.
+              {adminStatus?.isAdmin && newDeckKind === "starred"
+                ? "Csillagozott pakli készül: pontosított generálás és preview hangfeltöltés fut."
+                : "Spotify-only pakli készül, ezért nincs Supabase hangfájl-feltöltés."}
             </p>
             {progress.warning && (
               <p className="rounded-[var(--radius-card)] border border-warning bg-warning/10 px-4 py-3 text-sm text-warning">

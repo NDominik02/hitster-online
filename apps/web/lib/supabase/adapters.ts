@@ -32,7 +32,11 @@ export function adaptDeck(row: DeckRow): Deck {
     reason?: string;
     errorCode?: string;
     playlistImportWarning?: string;
+    starred?: boolean;
+    audioPipeline?: string;
+    qualityStatus?: string;
   };
+  const isStarred = report.starred === true || report.audioPipeline === "verified_audio";
   return {
     id: row.id,
     name: row.name,
@@ -51,6 +55,9 @@ export function adaptDeck(row: DeckRow): Deck {
       uncertainYearCount: report.uncertainYearCount,
       spotifyOnlyCount: report.spotifyOnlyCount,
       playlistImportWarning: report.playlistImportWarning,
+      starred: isStarred,
+      audioPipeline: report.audioPipeline,
+      qualityStatus: report.qualityStatus,
     },
     progress: {
       processed: report.processed ?? 0,
@@ -62,6 +69,7 @@ export function adaptDeck(row: DeckRow): Deck {
     ownerId: row.owner_id,
     isPublic: row.is_public,
     isFeatured: isFeaturedDeckReport(row.report),
+    isStarred,
     createdAt: row.created_at,
   };
 }

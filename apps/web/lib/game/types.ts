@@ -154,6 +154,9 @@ export interface DeckReport {
   uncertainYearCount?: number;
   spotifyOnlyCount?: number;
   playlistImportWarning?: string;
+  starred?: boolean;
+  audioPipeline?: string;
+  qualityStatus?: string;
 }
 
 export interface Deck {
@@ -170,6 +173,7 @@ export interface Deck {
   ownerId?: string | null;
   isPublic?: boolean;
   isFeatured?: boolean;
+  isStarred?: boolean;
   createdAt?: string;
   /** Generálás közbeni progress (BACKEND-NOTES 4.: decks.report.{processed,total,step}). */
   progress: {
