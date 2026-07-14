@@ -48,9 +48,6 @@ Deno.serve(async (req: Request) => {
     if (currentReport.audioPipeline === 'spotify_only') {
       return errorResponse('deck_not_starred', 'Csak csillagozott pakli jelenhet meg ajanlottkent.', 409);
     }
-    if (typeof currentReport.spotifyOnlyCount === 'number' && currentReport.spotifyOnlyCount > 0) {
-      return errorResponse('deck_has_spotify_only_cards', 'Az ajanlott pakliban nem maradhat Spotify-only kartya.', 409);
-    }
 
     nextReport.featured = true;
     nextReport.starred = true;
