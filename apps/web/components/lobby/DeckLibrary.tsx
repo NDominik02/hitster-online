@@ -61,7 +61,6 @@ export function DeckLibrary({
   return (
     <div className="space-y-2">
       {decks.map((deck) => {
-        const canManage = !deck.isFeatured;
         return (
           <div
             key={deck.id}
@@ -88,7 +87,7 @@ export function DeckLibrary({
               <AppButton size="sm" variant="secondary" onClick={() => onSelect(deck)}>
                 Kiválasztom
               </AppButton>
-              {canManage && onRename && (
+              {onRename && (
                 <ActionIconButton
                   icon="pen"
                   label={renamingDeckId === deck.id ? "Átnevezés folyamatban" : "Átnevezés"}
@@ -98,7 +97,7 @@ export function DeckLibrary({
                   onClick={() => onRename(deck)}
                 />
               )}
-              {canManage && onDelete && (
+              {onDelete && (
                 <ActionIconButton
                   icon="trash"
                   label={deletingDeckId === deck.id ? "Törlés folyamatban" : "Törlés"}

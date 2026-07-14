@@ -2,7 +2,6 @@
 
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
-import { isProtectedDeckReport } from '../_shared/protected_decks.ts';
 import { callerCanManageDeck } from '../_shared/deck_ownership.ts';
 
 function normalizeDeckName(value: unknown): string | null {
@@ -39,9 +38,6 @@ Deno.serve(async (req: Request) => {
 
   if (deckError) return errorResponse('db_error', 'Hiba a pakli lekerdezese kozben.', 500);
   if (!deck) return errorResponse('deck_not_found', 'A pakli nem talalhato.', 404);
-  if (isProtectedDeckReport(deck.report)) {
-    return errorResponse('protected_deck', 'Az ajanlott paklik nem nevezhetok at.', 403);
-  }
   if (!(await callerCanManageDeck(supabase, callerUid, deck))) {
     return errorResponse('not_owner', 'Csak a sajat paklidat nevezheted at.', 403);
   }

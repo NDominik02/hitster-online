@@ -35,6 +35,7 @@
 
 import { adminClient, getCallerUid } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
+import { callerCanManageDeck } from '../_shared/deck_ownership.ts';
 import type { StealEntry, NameGuess } from '../_shared/steal.ts';
 import { evaluateSteals } from '../_shared/steal.ts';
 import {
@@ -75,9 +76,19 @@ Deno.serve(async (req: Request) => {
 
   if (roundError || !round) return errorResponse('round_not_found', 'A kör nem található.', 404);
 
-  const { data: room } = await supabase.from('rooms').select('id, host_uid').eq('id', round.room_id).single();
+  const { data: room } = await supabase.from('rooms').select('id, host_uid, deck_id').eq('id', round.room_id).single();
   if (!room || room.host_uid !== callerUid) {
     return errorResponse('not_host', 'Csak a host javíthatja ki az évszámot.', 403);
+  }
+
+  let canPersistCardCorrection = false;
+  const { data: deck } = await supabase
+    .from('decks')
+    .select('id, owner_id, spotify_owner_id')
+    .eq('id', room.deck_id)
+    .maybeSingle();
+  if (deck) {
+    canPersistCardCorrection = await callerCanManageDeck(supabase, callerUid, deck);
   }
 
   if (round.phase !== 'reveal') {
@@ -198,10 +209,14 @@ Deno.serve(async (req: Request) => {
   // a host által megerősített évet visszaírjuk a kártyára is — 'host_corrected' forrással (a
   // legmagasabb bizalmi szint, nem bizonytalan), hogy a jövőben ne forduljon elő újra. Best-effort:
   // ha ez a mellékhatás hibázna, a fő (kör-szintű) javítás már úgyis sikeresen lezajlott.
-  await supabase
-    .from('deck_cards')
-    .update({ year: correctedYear, year_source: 'host_corrected', year_uncertain: false })
-    .eq('id', round.card_id);
+  // Ownership gate (2026-07-14): the round correction above always applies, but
+  // the underlying deck card is updated only when this host owns/manages the deck.
+  if (canPersistCardCorrection) {
+    await supabase
+      .from('deck_cards')
+      .update({ year: correctedYear, year_source: 'host_corrected', year_uncertain: false })
+      .eq('id', round.card_id);
+  }
 
   return jsonResponse({ ok: true, outcome, revealedCard: updatedRevealedCard });
 });

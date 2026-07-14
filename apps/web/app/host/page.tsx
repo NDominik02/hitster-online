@@ -115,6 +115,7 @@ export default function HostCreatePage() {
   const [libraryDecks, setLibraryDecks] = useState<Deck[]>([]);
   const [loadedLibraryOwnerId, setLoadedLibraryOwnerId] = useState<string | null>(null);
   const [previewDeck, setPreviewDeck] = useState<Deck | null>(null);
+  const [previewCanEditYear, setPreviewCanEditYear] = useState(false);
   const [renamingDeckId, setRenamingDeckId] = useState<string | null>(null);
   const [deletingDeckId, setDeletingDeckId] = useState<string | null>(null);
 
@@ -188,7 +189,7 @@ export default function HostCreatePage() {
   }
 
   async function handleRenameLibraryDeck(selected: Deck) {
-    if (!spotifyAccount || selected.isFeatured || renamingDeckId) return;
+    if (!spotifyAccount || renamingDeckId) return;
     const nextName = window.prompt("Új paklinév", selected.name)?.trim();
     if (!nextName || nextName === selected.name) return;
 
@@ -210,7 +211,7 @@ export default function HostCreatePage() {
   }
 
   async function handleDeleteLibraryDeck(selected: Deck) {
-    if (!spotifyAccount || selected.isFeatured || deletingDeckId) return;
+    if (!spotifyAccount || deletingDeckId) return;
     const confirmed = window.confirm(`Törlöd ezt a paklit?\n\n${selected.name}`);
     if (!confirmed) return;
 
@@ -409,7 +410,11 @@ export default function HostCreatePage() {
           <DeckPreviewModal
             key={previewDeck.id}
             deck={previewDeck}
-            onClose={() => setPreviewDeck(null)}
+            canEditYear={previewCanEditYear}
+            onClose={() => {
+              setPreviewDeck(null);
+              setPreviewCanEditYear(false);
+            }}
             onSelect={handleSelectPreviewDeck}
           />
         )}
@@ -507,7 +512,10 @@ export default function HostCreatePage() {
                               label="Megnézem"
                               size="sm"
                               variant="secondary"
-                              onClick={() => setPreviewDeck(pl)}
+                              onClick={() => {
+                                setPreviewDeck(pl);
+                                setPreviewCanEditYear(false);
+                              }}
                             />
                             <AppButton size="sm" variant="secondary" onClick={() => handleSelectFeatured(pl)}>
                               Kiválasztom
@@ -531,7 +539,10 @@ export default function HostCreatePage() {
                     connected={spotifyStatus === "connected"}
                     onConnect={handleConnectSpotify}
                     onSelect={handleSelectLibraryDeck}
-                    onPreview={setPreviewDeck}
+                    onPreview={(selected) => {
+                      setPreviewDeck(selected);
+                      setPreviewCanEditYear(true);
+                    }}
                     onRename={handleRenameLibraryDeck}
                     onDelete={handleDeleteLibraryDeck}
                     renamingDeckId={renamingDeckId}

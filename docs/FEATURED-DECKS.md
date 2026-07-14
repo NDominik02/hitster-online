@@ -10,6 +10,15 @@ The host screen lists decks where:
 Selecting one of these decks does not fetch Spotify again. It reuses the stored
 deck metadata, cards, and uploaded audio.
 
+If a featured deck also belongs to the connected Spotify account, it is still a
+normal owned deck for that user. It appears in both the Recommended and Existing
+deck lists, and owner-only edits (rename, delete, card year overrides) update the
+same shared deck that everyone sees in Recommended.
+
+In-game year disputes always correct the current round. The correction is saved
+back to `deck_cards` only when the host owns/manages that deck; hosts playing
+someone else's featured deck cannot modify the shared source data.
+
 ## Promote A Deck
 
 ```sql

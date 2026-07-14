@@ -100,7 +100,7 @@ export async function listDecks(spotifyUserId: string, limit = 30): Promise<Deck
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return (data ?? []).map(adaptDeck).filter((deck) => !deck.isFeatured);
+  return (data ?? []).map(adaptDeck);
 }
 
 export async function listFeaturedDecks(limit = 30): Promise<Deck[]> {

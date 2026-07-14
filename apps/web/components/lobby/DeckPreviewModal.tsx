@@ -10,11 +10,12 @@ const PAGE_SIZE = 50;
 
 export interface DeckPreviewModalProps {
   deck: Deck;
+  canEditYear?: boolean;
   onClose: () => void;
   onSelect: (deck: Deck) => void;
 }
 
-export function DeckPreviewModal({ deck, onClose, onSelect }: DeckPreviewModalProps) {
+export function DeckPreviewModal({ deck, canEditYear = !deck.isFeatured, onClose, onSelect }: DeckPreviewModalProps) {
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<DeckCardPreviewPage | null>(null);
@@ -62,7 +63,7 @@ export function DeckPreviewModal({ deck, onClose, onSelect }: DeckPreviewModalPr
   }
 
   async function handleUpdateCardYear(card: DeckCardPreview, year: number) {
-    if (deck.isFeatured || updatingCardId) return;
+    if (!canEditYear || updatingCardId) return;
     setUpdatingCardId(card.id);
     setYearError(null);
     try {
@@ -146,7 +147,7 @@ export function DeckPreviewModal({ deck, onClose, onSelect }: DeckPreviewModalPr
                 <DeckPreviewRow
                   key={`${card.id}-${card.year}`}
                   card={card}
-                  canEditYear={!deck.isFeatured}
+                  canEditYear={canEditYear}
                   updating={updatingCardId === card.id}
                   onUpdateYear={handleUpdateCardYear}
                 />
