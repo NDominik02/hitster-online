@@ -10,6 +10,7 @@ import { CoverageReport } from "@/components/game/CoverageReport";
 import { ModeCard } from "@/components/lobby/ModeCard";
 import { HelpModal } from "@/components/system/HelpModal";
 import { DeckLibrary } from "@/components/lobby/DeckLibrary";
+import { DeckQualityBadge } from "@/components/lobby/DeckQualityBadge";
 import { DeckPreviewModal } from "@/components/lobby/DeckPreviewModal";
 import { RosterBuilder, type RosterEntry } from "@/components/pass-and-play/RosterBuilder";
 import { ensureAnonymousSession } from "@/lib/supabase/client";
@@ -714,7 +715,6 @@ export default function HostCreatePage() {
                   ) : (
                     adminDecks.map((adminDeck) => {
                       const busy = adminBusyDeckId === adminDeck.id;
-                      const pipelineLabel = adminDeck.isStarred ? "csillagozott" : "Spotify-only";
                       const canPrepare = adminDeck.status === "ready" && !adminDeck.isStarred;
                       const canPublish =
                         adminDeck.status === "ready" &&
@@ -731,7 +731,7 @@ export default function HostCreatePage() {
                             <p className="mt-0.5 text-xs text-text-muted">
                               {adminDeck.usableCount} kártya
                               {adminDeck.totalTracks !== adminDeck.usableCount ? ` / ${adminDeck.totalTracks} szám` : ""} -{" "}
-                              {adminDeck.coveragePct.toFixed(0)}% - {pipelineLabel}
+                              {adminDeck.coveragePct.toFixed(0)}% - <DeckQualityBadge starred={adminDeck.isStarred} />
                               {adminDeck.isFeatured ? " - ajánlott" : ""}
                               {adminDeck.status !== "ready" ? ` - ${adminDeck.status}` : ""}
                             </p>

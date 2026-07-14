@@ -1662,10 +1662,11 @@ Deno.serve(async (req: Request) => {
     typeof body.sourceKey === 'string' && /^[a-zA-Z0-9_-]{3,80}$/.test(body.sourceKey)
       ? body.sourceKey
       : playlistIds[0];
-  const deckName =
+  const requestedDeckName =
     typeof body.deckName === 'string' && body.deckName.trim().length > 0
       ? body.deckName.trim().slice(0, 120)
-      : sourceKey;
+      : null;
+  const deckName = requestedDeckName ?? sourceKey;
   const audioPipeline = normalizeRequestedAudioPipeline(body.audioPipeline);
   const curationSourceDeckId =
     typeof body.curationSourceDeckId === 'string' &&
@@ -1703,7 +1704,7 @@ Deno.serve(async (req: Request) => {
         total: 0,
         step: 'fetching_playlist',
         sourcePlaylistIds: playlistIds,
-        deckName,
+        ...(requestedDeckName ? { deckName: requestedDeckName } : {}),
         audioPipeline,
         qualityStatus: audioPipeline === 'spotify_only' ? 'fast_spotify' : 'verified',
         starred: audioPipeline === 'verified_audio',

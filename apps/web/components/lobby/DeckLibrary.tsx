@@ -2,6 +2,7 @@
 
 import { AppButton } from "../system/AppButton";
 import { ActionIconButton } from "../system/ActionIconButton";
+import { DeckQualityBadge } from "./DeckQualityBadge";
 import type { Deck } from "../../lib/game/types";
 
 export interface DeckLibraryProps {
@@ -61,7 +62,6 @@ export function DeckLibrary({
   return (
     <div className="space-y-2">
       {decks.map((deck) => {
-        const kindLabel = deck.isStarred ? "csillagozott" : "Spotify-only";
         return (
           <div
             key={deck.id}
@@ -72,7 +72,7 @@ export function DeckLibrary({
               <p className="mt-0.5 text-xs text-text-muted">
                 {deck.usableCount} kártya
                 {deck.totalTracks !== deck.usableCount ? ` / ${deck.totalTracks} szám` : ""} -{" "}
-                {deck.coveragePct.toFixed(0)}% lefedettség - {kindLabel}
+                {deck.coveragePct.toFixed(0)}% lefedettség - <DeckQualityBadge starred={deck.isStarred} />
                 {deck.isFeatured ? " - ajánlott" : ""}
               </p>
             </div>
