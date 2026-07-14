@@ -300,7 +300,7 @@ export default function HostCreatePage() {
       return;
     }
     const confirmed = window.confirm(
-      `Előkészíted ajánlottnak?\n\n${selected.name}\n\nEz a lassabb, pontosabb generálást futtatja és feltölti a preview hangokat.`
+      `Ajánlott verziót készítesz ebből a pakliból?\n\n${selected.name}\n\nEz külön, pontosított másolatot generál, és feltölti a preview hangokat.`
     );
     if (!confirmed) return;
 
@@ -330,8 +330,8 @@ export default function HostCreatePage() {
     if (adminBusyDeckId) return;
     const confirmed = window.confirm(
       featured
-        ? `Publikálod ajánlott pakliként?\n\n${selected.name}`
-        : `Leveszed az ajánlott paklik közül?\n\n${selected.name}`
+        ? `Megjeleníted az Ajánlott paklik között?\n\n${selected.name}`
+        : `Elrejted az Ajánlott paklik közül?\n\n${selected.name}`
     );
     if (!confirmed) return;
 
@@ -592,7 +592,7 @@ export default function HostCreatePage() {
                   { value: "new", label: "Új pakli" },
                   { value: "featured", label: "Ajánlott" },
                   { value: "library", label: "Meglévő pakli" },
-                  ...(adminStatus?.isAdmin ? [{ value: "curation" as const, label: "Kurálás" }] : []),
+                  ...(adminStatus?.isAdmin ? [{ value: "curation" as const, label: "Admin" }] : []),
                 ]}
               />
 
@@ -687,7 +687,7 @@ export default function HostCreatePage() {
               {deckSource === "curation" && (
                 <div className="mt-3 space-y-2">
                   {adminLoading ? (
-                    <p className="text-text-muted text-sm">Kurált paklik betöltése...</p>
+                    <p className="text-text-muted text-sm">Admin paklik betöltése...</p>
                   ) : adminDecks.length === 0 ? (
                     <p className="text-text-muted text-sm">Nincs megjeleníthető pakli.</p>
                   ) : (
@@ -722,18 +722,36 @@ export default function HostCreatePage() {
                           </div>
                           <div className="flex shrink-0 flex-wrap items-center gap-2">
                             {canPrepare && (
-                              <AppButton size="sm" variant="secondary" disabled={busy} onClick={() => handlePrepareFeaturedDeck(adminDeck)}>
-                                {busy ? "Előkészítés..." : "Előkészítés"}
+                              <AppButton
+                                size="sm"
+                                variant="secondary"
+                                disabled={busy}
+                                title="Külön, ellenőrzött, preview hangos másolatot készít ebből a pakliból."
+                                onClick={() => handlePrepareFeaturedDeck(adminDeck)}
+                              >
+                                {busy ? "Verzió készül..." : "Ajánlott verzió készítése"}
                               </AppButton>
                             )}
                             {canPublish && (
-                              <AppButton size="sm" variant="secondary" disabled={busy} onClick={() => handleSetFeaturedDeck(adminDeck, true)}>
-                                Publikálás
+                              <AppButton
+                                size="sm"
+                                variant="secondary"
+                                disabled={busy}
+                                title="Megjeleníti ezt a kész másolatot az Ajánlott paklik között."
+                                onClick={() => handleSetFeaturedDeck(adminDeck, true)}
+                              >
+                                Ajánlottként megjelenít
                               </AppButton>
                             )}
                             {adminDeck.isFeatured && (
-                              <AppButton size="sm" variant="danger" disabled={busy} onClick={() => handleSetFeaturedDeck(adminDeck, false)}>
-                                Levétel
+                              <AppButton
+                                size="sm"
+                                variant="danger"
+                                disabled={busy}
+                                title="Leveszi ezt a paklit az Ajánlott listából."
+                                onClick={() => handleSetFeaturedDeck(adminDeck, false)}
+                              >
+                                Elrejtés ajánlottból
                               </AppButton>
                             )}
                           </div>
