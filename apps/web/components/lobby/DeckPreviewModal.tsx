@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 import { AppButton } from "../system/AppButton";
-import { listDeckCards } from "../../lib/supabase/functions";
+import { listDeckCards, updateDeckCardYear } from "../../lib/supabase/functions";
 import type { Deck, DeckCardPreview, DeckCardPreviewPage } from "../../lib/game/types";
 
 const PAGE_SIZE = 50;
@@ -19,6 +20,8 @@ export function DeckPreviewModal({ deck, onClose, onSelect }: DeckPreviewModalPr
   const [result, setResult] = useState<DeckCardPreviewPage | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [yearError, setYearError] = useState<string | null>(null);
+  const [updatingCardId, setUpdatingCardId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,6 +59,29 @@ export function DeckPreviewModal({ deck, onClose, onSelect }: DeckPreviewModalPr
   function handleQueryChange(value: string) {
     setQuery(value);
     setPage(1);
+  }
+
+  async function handleUpdateCardYear(card: DeckCardPreview, year: number) {
+    if (deck.isFeatured || updatingCardId) return;
+    setUpdatingCardId(card.id);
+    setYearError(null);
+    try {
+      const updated = await updateDeckCardYear(deck.id, card.id, year);
+      setResult((current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((item) =>
+                item.id === card.id ? { ...item, year: updated.year, yearUncertain: updated.yearUncertain } : item
+              ),
+            }
+          : current
+      );
+    } catch (err) {
+      setYearError(err instanceof Error ? err.message : "Nem sikerult menteni az evszamot.");
+    } finally {
+      setUpdatingCardId(null);
+    }
   }
 
   return (
@@ -101,6 +127,11 @@ export function DeckPreviewModal({ deck, onClose, onSelect }: DeckPreviewModalPr
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {yearError && (
+            <p role="alert" className="mb-3 rounded-[var(--radius-card)] border border-danger bg-danger/10 px-4 py-3 text-sm text-danger">
+              {yearError}
+            </p>
+          )}
           {error ? (
             <p role="alert" className="rounded-[var(--radius-card)] border border-danger bg-danger/10 px-4 py-3 text-sm text-danger">
               {error}
@@ -112,7 +143,13 @@ export function DeckPreviewModal({ deck, onClose, onSelect }: DeckPreviewModalPr
           ) : (
             <div className="space-y-2">
               {(result?.items ?? []).map((card) => (
-                <DeckPreviewRow key={card.id} card={card} />
+                <DeckPreviewRow
+                  key={`${card.id}-${card.year}`}
+                  card={card}
+                  canEditYear={!deck.isFeatured}
+                  updating={updatingCardId === card.id}
+                  onUpdateYear={handleUpdateCardYear}
+                />
               ))}
             </div>
           )}
@@ -154,9 +191,31 @@ export function DeckPreviewModal({ deck, onClose, onSelect }: DeckPreviewModalPr
   );
 }
 
-function DeckPreviewRow({ card }: { card: DeckCardPreview }) {
+function DeckPreviewRow({
+  card,
+  canEditYear,
+  updating,
+  onUpdateYear,
+}: {
+  card: DeckCardPreview;
+  canEditYear: boolean;
+  updating: boolean;
+  onUpdateYear: (card: DeckCardPreview, year: number) => void;
+}) {
+  const [draftYear, setDraftYear] = useState(String(card.year));
+
+  const parsedYear = Number(draftYear);
+  const validYear = Number.isInteger(parsedYear) && parsedYear >= 1800 && parsedYear <= 2100;
+  const changed = validYear && parsedYear !== card.year;
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!changed || updating) return;
+    onUpdateYear(card, parsedYear);
+  }
+
   return (
-    <div className="grid grid-cols-[44px_1fr_auto] items-center gap-3 rounded-[var(--radius-card)] border border-border bg-surface-2 px-3 py-2">
+    <div className="grid grid-cols-[44px_1fr] items-center gap-3 rounded-[var(--radius-card)] border border-border bg-surface-2 px-3 py-2 sm:grid-cols-[44px_1fr_auto]">
       <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-[10px] bg-surface">
         {card.artworkUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -171,8 +230,29 @@ function DeckPreviewRow({ card }: { card: DeckCardPreview }) {
         <p className="truncate font-semibold">{card.title}</p>
         <p className="truncate text-sm text-text-muted">{card.artist}</p>
       </div>
-      <div className="flex flex-col items-end gap-1">
-        <span className="font-numeric text-base font-bold">{card.year}</span>
+      <div className="col-span-2 flex flex-wrap items-center justify-between gap-2 sm:col-span-1 sm:flex-col sm:items-end sm:justify-center">
+        {canEditYear ? (
+          <form className="flex items-center gap-2" onSubmit={handleSubmit}>
+            <label className="sr-only" htmlFor={`deck-card-year-${card.id}`}>
+              Evszam
+            </label>
+            <input
+              id={`deck-card-year-${card.id}`}
+              type="number"
+              inputMode="numeric"
+              min={1800}
+              max={2100}
+              value={draftYear}
+              onChange={(event) => setDraftYear(event.target.value)}
+              className="h-10 w-20 rounded-[var(--radius-button)] border-2 border-border bg-surface px-2 text-center font-numeric text-base font-bold outline-none focus-visible:border-accent"
+            />
+            <AppButton type="submit" size="sm" variant="secondary" disabled={!changed || updating}>
+              {updating ? "..." : "Mentés"}
+            </AppButton>
+          </form>
+        ) : (
+          <span className="font-numeric text-base font-bold">{card.year}</span>
+        )}
         {(card.spotifyOnly || card.yearUncertain) && (
           <span className="rounded-[var(--radius-pill)] border border-border px-2 py-0.5 text-[11px] text-text-muted">
             {card.spotifyOnly ? "Spotify" : "bizonytalan"}

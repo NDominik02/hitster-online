@@ -100,7 +100,7 @@ export async function listDecks(spotifyUserId: string, limit = 30): Promise<Deck
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return (data ?? []).map(adaptDeck);
+  return (data ?? []).map(adaptDeck).filter((deck) => !deck.isFeatured);
 }
 
 export async function listFeaturedDecks(limit = 30): Promise<Deck[]> {
@@ -132,6 +132,14 @@ export async function listDeckCards(
     pageSize: options?.pageSize ?? 50,
     query: options?.query ?? "",
   });
+}
+
+export async function updateDeckCardYear(
+  deckId: string,
+  cardId: string,
+  year: number
+): Promise<{ ok: true; cardId: string; year: number; yearUncertain: boolean; uncertainYearCount?: number }> {
+  return invoke("update_deck_card_year", { deckId, cardId, year });
 }
 
 export async function renameDeck(deckId: string, name: string): Promise<{ ok: true; name: string }> {
