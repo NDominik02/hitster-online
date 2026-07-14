@@ -1134,12 +1134,11 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
     }
 
     const total = tracks.length;
-    
-    // KIKOMMENTELVE / ELTÁVOLÍTVA: Nem ugorjuk át a precíz adatfeldolgozást!
-    // if (audioPipeline === 'spotify_only') {
-    //   await finalizeSpotifyOnlyDeck(supabase, deckId, tracks, playlistName, possiblyTruncatedAt100, playlistImportWarning);
-    //   return;
-    // }
+
+    if (audioPipeline === 'spotify_only') {
+      await finalizeSpotifyOnlyDeck(supabase, deckId, tracks, playlistName, possiblyTruncatedAt100, playlistImportWarning);
+      return;
+    }
 
     // Reload the accumulated per-track results from previous batches (if any).
     const { data: freshDeckRow } = await supabase.from('decks').select('report').eq('id', deckId).single();
@@ -1280,7 +1279,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
       })
       .eq('id', deckId);
 
-    await runAudioUploadPhase(supabase, deckId, accumulated, total, startedAt, audioPipeline);
+    await runAudioUploadPhase(supabase, deckId, accumulated, total, startedAt);
   } catch (err) {
     await supabase
       .from('decks')
@@ -1409,8 +1408,7 @@ async function runAudioUploadPhase(
   deckId: string,
   processed: ProcessedTrack[],
   total: number,
-  startedAt: number,
-  audioPipeline: string
+  startedAt: number
 ): Promise<void> {
   const usableTracks = processed.filter((t) => !t.excludeReason);
   // Playtest feedback (2026-07-06): a 'no_year' miatt kimaradt trackekhez most eltároljuk
@@ -1473,46 +1471,7 @@ async function runAudioUploadPhase(
     }
 
     const chunk = usableTracks.slice(cursor, Math.min(cursor + AUDIO_UPLOAD_CONCURRENCY, usableTracks.length));
-    
-    // Ha 'spotify_only' módban vagyunk, generáljuk le a kártyákat letöltés nélkül!
-    let results;
-    if (audioPipeline === 'spotify_only') {
-      results = await Promise.all(chunk.map(async (track) => {
-        // Lekérjük a borítóképet (ha nincs iTunes, akkor Spotify oembed fallback-kel)
-        let artworkUrl = track.itunesArtworkUrl;
-        if (!artworkUrl) {
-          artworkUrl = await fetchSpotifyOembedArtwork(track.raw.uri);
-        }
-
-        return {
-          card: {
-            id: crypto.randomUUID(),
-            deck_id: deckId,
-            title: track.raw.title,
-            artist: track.raw.artist,
-            year: track.finalYear,               // <-- Precíz évszám (MusicBrainz/iTunes)!
-            year_source: track.finalYearSource,   // <-- Precíz forrás!
-            year_uncertain: track.yearUncertain, // <-- Valós bizonytalansági flag!
-            audio_url: null,                     // <-- Nem foglal tárhelyet a Supabase-en!
-            audio_source: 'spotify' as const,    // <-- A kliensnek jelzi, hogy Spotify lejátszót használjon
-            artwork_url: artworkUrl,
-            spotify_uri: track.raw.uri,
-            duration_ms: track.raw.durationMs,
-          },
-          excluded: track.raw.uri ? null : { 
-            title: track.raw.title, 
-            artist: track.raw.artist, 
-            reason: 'no_preview' as const, 
-            detail: 'missing_spotify_uri_for_spotify_only' 
-          },
-          previewFallbackUsed: false,
-        };
-      }));
-    } else {
-      // Eredeti verified_audio ág, ami letölti az MP3 fájlokat
-      results = await Promise.all(chunk.map((track) => uploadTrackCard(supabase, deckId, track)));
-    }
-
+    const results = await Promise.all(chunk.map((track) => uploadTrackCard(supabase, deckId, track)));
     for (const result of results) {
       if (result.card) deckCardRows.push(result.card);
       if (result.excluded) uploadExcluded.push(result.excluded);
@@ -1563,8 +1522,6 @@ async function runAudioUploadPhase(
       coverage_pct: coveragePct,
       report: {
         ...finalGenerationDiagnostics(report),
-        audioPipeline, // Megtartja a beállított pipeline-t ('spotify_only' vagy 'verified_audio')
-        qualityStatus: audioPipeline === 'spotify_only' ? 'fast_spotify' : 'verified',
         processed: total,
         total,
         step: 'done',
@@ -1663,7 +1620,7 @@ Deno.serve(async (req: Request) => {
       const total = report.total ?? processed.length;
       // deckCardRows/uploadCursor are read fresh inside runAudioUploadPhase from decks.report.
       // @ts-ignore Deno global
-      EdgeRuntime.waitUntil(runAudioUploadPhase(adminClient(), body.deckId, processed, total, Date.now(), audioPipeline));
+      EdgeRuntime.waitUntil(runAudioUploadPhase(adminClient(), body.deckId, processed, total, Date.now()));
       return jsonResponse({ ok: true, continuing: true });
     }
 
