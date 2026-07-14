@@ -72,6 +72,12 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const FUNCTION_SELF_URL = `${SUPABASE_URL}/functions/v1/generate_deck`;
 
+type AudioPipeline = 'spotify_only' | 'verified_audio';
+
+function normalizeAudioPipeline(value: unknown): AudioPipeline {
+  return value === 'spotify_only' ? 'spotify_only' : 'verified_audio';
+}
+
 function inferAudioStorage(contentType: string | null, sourceUrl: string): { extension: 'mp3' | 'm4a'; contentType: string } {
   const type = (contentType ?? '').toLowerCase();
   const url = sourceUrl.toLowerCase();
@@ -89,6 +95,8 @@ function inferAudioStorage(contentType: string | null, sourceUrl: string): { ext
 
 function finalGenerationDiagnostics(report: Record<string, any>): Record<string, unknown> {
   return {
+    ...(typeof report.audioPipeline === 'string' ? { audioPipeline: report.audioPipeline } : {}),
+    ...(typeof report.qualityStatus === 'string' ? { qualityStatus: report.qualityStatus } : {}),
     ...(report.playlistName ? { playlistName: report.playlistName } : {}),
     ...(Array.isArray(report.sourcePlaylistIds) ? { sourcePlaylistIds: report.sourcePlaylistIds } : {}),
     ...(Array.isArray(report.sourceReports) ? { sourceReports: report.sourceReports } : {}),
@@ -117,6 +125,7 @@ interface RawTrack {
   spotifyPreviewUrl: string | null;
   spotifyReleaseYear: number | null;
   spotifyReleaseDatePrecision: string | null;
+  spotifyArtworkUrl: string | null;
   isPlayable: boolean;
 }
 
@@ -182,6 +191,7 @@ async function fetchPlaylistViaEmbed(playlistId: string): Promise<FetchPlaylistR
     spotifyPreviewUrl: t.audioPreview ? t.audioPreview.url : null,
     spotifyReleaseYear: null,
     spotifyReleaseDatePrecision: null,
+    spotifyArtworkUrl: null,
     isPlayable: t.isPlayable,
   }));
 
@@ -242,7 +252,7 @@ async function fetchPlaylistTracksAuthenticated(
         `https://api.spotify.com/v1/playlists/${playlistId}/items` +
         `?fields=${
           includeAlbumRelease
-            ? 'items(item(uri,name,artists(name),duration_ms,type,album(release_date,release_date_precision))),total'
+            ? 'items(item(uri,name,artists(name),duration_ms,type,album(release_date,release_date_precision,images(url,width,height)))),total'
             : 'items(item(uri,name,artists(name),duration_ms,type)),total'
         }&limit=${SPOTIFY_PLAYLIST_PAGE_LIMIT}&offset=${offset}`;
 
@@ -306,6 +316,11 @@ async function fetchPlaylistTracksAuthenticated(
           spotifyPreviewUrl: t.preview_url ?? null,
           spotifyReleaseYear: parseReleaseYear(t.album?.release_date),
           spotifyReleaseDatePrecision: t.album?.release_date_precision ?? null,
+          spotifyArtworkUrl:
+            (t.album?.images ?? [])
+              .slice()
+              .sort((a: { width?: number }, b: { width?: number }) => (a.width ?? 0) - (b.width ?? 0))
+              .find((image: { url?: string }) => typeof image.url === 'string')?.url ?? null,
           isPlayable: t.is_playable ?? true,
         });
         if (tracks.length >= maxTracks) break;
@@ -679,6 +694,108 @@ async function processTrack(
   };
 }
 
+async function finalizeSpotifyOnlyDeck(
+  supabase: ReturnType<typeof adminClient>,
+  deckId: string,
+  tracks: RawTrack[],
+  playlistName: string,
+  possiblyTruncatedAt100: boolean,
+  playlistImportWarning?: string
+): Promise<void> {
+  const deckCardRows: any[] = [];
+  const excluded: any[] = [];
+
+  for (const track of tracks) {
+    if (!track.spotifyReleaseYear) {
+      excluded.push({
+        title: track.title,
+        artist: track.artist,
+        reason: 'no_year',
+        index: track.index,
+        hasSource: Boolean(track.uri),
+        ...(track.uri
+          ? {
+              spotifyUri: track.uri,
+              durationMs: track.durationMs,
+              spotifyArtworkUrl: track.spotifyArtworkUrl,
+              audioSource: 'spotify',
+            }
+          : {}),
+      });
+      continue;
+    }
+
+    if (!track.uri) {
+      excluded.push({
+        title: track.title,
+        artist: track.artist,
+        reason: 'no_preview',
+        index: track.index,
+        detail: 'missing_spotify_uri',
+      });
+      continue;
+    }
+
+    deckCardRows.push({
+      id: crypto.randomUUID(),
+      deck_id: deckId,
+      title: track.title,
+      artist: track.artist,
+      year: track.spotifyReleaseYear,
+      year_source: 'spotify_album',
+      year_uncertain: true,
+      audio_url: null,
+      audio_source: 'spotify',
+      artwork_url: track.spotifyArtworkUrl,
+      spotify_uri: track.uri,
+      duration_ms: track.durationMs,
+    });
+  }
+
+  if (deckCardRows.length > 0) {
+    const { error: cardsInsertError } = await supabase.from('deck_cards').insert(deckCardRows);
+    if (cardsInsertError) {
+      await supabase
+        .from('decks')
+        .update({ status: 'failed', report: { step: 'failed', reason: 'deck_cards_insert_failed: ' + cardsInsertError.message } })
+        .eq('id', deckId);
+      return;
+    }
+  }
+
+  const total = tracks.length;
+  const usableCount = deckCardRows.length;
+  const coveragePct = total > 0 ? Math.round((usableCount / total) * 1000) / 10 : 0;
+  const { data: deckRow } = await supabase.from('decks').select('report').eq('id', deckId).single();
+  const report = (deckRow?.report ?? {}) as Record<string, any>;
+
+  await supabase
+    .from('decks')
+    .update({
+      status: 'ready',
+      usable_count: usableCount,
+      coverage_pct: coveragePct,
+      report: {
+        ...finalGenerationDiagnostics(report),
+        audioPipeline: 'spotify_only',
+        qualityStatus: 'fast_spotify',
+        processed: total,
+        total,
+        step: 'done',
+        playlistName,
+        possiblyTruncatedAt100,
+        ...(playlistImportWarning ? { playlistImportWarning } : {}),
+        fetchedTrackCount: tracks.length,
+        excluded,
+        uncertainYearCount: usableCount,
+        spotifyOnlyCount: usableCount,
+        previewFallbackCount: 0,
+        meetsMinimum: usableCount >= MIN_USABLE_CARDS,
+      },
+    })
+    .eq('id', deckId);
+}
+
 // ---------------------------------------------------------------------------
 // Background worker: processes ONE time-boxed batch, persists progress, and
 // self-chains (re-invokes itself over HTTP) if there's more to do. This is
@@ -700,6 +817,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
     // Playlist fetch only needs to happen once — cache it in decks.report so
     // resumed invocations (self-chained batches) don't re-fetch it.
     const existingReport = (deckRow?.report ?? {}) as any;
+    const audioPipeline = normalizeAudioPipeline(existingReport.audioPipeline);
     if (existingReport.tracksCache) {
       tracks = existingReport.tracksCache;
       playlistName = existingReport.playlistName ?? playlistId;
@@ -711,7 +829,108 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
           ? (existingReport.sourcePlaylistIds as string[])
           : [playlistId];
 
-      if (sourcePlaylistIds.length > 1) {
+      if (audioPipeline === 'spotify_only') {
+        const ownerId = deckRow?.owner_id as string | undefined;
+        const token = ownerId ? await getValidSpotifyAccessToken(supabase, ownerId) : null;
+        if (!token) {
+          await supabase
+            .from('decks')
+            .update({
+              status: 'failed',
+              report: {
+                ...existingReport,
+                step: 'failed',
+                reason: 'spotify_connection_required',
+                errorCode: 'spotify_connection_required',
+              },
+            })
+            .eq('id', deckId);
+          return;
+        }
+
+        const sourceNames: string[] = [];
+        const sourceReports: Array<{
+          playlistId: string;
+          name: string;
+          trackCount: number;
+          possiblyTruncatedAt100: boolean;
+          spotifyTotal?: number;
+        }> = [];
+        const mergedTracks: RawTrack[] = [];
+        const sourceWarnings: string[] = [];
+
+        for (const sourcePlaylistId of sourcePlaylistIds) {
+          const full = await fetchPlaylistTracksAuthenticated(sourcePlaylistId, token.accessToken, MAX_TRACKS_PREMIUM);
+          if (!full.ok || !full.tracks) {
+            await supabase
+              .from('decks')
+              .update({
+                status: 'failed',
+                report: {
+                  ...existingReport,
+                  step: 'failed',
+                  reason: full.reason ?? 'playlist_fetch_failed',
+                  errorCode: 'playlist_fetch_failed',
+                  sourcePlaylistId,
+                },
+              })
+              .eq('id', deckId);
+            return;
+          }
+
+          const sourceName = full.playlistName ?? sourcePlaylistId;
+          const sourcePossiblyTruncatedAt100 =
+            full.tracks.length >= MAX_TRACKS_PREMIUM &&
+            typeof full.spotifyTotal === 'number' &&
+            full.spotifyTotal > full.tracks.length;
+          if (sourcePossiblyTruncatedAt100) {
+            sourceWarnings.push(`${sourceName}: a Spotify playlist nagyon hosszú, ezért az első ${MAX_TRACKS_PREMIUM} számot importáltuk.`);
+          }
+
+          sourceNames.push(sourceName);
+          sourceReports.push({
+            playlistId: sourcePlaylistId,
+            name: sourceName,
+            trackCount: full.tracks.length,
+            possiblyTruncatedAt100: sourcePossiblyTruncatedAt100,
+            spotifyTotal: full.spotifyTotal,
+          });
+          mergedTracks.push(...full.tracks);
+        }
+
+        tracks = dedupeRawTracks(mergedTracks);
+        playlistName = existingReport.deckName ?? sourceNames.join(' + ');
+        possiblyTruncatedAt100 = sourceReports.some((source) => source.possiblyTruncatedAt100);
+        playlistImportWarning =
+          sourceWarnings.length > 0
+            ? sourceWarnings.length === 1
+              ? sourceWarnings[0]
+              : `${sourceWarnings.length} playlist importkorlátba futott. Részletek: ${sourceWarnings.join(' ')}`
+            : undefined;
+
+        await supabase
+          .from('decks')
+          .update({
+            name: playlistName,
+            total_tracks: tracks.length,
+            report: {
+              ...existingReport,
+              audioPipeline,
+              qualityStatus: 'fast_spotify',
+              processed: 0,
+              total: tracks.length,
+              step: 'building_spotify_only_cards',
+              tracksCache: tracks,
+              playlistName,
+              possiblyTruncatedAt100,
+              playlistImportWarning,
+              sourcePlaylistIds,
+              sourceReports,
+              mergedTrackCountBeforeDedupe: mergedTracks.length,
+            },
+          })
+          .eq('id', deckId);
+      } else if (sourcePlaylistIds.length > 1) {
         const ownerId = deckRow?.owner_id as string | undefined;
         const sourceNames: string[] = [];
         const sourceReports: Array<{ playlistId: string; name: string; trackCount: number; possiblyTruncatedAt100: boolean }> = [];
@@ -805,6 +1024,8 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
             name: playlistName,
             total_tracks: tracks.length,
             report: {
+              audioPipeline,
+              qualityStatus: 'verified',
               processed: 0,
               total: tracks.length,
               step: 'resolving_years',
@@ -888,6 +1109,8 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
           name: playlistName,
           total_tracks: tracks.length,
           report: {
+            audioPipeline,
+            qualityStatus: 'verified',
             processed: 0,
             total: tracks.length,
             step: 'resolving_years',
@@ -903,6 +1126,11 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
     }
 
     const total = tracks.length;
+
+    if (audioPipeline === 'spotify_only') {
+      await finalizeSpotifyOnlyDeck(supabase, deckId, tracks, playlistName, possiblyTruncatedAt100, playlistImportWarning);
+      return;
+    }
 
     // Reload the accumulated per-track results from previous batches (if any).
     const { data: freshDeckRow } = await supabase.from('decks').select('report').eq('id', deckId).single();
@@ -1430,6 +1658,7 @@ Deno.serve(async (req: Request) => {
     typeof body.deckName === 'string' && body.deckName.trim().length > 0
       ? body.deckName.trim().slice(0, 120)
       : sourceKey;
+  const audioPipeline = normalizeAudioPipeline(body.audioPipeline);
 
   const supabase = adminClient();
 
@@ -1451,7 +1680,15 @@ Deno.serve(async (req: Request) => {
       owner_id: callerUid,
       spotify_owner_id: spotifyConnection?.spotify_user_id ?? null,
       status: 'generating',
-      report: { processed: 0, total: 0, step: 'fetching_playlist', sourcePlaylistIds: playlistIds, deckName },
+      report: {
+        processed: 0,
+        total: 0,
+        step: 'fetching_playlist',
+        sourcePlaylistIds: playlistIds,
+        deckName,
+        audioPipeline,
+        qualityStatus: audioPipeline === 'spotify_only' ? 'fast_spotify' : 'verified',
+      },
     })
     .select()
     .single();

@@ -279,12 +279,25 @@ export default function HostCreatePage() {
    */
   async function handleGenerate(
     urlOverride?: string,
-    options?: { playlistUrls?: string[]; sourceKey?: string; deckName?: string }
+    options?: {
+      playlistUrls?: string[];
+      sourceKey?: string;
+      deckName?: string;
+      audioPipeline?: "spotify_only" | "verified_audio";
+    }
   ) {
     const url = (urlOverride ?? playlistUrl).trim();
     const urls = options?.playlistUrls ?? (urlOverride ? [url] : playlistUrls);
     if (!urlOverride && !playlistUrlsLookValid) {
       setError("Érvénytelen Spotify playlist link. Ellenőrizd, és próbáld újra.");
+      return;
+    }
+    if (!urlOverride && spotifyStatus !== "connected") {
+      setError("Saját pakli létrehozásához csatlakoztass Spotify Premium fiókot. Az ajánlott paklik továbbra is mennek bejelentkezés nélkül.");
+      return;
+    }
+    if (!urlOverride && spotifyAccount?.product !== "premium") {
+      setError("Saját pakli létrehozásához Spotify Premium kell, mert ezek a paklik Storage-feltöltés nélkül, Spotify-ról játszanak.");
       return;
     }
     setError(null);
@@ -298,6 +311,7 @@ export default function HostCreatePage() {
       const { deckId } = await generateDeck(urls[0] ?? url, {
         ...options,
         playlistUrls: urls.length > 1 ? urls : options?.playlistUrls,
+        audioPipeline: options?.audioPipeline ?? "spotify_only",
       });
 
       // Pollingozzuk a decks táblát ~2 mp-enként, amíg ready/failed nem lesz (BACKEND-NOTES 4.).
@@ -659,7 +673,7 @@ export default function HostCreatePage() {
               currentStep={stepLabel(progress.step)}
             />
             <p className="text-text-muted text-sm">
-              Ez playlist mérettől függően több percig is eltarthat (MusicBrainz + iTunes lekérdezések).
+              Saját paklinál Spotify-only módot használunk, ezért nincs Supabase hangfájl-feltöltés.
             </p>
             {progress.warning && (
               <p className="rounded-[var(--radius-card)] border border-warning bg-warning/10 px-4 py-3 text-sm text-warning">
@@ -743,6 +757,8 @@ function stepLabel(step: string): string {
       return "Playlist lekérése…";
     case "resolving_years":
       return "Évszámok lekérése (MusicBrainz)…";
+    case "building_spotify_only_cards":
+      return "Spotify-kártyák előkészítése…";
     case "uploading_audio":
       return "Hangfájlok feltöltése…";
     case "done":

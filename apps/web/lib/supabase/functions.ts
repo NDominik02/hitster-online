@@ -67,13 +67,19 @@ async function invoke<T>(name: string, body: Record<string, unknown>): Promise<T
  */
 export async function generateDeck(
   playlistUrl: string,
-  options?: { playlistUrls?: string[]; sourceKey?: string; deckName?: string }
+  options?: {
+    playlistUrls?: string[];
+    sourceKey?: string;
+    deckName?: string;
+    audioPipeline?: "spotify_only" | "verified_audio";
+  }
 ): Promise<{ deckId: string }> {
   return invoke<{ deckId: string; status: string; message?: string }>("generate_deck", {
     playlistUrl,
     ...(options?.playlistUrls ? { playlistUrls: options.playlistUrls } : {}),
     ...(options?.sourceKey ? { sourceKey: options.sourceKey } : {}),
     ...(options?.deckName ? { deckName: options.deckName } : {}),
+    ...(options?.audioPipeline ? { audioPipeline: options.audioPipeline } : {}),
   });
 }
 
