@@ -72,6 +72,7 @@ export async function generateDeck(
     sourceKey?: string;
     deckName?: string;
     audioPipeline?: "spotify_only" | "verified_audio";
+    curationSourceDeckId?: string;
   }
 ): Promise<{ deckId: string }> {
   return invoke<{ deckId: string; status: string; message?: string }>("generate_deck", {
@@ -80,7 +81,46 @@ export async function generateDeck(
     ...(options?.sourceKey ? { sourceKey: options.sourceKey } : {}),
     ...(options?.deckName ? { deckName: options.deckName } : {}),
     ...(options?.audioPipeline ? { audioPipeline: options.audioPipeline } : {}),
+    ...(options?.curationSourceDeckId ? { curationSourceDeckId: options.curationSourceDeckId } : {}),
   });
+}
+
+export interface AdminStatus {
+  isAdmin: boolean;
+  role: "curator" | "admin" | null;
+  spotifyUserId: string | null;
+  displayName: string | null;
+}
+
+export interface AdminDeck {
+  id: string;
+  name: string;
+  sourcePlaylistId: string;
+  sourcePlaylistUrl: string | null;
+  totalTracks: number;
+  usableCount: number;
+  coveragePct: number;
+  status: string;
+  isPublic: boolean;
+  isFeatured: boolean;
+  audioPipeline: string | null;
+  qualityStatus: string | null;
+  spotifyOnlyCount: number | null;
+  promotedFromDeckId: string | null;
+  createdAt: string;
+}
+
+export async function getAdminStatus(): Promise<AdminStatus> {
+  return invoke<AdminStatus>("admin_status", {});
+}
+
+export async function listAdminDecks(): Promise<AdminDeck[]> {
+  const result = await invoke<{ decks: AdminDeck[] }>("admin_list_decks", {});
+  return result.decks;
+}
+
+export async function setFeaturedDeck(deckId: string, featured: boolean): Promise<{ ok: true }> {
+  return invoke<{ ok: true }>("set_featured_deck", { deckId, featured });
 }
 
 /** Egyszeri lekérdezés a decks tábláról (RLS: publikus, anonim saját vagy Spotify-fiókhoz tartozó). */

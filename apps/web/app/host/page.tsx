@@ -24,9 +24,16 @@ import {
   listFeaturedDecks,
   deleteDeck,
   renameDeck,
+  getAdminStatus,
+  listAdminDecks,
+  setFeaturedDeck,
+  type AdminDeck,
+  type AdminStatus,
 } from "@/lib/supabase/functions";
 import { startSpotifyLogin } from "@/lib/spotify/pkce";
 import type { Deck } from "@/lib/game/types";
+
+type DeckSource = "new" | "featured" | "library" | "curation";
 
 /**
  * H1 — Létrehozás (host): playlist forrás + beállítások (DESIGN H1 wireframe).
@@ -109,7 +116,7 @@ export default function HostCreatePage() {
   // Spotify-fiókhoz tartozó, korábban generált) között. A
   // könyvtárból/ajánlottból választás — ha van már kész pakli rá — azonnal
   // a "report" fázisba ugrik, generálás/pollingozás nélkül.
-  const [deckSource, setDeckSource] = useState<"new" | "featured" | "library">("new");
+  const [deckSource, setDeckSource] = useState<DeckSource>("new");
   const [featuredDecks, setFeaturedDecks] = useState<Deck[]>([]);
   const [featuredLoading, setFeaturedLoading] = useState(false);
   const [libraryDecks, setLibraryDecks] = useState<Deck[]>([]);
@@ -118,6 +125,31 @@ export default function HostCreatePage() {
   const [previewCanEditYear, setPreviewCanEditYear] = useState(false);
   const [renamingDeckId, setRenamingDeckId] = useState<string | null>(null);
   const [deletingDeckId, setDeletingDeckId] = useState<string | null>(null);
+  const [adminStatus, setAdminStatus] = useState<AdminStatus | null>(null);
+  const [adminDecks, setAdminDecks] = useState<AdminDeck[]>([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminBusyDeckId, setAdminBusyDeckId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (spotifyStatus !== "connected") {
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        await ensureAnonymousSession();
+        const status = await getAdminStatus();
+        if (!cancelled) setAdminStatus(status);
+      } catch {
+        if (!cancelled) setAdminStatus(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [spotifyStatus]);
 
   useEffect(() => {
     if (
@@ -150,7 +182,8 @@ export default function HostCreatePage() {
     };
   }, [deckSource, spotifyAccount, loadedLibraryOwnerId]);
 
-  async function handleSelectSource(source: "new" | "featured" | "library") {
+  async function handleSelectSource(source: DeckSource) {
+    if (source === "curation" && !adminStatus?.isAdmin) return;
     setDeckSource(source);
     setError(null);
     if (source === "featured" && featuredDecks.length === 0) {
@@ -163,6 +196,9 @@ export default function HostCreatePage() {
       } finally {
         setFeaturedLoading(false);
       }
+    }
+    if (source === "curation") {
+      await refreshAdminDecks();
     }
   }
 
@@ -186,6 +222,24 @@ export default function HostCreatePage() {
     setLibraryDecks(decks);
     setLoadedLibraryOwnerId(spotifyAccount.spotifyUserId);
     return decks;
+  }
+
+  async function refreshAdminDecks() {
+    if (!adminStatus?.isAdmin) {
+      setAdminDecks([]);
+      return [];
+    }
+    setAdminLoading(true);
+    try {
+      const decks = await listAdminDecks();
+      setAdminDecks(decks);
+      return decks;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nem sikerült betölteni a kurátori paklikat.");
+      return [];
+    } finally {
+      setAdminLoading(false);
+    }
   }
 
   async function handleRenameLibraryDeck(selected: Deck) {
@@ -231,6 +285,68 @@ export default function HostCreatePage() {
     }
   }
 
+  function adminDeckPlaylistUrls(selected: AdminDeck): string[] {
+    return (selected.sourcePlaylistUrl ?? "")
+      .split(/\s+/)
+      .map((url) => url.trim())
+      .filter((url) => /^https:\/\/open\.spotify\.com\/playlist\/[a-zA-Z0-9]+/.test(url));
+  }
+
+  async function handlePrepareFeaturedDeck(selected: AdminDeck) {
+    if (adminBusyDeckId) return;
+    const urls = adminDeckPlaylistUrls(selected);
+    if (urls.length === 0) {
+      setError("Ehhez a paklihoz nincs újragenerálható Spotify playlist link.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Előkészíted ajánlottnak?\n\n${selected.name}\n\nEz a lassabb, pontosabb generálást futtatja és feltölti a preview hangokat.`
+    );
+    if (!confirmed) return;
+
+    setAdminBusyDeckId(selected.id);
+    setError(null);
+    try {
+      const { deckId } = await generateDeck(urls[0], {
+        playlistUrls: urls.length > 1 ? urls : undefined,
+        sourceKey: `featured-${selected.id}`,
+        deckName: selected.name,
+        audioPipeline: "verified_audio",
+        curationSourceDeckId: selected.id,
+      });
+      const prepared = await pollDeckUntilReady(deckId);
+      if (prepared.status === "failed") {
+        throw new Error(prepared.progress.failReason || "Nem sikerült előkészíteni az ajánlott paklit.");
+      }
+      await refreshAdminDecks();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nem sikerült előkészíteni az ajánlott paklit.");
+    } finally {
+      setAdminBusyDeckId(null);
+    }
+  }
+
+  async function handleSetFeaturedDeck(selected: AdminDeck, featured: boolean) {
+    if (adminBusyDeckId) return;
+    const confirmed = window.confirm(
+      featured
+        ? `Publikálod ajánlott pakliként?\n\n${selected.name}`
+        : `Leveszed az ajánlott paklik közül?\n\n${selected.name}`
+    );
+    if (!confirmed) return;
+
+    setAdminBusyDeckId(selected.id);
+    setError(null);
+    try {
+      await setFeaturedDeck(selected.id, featured);
+      await Promise.all([refreshAdminDecks(), listFeaturedDecks().then(setFeaturedDecks)]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nem sikerült menteni az ajánlott állapotot.");
+    } finally {
+      setAdminBusyDeckId(null);
+    }
+  }
+
   function handleSelectFeatured(pl: Deck) {
     setDeck(pl);
     setPhase("report");
@@ -256,7 +372,9 @@ export default function HostCreatePage() {
       setSpotifyStatus("not_connected");
       setLibraryDecks([]);
       setLoadedLibraryOwnerId(null);
-      if (deckSource === "library") setDeck(null);
+      setAdminStatus(null);
+      setAdminDecks([]);
+      if (deckSource === "library" || deckSource === "curation") setDeck(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nem sikerült kijelentkezni a Spotify-fiókból.");
     } finally {
@@ -474,6 +592,7 @@ export default function HostCreatePage() {
                   { value: "new", label: "Új pakli" },
                   { value: "featured", label: "Ajánlott" },
                   { value: "library", label: "Meglévő pakli" },
+                  ...(adminStatus?.isAdmin ? [{ value: "curation" as const, label: "Kuralas" }] : []),
                 ]}
               />
 
@@ -562,6 +681,66 @@ export default function HostCreatePage() {
                     renamingDeckId={renamingDeckId}
                     deletingDeckId={deletingDeckId}
                   />
+                </div>
+              )}
+
+              {deckSource === "curation" && (
+                <div className="mt-3 space-y-2">
+                  {adminLoading ? (
+                    <p className="text-text-muted text-sm">Kuratalt paklik betoltese...</p>
+                  ) : adminDecks.length === 0 ? (
+                    <p className="text-text-muted text-sm">Nincs megjelenitheto pakli.</p>
+                  ) : (
+                    adminDecks.map((adminDeck) => {
+                      const busy = adminBusyDeckId === adminDeck.id;
+                      const pipelineLabel =
+                        adminDeck.audioPipeline === "spotify_only"
+                          ? "Spotify-only"
+                          : adminDeck.audioPipeline === "verified_audio"
+                            ? "Verified audio"
+                            : "Legacy";
+                      const canPrepare = adminDeck.status === "ready" && adminDeck.audioPipeline !== "verified_audio";
+                      const canPublish =
+                        adminDeck.status === "ready" &&
+                        !adminDeck.isFeatured &&
+                        adminDeck.audioPipeline !== "spotify_only";
+
+                      return (
+                        <div
+                          key={adminDeck.id}
+                          className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-surface-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold">{adminDeck.name}</p>
+                            <p className="mt-0.5 text-xs text-text-muted">
+                              {adminDeck.usableCount} kartya
+                              {adminDeck.totalTracks !== adminDeck.usableCount ? ` / ${adminDeck.totalTracks} szam` : ""} -{" "}
+                              {adminDeck.coveragePct.toFixed(0)}% - {pipelineLabel}
+                              {adminDeck.isFeatured ? " - ajanlott" : ""}
+                              {adminDeck.status !== "ready" ? ` - ${adminDeck.status}` : ""}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap items-center gap-2">
+                            {canPrepare && (
+                              <AppButton size="sm" variant="secondary" disabled={busy} onClick={() => handlePrepareFeaturedDeck(adminDeck)}>
+                                {busy ? "Elokeszites..." : "Elokeszites"}
+                              </AppButton>
+                            )}
+                            {canPublish && (
+                              <AppButton size="sm" variant="secondary" disabled={busy} onClick={() => handleSetFeaturedDeck(adminDeck, true)}>
+                                Publikalas
+                              </AppButton>
+                            )}
+                            {adminDeck.isFeatured && (
+                              <AppButton size="sm" variant="danger" disabled={busy} onClick={() => handleSetFeaturedDeck(adminDeck, false)}>
+                                Levetel
+                              </AppButton>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               )}
 

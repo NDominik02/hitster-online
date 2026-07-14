@@ -38,6 +38,7 @@ import { adminClient } from '../_shared/supabase.ts';
 import { jsonResponse, errorResponse, handleOptions } from '../_shared/cors.ts';
 import { normalize, primaryArtist, similarity, parsePlaylistId, sleep } from '../_shared/util.ts';
 import { getValidSpotifyAccessToken } from '../_shared/spotify.ts';
+import { callerIsAdmin } from '../_shared/admin.ts';
 
 const SPOTIFY_EMBED_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
@@ -76,6 +77,10 @@ type AudioPipeline = 'spotify_only' | 'verified_audio';
 
 function normalizeAudioPipeline(value: unknown): AudioPipeline {
   return value === 'spotify_only' ? 'spotify_only' : 'verified_audio';
+}
+
+function normalizeRequestedAudioPipeline(value: unknown): AudioPipeline {
+  return value === 'verified_audio' ? 'verified_audio' : 'spotify_only';
 }
 
 function inferAudioStorage(contentType: string | null, sourceUrl: string): { extension: 'mp3' | 'm4a'; contentType: string } {
@@ -1658,9 +1663,18 @@ Deno.serve(async (req: Request) => {
     typeof body.deckName === 'string' && body.deckName.trim().length > 0
       ? body.deckName.trim().slice(0, 120)
       : sourceKey;
-  const audioPipeline = normalizeAudioPipeline(body.audioPipeline);
+  const audioPipeline = normalizeRequestedAudioPipeline(body.audioPipeline);
+  const curationSourceDeckId =
+    typeof body.curationSourceDeckId === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.curationSourceDeckId)
+      ? body.curationSourceDeckId
+      : null;
 
   const supabase = adminClient();
+
+  if (audioPipeline === 'verified_audio' && !(await callerIsAdmin(supabase, callerUid))) {
+    return errorResponse('admin_required', 'Csak kuratori joggal lehet ajanlottra elokeszitett paklit generalni.', 403);
+  }
 
   const { data: spotifyConnection } = await supabase
     .from('spotify_connections')
@@ -1680,6 +1694,7 @@ Deno.serve(async (req: Request) => {
       owner_id: callerUid,
       spotify_owner_id: spotifyConnection?.spotify_user_id ?? null,
       status: 'generating',
+      is_public: audioPipeline === 'spotify_only',
       report: {
         processed: 0,
         total: 0,
@@ -1688,6 +1703,7 @@ Deno.serve(async (req: Request) => {
         deckName,
         audioPipeline,
         qualityStatus: audioPipeline === 'spotify_only' ? 'fast_spotify' : 'verified',
+        ...(curationSourceDeckId ? { promotedFromDeckId: curationSourceDeckId } : {}),
       },
     })
     .select()
