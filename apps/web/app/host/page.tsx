@@ -592,7 +592,7 @@ export default function HostCreatePage() {
                   { value: "new", label: "Új pakli" },
                   { value: "featured", label: "Ajánlott" },
                   { value: "library", label: "Meglévő pakli" },
-                  ...(adminStatus?.isAdmin ? [{ value: "curation" as const, label: "Kuralas" }] : []),
+                  ...(adminStatus?.isAdmin ? [{ value: "curation" as const, label: "Kurálás" }] : []),
                 ]}
               />
 
@@ -687,9 +687,9 @@ export default function HostCreatePage() {
               {deckSource === "curation" && (
                 <div className="mt-3 space-y-2">
                   {adminLoading ? (
-                    <p className="text-text-muted text-sm">Kuratalt paklik betoltese...</p>
+                    <p className="text-text-muted text-sm">Kurált paklik betöltése...</p>
                   ) : adminDecks.length === 0 ? (
-                    <p className="text-text-muted text-sm">Nincs megjelenitheto pakli.</p>
+                    <p className="text-text-muted text-sm">Nincs megjeleníthető pakli.</p>
                   ) : (
                     adminDecks.map((adminDeck) => {
                       const busy = adminBusyDeckId === adminDeck.id;
@@ -713,27 +713,27 @@ export default function HostCreatePage() {
                           <div className="min-w-0">
                             <p className="truncate font-semibold">{adminDeck.name}</p>
                             <p className="mt-0.5 text-xs text-text-muted">
-                              {adminDeck.usableCount} kartya
-                              {adminDeck.totalTracks !== adminDeck.usableCount ? ` / ${adminDeck.totalTracks} szam` : ""} -{" "}
+                              {adminDeck.usableCount} kártya
+                              {adminDeck.totalTracks !== adminDeck.usableCount ? ` / ${adminDeck.totalTracks} szám` : ""} -{" "}
                               {adminDeck.coveragePct.toFixed(0)}% - {pipelineLabel}
-                              {adminDeck.isFeatured ? " - ajanlott" : ""}
+                              {adminDeck.isFeatured ? " - ajánlott" : ""}
                               {adminDeck.status !== "ready" ? ` - ${adminDeck.status}` : ""}
                             </p>
                           </div>
                           <div className="flex shrink-0 flex-wrap items-center gap-2">
                             {canPrepare && (
                               <AppButton size="sm" variant="secondary" disabled={busy} onClick={() => handlePrepareFeaturedDeck(adminDeck)}>
-                                {busy ? "Elokeszites..." : "Elokeszites"}
+                                {busy ? "Előkészítés..." : "Előkészítés"}
                               </AppButton>
                             )}
                             {canPublish && (
                               <AppButton size="sm" variant="secondary" disabled={busy} onClick={() => handleSetFeaturedDeck(adminDeck, true)}>
-                                Publikalas
+                                Publikálás
                               </AppButton>
                             )}
                             {adminDeck.isFeatured && (
                               <AppButton size="sm" variant="danger" disabled={busy} onClick={() => handleSetFeaturedDeck(adminDeck, false)}>
-                                Levetel
+                                Levétel
                               </AppButton>
                             )}
                           </div>
