@@ -1543,6 +1543,8 @@ async function finalizeAccurateSpotifyDeck(
       },
     })
     .eq('id', deckId);
+
+  await hideReplacedSpotifyOnlySource(supabase, report.promotedFromDeckId);
 }
 
 async function hideReplacedSpotifyOnlySource(supabase: ReturnType<typeof adminClient>, sourceDeckId: unknown): Promise<void> {

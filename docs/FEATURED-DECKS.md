@@ -24,12 +24,15 @@ remain playable without Spotify Premium.
 Admins are allowlisted in `admin_users` by `spotify_user_id`. The host create
 page shows an `Admin` tab only for connected admin/curator accounts.
 
-Curators should use this flow:
+Curators have two preparation flows:
 
-1. Pick a user/source deck in the admin list.
-2. Run `Letoltott verzio keszitese`, which creates a new `verified_audio`
-   copy from the source playlist and stores uploaded preview audio.
-3. Publish the prepared copy with `Ajanlottkent megjelenit`.
+- Paste playlist links in the Admin tab and run `Letoltott verzio keszitese`.
+  This creates a new `verified_audio` deck and stores uploaded preview audio.
+- Pick a `spotify_only` deck in the admin list and run
+  `Megbizhato verzio keszitese`. This creates an `accurate_spotify` copy with
+  more reliable years, but does not upload preview audio.
+
+Prepared decks can be published with `Ajanlottkent megjelenit`.
 
 The publish step calls `set_featured_deck`; direct browser writes to `decks` are
 not allowed. Publishing is rejected if the deck is still `spotify_only`, is not
@@ -44,10 +47,10 @@ the recommended list without touching the original user deck.
 ## Ownership Notes
 
 Prepared featured decks are separate curated copies. When a `spotify_only`
-source deck is replaced by a `verified_audio` copy, the source deck is deleted
-immediately if no room references it. If an existing room still points at the
-source deck, it is first hidden with `status = 'deleted'` and `is_public = false`
-so active games cannot break.
+source deck is replaced by an `accurate_spotify` or `verified_audio` copy, the
+source deck is deleted immediately if no room references it. If an existing room
+still points at the source deck, it is first hidden with `status = 'deleted'`
+and `is_public = false` so active games cannot break.
 
 The `cleanup_deleted_decks` Edge Function permanently removes hidden decks after
 rooms no longer reference them. It deletes Storage audio first, then `deck_cards`,
