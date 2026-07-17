@@ -12,7 +12,10 @@ import { HelpModal } from "@/components/system/HelpModal";
 import { DeckLibrary } from "@/components/lobby/DeckLibrary";
 import { DeckQualityBadge } from "@/components/lobby/DeckQualityBadge";
 import { DeckPreviewModal } from "@/components/lobby/DeckPreviewModal";
-import { RosterBuilder, type RosterEntry } from "@/components/pass-and-play/RosterBuilder";
+import {
+  RosterBuilder,
+  type RosterEntry,
+} from "@/components/pass-and-play/RosterBuilder";
 import { ensureAnonymousSession } from "@/lib/supabase/client";
 import {
   generateDeck,
@@ -35,7 +38,10 @@ import { startSpotifyLogin } from "@/lib/spotify/pkce";
 import type { Deck } from "@/lib/game/types";
 
 type DeckSource = "new" | "featured" | "library" | "curation";
-type GenerationPipeline = "spotify_only" | "accurate_spotify" | "verified_audio";
+type GenerationPipeline =
+  | "spotify_only"
+  | "accurate_spotify"
+  | "verified_audio";
 
 /**
  * H1 — Létrehozás (host): playlist forrás + beállítások (DESIGN H1 wireframe).
@@ -61,8 +67,15 @@ export default function HostCreatePage() {
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
 
-  const [phase, setPhase] = useState<"mode" | "form" | "generating" | "report">("mode");
-  const [progress, setProgress] = useState<{ processed: number; total: number; step: string; warning?: string }>({
+  const [phase, setPhase] = useState<"mode" | "form" | "generating" | "report">(
+    "mode",
+  );
+  const [progress, setProgress] = useState<{
+    processed: number;
+    total: number;
+    step: string;
+    warning?: string;
+  }>({
     processed: 0,
     total: 0,
     step: "fetching_playlist",
@@ -72,13 +85,17 @@ export default function HostCreatePage() {
 
   // PP0 (Pass-and-play mód-választó) — US-PP1: a mód a szoba-létrehozás ELŐTT dől el,
   // menet közben nem váltható. "shared_screen" a jelenlegi (F1/F2) host+player mód.
-  const [mode, setMode] = useState<"shared_screen" | "pass_and_play" | null>(null);
+  const [mode, setMode] = useState<"shared_screen" | "pass_and_play" | null>(
+    null,
+  );
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [creatingRoster, setCreatingRoster] = useState(false);
 
   // A token az anonim Supabase sessionhöz tartozik, de a paklik stabil
   // tulajdonosa a Spotify-fiók. Így másik eszközön is ugyanaz a könyvtár nyílik meg.
-  const [spotifyStatus, setSpotifyStatus] = useState<"checking" | "connected" | "not_connected">("checking");
+  const [spotifyStatus, setSpotifyStatus] = useState<
+    "checking" | "connected" | "not_connected"
+  >("checking");
   const [spotifyAccount, setSpotifyAccount] = useState<{
     spotifyUserId: string;
     displayName: string | null;
@@ -91,7 +108,8 @@ export default function HostCreatePage() {
       try {
         await ensureAnonymousSession();
         const account = await spotifyRefreshToken();
-        if (!account.spotifyUserId) throw new Error("A Spotify-kapcsolatot újra kell csatlakoztatni.");
+        if (!account.spotifyUserId)
+          throw new Error("A Spotify-kapcsolatot újra kell csatlakoztatni.");
         if (!cancelled) {
           setSpotifyAccount({
             spotifyUserId: account.spotifyUserId,
@@ -122,7 +140,9 @@ export default function HostCreatePage() {
   const [featuredDecks, setFeaturedDecks] = useState<Deck[]>([]);
   const [featuredLoading, setFeaturedLoading] = useState(false);
   const [libraryDecks, setLibraryDecks] = useState<Deck[]>([]);
-  const [loadedLibraryOwnerId, setLoadedLibraryOwnerId] = useState<string | null>(null);
+  const [loadedLibraryOwnerId, setLoadedLibraryOwnerId] = useState<
+    string | null
+  >(null);
   const [previewDeck, setPreviewDeck] = useState<Deck | null>(null);
   const [previewCanEditYear, setPreviewCanEditYear] = useState(false);
   const [renamingDeckId, setRenamingDeckId] = useState<string | null>(null);
@@ -132,9 +152,13 @@ export default function HostCreatePage() {
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminBusyDeckId, setAdminBusyDeckId] = useState<string | null>(null);
   const [adminPlaylistUrl, setAdminPlaylistUrl] = useState("");
-  const [adminGeneratingDownloaded, setAdminGeneratingDownloaded] = useState(false);
-  const [newDeckKind, setNewDeckKind] = useState<"spotify_only" | "accurate_spotify">("spotify_only");
-  const [activeGenerationPipeline, setActiveGenerationPipeline] = useState<GenerationPipeline>("spotify_only");
+  const [adminGeneratingDownloaded, setAdminGeneratingDownloaded] =
+    useState(false);
+  const [newDeckKind, setNewDeckKind] = useState<
+    "spotify_only" | "accurate_spotify"
+  >("spotify_only");
+  const [activeGenerationPipeline, setActiveGenerationPipeline] =
+    useState<GenerationPipeline>("spotify_only");
 
   useEffect(() => {
     if (spotifyStatus !== "connected") {
@@ -177,7 +201,11 @@ export default function HostCreatePage() {
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Nem sikerült betölteni a pakli-könyvtárat.");
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Nem sikerült betölteni a pakli-könyvtárat.",
+          );
           setLoadedLibraryOwnerId(spotifyAccount.spotifyUserId);
         }
       }
@@ -198,7 +226,11 @@ export default function HostCreatePage() {
         await ensureAnonymousSession();
         setFeaturedDecks(await listFeaturedDecks());
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Nem sikerult betolteni az ajanlott paklikat.");
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Nem sikerult betolteni az ajanlott paklikat.",
+        );
       } finally {
         setFeaturedLoading(false);
       }
@@ -241,7 +273,11 @@ export default function HostCreatePage() {
       setAdminDecks(decks);
       return decks;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nem sikerült betölteni a kurátori paklikat.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Nem sikerült betölteni a kurátori paklikat.",
+      );
       return [];
     } finally {
       setAdminLoading(false);
@@ -258,13 +294,21 @@ export default function HostCreatePage() {
     try {
       const result = await renameDeck(selected.id, nextName);
       setLibraryDecks((current) =>
-        current.map((deckItem) => (deckItem.id === selected.id ? { ...deckItem, name: result.name } : deckItem))
+        current.map((deckItem) =>
+          deckItem.id === selected.id
+            ? { ...deckItem, name: result.name }
+            : deckItem,
+        ),
       );
       if (deck?.id === selected.id) {
-        setDeck((current) => (current ? { ...current, name: result.name } : current));
+        setDeck((current) =>
+          current ? { ...current, name: result.name } : current,
+        );
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nem sikerült átnevezni a paklit.");
+      setError(
+        err instanceof Error ? err.message : "Nem sikerült átnevezni a paklit.",
+      );
     } finally {
       setRenamingDeckId(null);
     }
@@ -272,7 +316,9 @@ export default function HostCreatePage() {
 
   async function handleDeleteLibraryDeck(selected: Deck) {
     if (!spotifyAccount || deletingDeckId) return;
-    const confirmed = window.confirm(`Törlöd ezt a paklit?\n\n${selected.name}`);
+    const confirmed = window.confirm(
+      `Törlöd ezt a paklit?\n\n${selected.name}`,
+    );
     if (!confirmed) return;
 
     setDeletingDeckId(selected.id);
@@ -285,7 +331,9 @@ export default function HostCreatePage() {
         setPhase("form");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nem sikerült törölni a paklit.");
+      setError(
+        err instanceof Error ? err.message : "Nem sikerült törölni a paklit.",
+      );
     } finally {
       setDeletingDeckId(null);
     }
@@ -295,7 +343,9 @@ export default function HostCreatePage() {
     return (selected.sourcePlaylistUrl ?? "")
       .split(/\s+/)
       .map((url) => url.trim())
-      .filter((url) => /^https:\/\/open\.spotify\.com\/playlist\/[a-zA-Z0-9]+/.test(url));
+      .filter((url) =>
+        /^https:\/\/open\.spotify\.com\/playlist\/[a-zA-Z0-9]+/.test(url),
+      );
   }
 
   async function handleCreateReliableDeck(selected: AdminDeck) {
@@ -306,7 +356,7 @@ export default function HostCreatePage() {
       return;
     }
     const confirmed = window.confirm(
-      `Megbízható verziót készítesz ebből a pakliból?\n\n${selected.name}\n\nEz külön, pontosabb évszámos másolatot generál preview hangfeltöltés nélkül.`
+      `Megbízható verziót készítesz ebből a pakliból?\n\n${selected.name}\n\nEz külön, pontosabb évszámos másolatot generál preview hangfeltöltés nélkül.`,
     );
     if (!confirmed) return;
 
@@ -322,11 +372,18 @@ export default function HostCreatePage() {
       });
       const prepared = await pollDeckUntilReady(deckId);
       if (prepared.status === "failed") {
-        throw new Error(prepared.progress.failReason || "Nem sikerült elkészíteni a megbízható verziót.");
+        throw new Error(
+          prepared.progress.failReason ||
+            "Nem sikerült elkészíteni a megbízható verziót.",
+        );
       }
       await refreshAdminDecks();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nem sikerült elkészíteni a megbízható verziót.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Nem sikerült elkészíteni a megbízható verziót.",
+      );
     } finally {
       setAdminBusyDeckId(null);
     }
@@ -335,14 +392,17 @@ export default function HostCreatePage() {
   async function handleGenerateDownloadedDeck() {
     if (adminBusyDeckId || adminGeneratingDownloaded) return;
     if (!adminPlaylistUrlsLookValid) {
-      setError("Érvénytelen Spotify playlist link. Ellenőrizd, és próbáld újra.");
+      setError(
+        "Érvénytelen Spotify playlist link. Ellenőrizd, és próbáld újra.",
+      );
       return;
     }
 
     setAdminGeneratingDownloaded(true);
     try {
       await handleGenerate(adminPlaylistUrls[0], {
-        playlistUrls: adminPlaylistUrls.length > 1 ? adminPlaylistUrls : undefined,
+        playlistUrls:
+          adminPlaylistUrls.length > 1 ? adminPlaylistUrls : undefined,
         audioPipeline: "verified_audio",
       });
       await refreshAdminDecks();
@@ -356,7 +416,7 @@ export default function HostCreatePage() {
     const confirmed = window.confirm(
       featured
         ? `Megjeleníted az Ajánlott paklik között?\n\n${selected.name}`
-        : `Elrejted az Ajánlott paklik közül?\n\n${selected.name}`
+        : `Elrejted az Ajánlott paklik közül?\n\n${selected.name}`,
     );
     if (!confirmed) return;
 
@@ -364,9 +424,16 @@ export default function HostCreatePage() {
     setError(null);
     try {
       await setFeaturedDeck(selected.id, featured);
-      await Promise.all([refreshAdminDecks(), listFeaturedDecks().then(setFeaturedDecks)]);
+      await Promise.all([
+        refreshAdminDecks(),
+        listFeaturedDecks().then(setFeaturedDecks),
+      ]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nem sikerült menteni az ajánlott állapotot.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Nem sikerült menteni az ajánlott állapotot.",
+      );
     } finally {
       setAdminBusyDeckId(null);
     }
@@ -401,7 +468,11 @@ export default function HostCreatePage() {
       setAdminDecks([]);
       if (deckSource === "library" || deckSource === "curation") setDeck(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nem sikerült kijelentkezni a Spotify-fiókból.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Nem sikerült kijelentkezni a Spotify-fiókból.",
+      );
     } finally {
       setSpotifyDisconnecting(false);
     }
@@ -412,13 +483,19 @@ export default function HostCreatePage() {
     .map((url) => url.trim())
     .filter(Boolean);
   const playlistUrlsLookValid =
-    playlistUrls.length > 0 && playlistUrls.every((url) => /^https:\/\/open\.spotify\.com\/playlist\/[a-zA-Z0-9]+/.test(url));
+    playlistUrls.length > 0 &&
+    playlistUrls.every((url) =>
+      /^https:\/\/open\.spotify\.com\/playlist\/[a-zA-Z0-9]+/.test(url),
+    );
   const adminPlaylistUrls = adminPlaylistUrl
     .split(/\r?\n|,/)
     .map((url) => url.trim())
     .filter(Boolean);
   const adminPlaylistUrlsLookValid =
-    adminPlaylistUrls.length > 0 && adminPlaylistUrls.every((url) => /^https:\/\/open\.spotify\.com\/playlist\/[a-zA-Z0-9]+/.test(url));
+    adminPlaylistUrls.length > 0 &&
+    adminPlaylistUrls.every((url) =>
+      /^https:\/\/open\.spotify\.com\/playlist\/[a-zA-Z0-9]+/.test(url),
+    );
 
   /**
    * `urlOverride` — az "Ajánlott playlistek" gyorsválasztó adja át explicit
@@ -434,20 +511,26 @@ export default function HostCreatePage() {
       deckName?: string;
       audioPipeline?: GenerationPipeline;
       curationSourceDeckId?: string;
-    }
+    },
   ) {
     const url = (urlOverride ?? playlistUrl).trim();
     const urls = options?.playlistUrls ?? (urlOverride ? [url] : playlistUrls);
     if (!urlOverride && !playlistUrlsLookValid) {
-      setError("Érvénytelen Spotify playlist link. Ellenőrizd, és próbáld újra.");
+      setError(
+        "Érvénytelen Spotify playlist link. Ellenőrizd, és próbáld újra.",
+      );
       return;
     }
     if (!urlOverride && spotifyStatus !== "connected") {
-      setError("Saját pakli létrehozásához csatlakoztass Spotify Premium fiókot. Az ajánlott paklik továbbra is mennek bejelentkezés nélkül.");
+      setError(
+        "Saját pakli létrehozásához csatlakoztass Spotify Premium fiókot. Az ajánlott paklik továbbra is mennek bejelentkezés nélkül.",
+      );
       return;
     }
     if (!urlOverride && spotifyAccount?.product !== "premium") {
-      setError("Saját pakli létrehozásához Spotify Premium kell, mert ezek a paklik Storage-feltöltés nélkül, Spotify-ról játszanak.");
+      setError(
+        "Saját pakli létrehozásához Spotify Premium kell, mert ezek a paklik Storage-feltöltés nélkül, Spotify-ról játszanak.",
+      );
       return;
     }
     setError(null);
@@ -457,7 +540,10 @@ export default function HostCreatePage() {
     try {
       await ensureAnonymousSession();
       const requestedAudioPipeline =
-        options?.audioPipeline ?? (!urlOverride && newDeckKind === "accurate_spotify" ? "accurate_spotify" : "spotify_only");
+        options?.audioPipeline ??
+        (!urlOverride && newDeckKind === "accurate_spotify"
+          ? "accurate_spotify"
+          : "spotify_only");
       setActiveGenerationPipeline(requestedAudioPipeline);
 
       // A HTTP hívás azonnal visszatér a deckId-vel, a feldolgozás a szerveren fut tovább.
@@ -482,7 +568,7 @@ export default function HostCreatePage() {
         throw new Error(
           reason === "playlist_not_public"
             ? "Csak nyilvános playlist használható. Tedd a playlistet nyilvánossá, majd próbáld újra."
-            : "Nem sikerült a pakli generálása. Ellenőrizd, hogy a playlist nyilvános-e, és próbáld újra."
+            : "Nem sikerült a pakli generálása. Ellenőrizd, hogy a playlist nyilvános-e, és próbáld újra.",
         );
       }
 
@@ -492,7 +578,11 @@ export default function HostCreatePage() {
       setPhase("report");
     } catch (err) {
       setPhase("form");
-      setError(err instanceof Error ? err.message : "Ismeretlen hiba történt a pakli generálása közben.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Ismeretlen hiba történt a pakli generálása közben.",
+      );
     }
   }
 
@@ -506,12 +596,17 @@ export default function HostCreatePage() {
         timeLimitSec,
         stealEnabled,
         mode: "shared_screen",
-        spotifyPlaybackMode: spotifyStatus === "connected" ? "premium" : "preview",
+        spotifyPlaybackMode:
+          spotifyStatus === "connected" ? "premium" : "preview",
       });
       router.push(`/host/${code}`);
     } catch (err) {
       setCreatingRoom(false);
-      setError(err instanceof Error ? err.message : "Nem sikerült létrehozni a szobát.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Nem sikerült létrehozni a szobát.",
+      );
     }
   }
 
@@ -532,7 +627,8 @@ export default function HostCreatePage() {
         timeLimitSec,
         stealEnabled: false,
         mode: "pass_and_play",
-        spotifyPlaybackMode: spotifyStatus === "connected" ? "premium" : "preview",
+        spotifyPlaybackMode:
+          spotifyStatus === "connected" ? "premium" : "preview",
       });
       // Sorban, nem párhuzamosan — a szín/seat-ütközések elkerülése végett.
       for (const entry of roster) {
@@ -541,7 +637,11 @@ export default function HostCreatePage() {
       router.push(`/host/${code}/solo`);
     } catch (err) {
       setCreatingRoster(false);
-      setError(err instanceof Error ? err.message : "Nem sikerült elindítani a partit.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Nem sikerült elindítani a partit.",
+      );
     }
   }
 
@@ -588,7 +688,9 @@ export default function HostCreatePage() {
 
         {phase === "mode" && (
           <div className="space-y-4">
-            <h2 className="text-2xl font-bold text-center mb-2">Hogyan játszotok?</h2>
+            <h2 className="text-2xl font-bold text-center mb-2">
+              Hogyan játszotok?
+            </h2>
             <ModeCard
               icon="📺"
               title="Klasszikus"
@@ -627,27 +729,38 @@ export default function HostCreatePage() {
                   { value: "new", label: "Új pakli" },
                   { value: "featured", label: "Ajánlott" },
                   { value: "library", label: "Meglévő pakli" },
-                  ...(adminStatus?.isAdmin ? [{ value: "curation" as const, label: "Admin" }] : []),
+                  ...(adminStatus?.isAdmin
+                    ? [{ value: "curation" as const, label: "Admin" }]
+                    : []),
                 ]}
               />
 
               {deckSource === "new" && (
                 <div className="mt-3">
-                  <label className="block mb-1 font-medium" htmlFor="playlist-url">
+                  <label
+                    className="block mb-1 font-medium"
+                    htmlFor="playlist-url"
+                  >
                     Spotify playlist link(ek)
                   </label>
                   <textarea
                     id="playlist-url"
                     value={playlistUrl}
                     onChange={(e) => setPlaylistUrl(e.target.value)}
-                    placeholder={"https://open.spotify.com/playlist/...\nhttps://open.spotify.com/playlist/..."}
+                    placeholder={
+                      "https://open.spotify.com/playlist/...\nhttps://open.spotify.com/playlist/..."
+                    }
                     rows={playlistUrl.includes("\n") ? 4 : 2}
                     className="w-full min-h-24 rounded-[var(--radius-button)] bg-surface-2 border-2 border-border focus-visible:border-accent px-4 py-3 text-base resize-y"
                     aria-invalid={Boolean(error)}
                     aria-describedby="playlist-url-help"
                   />
-                  <p id="playlist-url-help" className="text-sm text-text-muted mt-1">
-                    › Egy vagy több Spotify playlist link, soronként külön. Több linkből egy közös, deduplikált pakli készül.
+                  <p
+                    id="playlist-url-help"
+                    className="text-sm text-text-muted mt-1"
+                  >
+                    › Egy vagy több Spotify playlist link, soronként külön. Több
+                    linkből egy közös, deduplikált pakli készül.
                   </p>
                   <div className="mt-4">
                     <SegmentedControl
@@ -657,11 +770,15 @@ export default function HostCreatePage() {
                       onChange={setNewDeckKind}
                       options={[
                         { value: "spotify_only", label: "Spotify-only" },
-                        { value: "accurate_spotify", label: "Pontosabb évszámok" },
+                        {
+                          value: "accurate_spotify",
+                          label: "Pontosabb évszámok",
+                        },
                       ]}
                     />
                     <p className="mt-1 text-sm text-text-muted">
-                      A pontosabb évszámos mód tovább tart, de nem tölt fel preview hangokat.
+                      A pontosabb évszámos mód tovább tart, de több forrásból
+                      dolgozik, ezért jobb eredményeket ad.
                     </p>
                   </div>
                 </div>
@@ -670,9 +787,13 @@ export default function HostCreatePage() {
               {deckSource === "featured" && (
                 <div className="mt-3 space-y-2">
                   {featuredLoading ? (
-                    <p className="text-text-muted text-sm">Ajánlott paklik betöltése...</p>
+                    <p className="text-text-muted text-sm">
+                      Ajánlott paklik betöltése...
+                    </p>
                   ) : featuredDeckList.length === 0 ? (
-                    <p className="text-text-muted text-sm">Még nincs ajánlott pakli beállítva.</p>
+                    <p className="text-text-muted text-sm">
+                      Még nincs ajánlott pakli beállítva.
+                    </p>
                   ) : (
                     featuredDeckList.map((pl) => {
                       const key = pl.id;
@@ -685,8 +806,10 @@ export default function HostCreatePage() {
                             <p className="truncate font-semibold">{pl.name}</p>
                             <p className="mt-0.5 text-xs text-text-muted">
                               {pl.usableCount} kártya
-                              {pl.totalTracks !== pl.usableCount ? ` / ${pl.totalTracks} szám` : ""} -{" "}
-                              {pl.coveragePct.toFixed(0)}% lefedettség{" "}
+                              {pl.totalTracks !== pl.usableCount
+                                ? ` / ${pl.totalTracks} szám`
+                                : ""}{" "}
+                              - {pl.coveragePct.toFixed(0)}% lefedettség{" "}
                               <DeckQualityBadge
                                 audioPipeline={pl.report.audioPipeline}
                                 featured={pl.isFeatured}
@@ -705,7 +828,11 @@ export default function HostCreatePage() {
                                 setPreviewCanEditYear(false);
                               }}
                             />
-                            <AppButton size="sm" variant="secondary" onClick={() => handleSelectFeatured(pl)}>
+                            <AppButton
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => handleSelectFeatured(pl)}
+                            >
                               Kiválasztom
                             </AppButton>
                           </div>
@@ -722,7 +849,8 @@ export default function HostCreatePage() {
                     decks={libraryDecks}
                     loading={
                       spotifyStatus === "checking" ||
-                      (spotifyAccount !== null && loadedLibraryOwnerId !== spotifyAccount.spotifyUserId)
+                      (spotifyAccount !== null &&
+                        loadedLibraryOwnerId !== spotifyAccount.spotifyUserId)
                     }
                     connected={spotifyStatus === "connected"}
                     onConnect={handleConnectSpotify}
@@ -742,18 +870,25 @@ export default function HostCreatePage() {
               {deckSource === "curation" && (
                 <div className="mt-3 space-y-2">
                   {adminLoading ? (
-                    <p className="text-text-muted text-sm">Admin paklik betöltése...</p>
+                    <p className="text-text-muted text-sm">
+                      Admin paklik betöltése...
+                    </p>
                   ) : (
                     <>
                       <div className="rounded-[var(--radius-card)] border border-border bg-surface-2 px-4 py-3">
-                        <label className="block mb-1 font-medium" htmlFor="admin-playlist-url">
+                        <label
+                          className="block mb-1 font-medium"
+                          htmlFor="admin-playlist-url"
+                        >
                           Letöltött verzió playlist link(ek)
                         </label>
                         <textarea
                           id="admin-playlist-url"
                           value={adminPlaylistUrl}
                           onChange={(e) => setAdminPlaylistUrl(e.target.value)}
-                          placeholder={"https://open.spotify.com/playlist/...\nhttps://open.spotify.com/playlist/..."}
+                          placeholder={
+                            "https://open.spotify.com/playlist/...\nhttps://open.spotify.com/playlist/..."
+                          }
                           rows={adminPlaylistUrl.includes("\n") ? 4 : 2}
                           className="w-full min-h-24 rounded-[var(--radius-button)] bg-surface border-2 border-border focus-visible:border-accent px-4 py-3 text-base resize-y"
                           aria-invalid={Boolean(error)}
@@ -762,81 +897,120 @@ export default function HostCreatePage() {
                           <AppButton
                             size="sm"
                             variant="secondary"
-                            disabled={!adminPlaylistUrlsLookValid || adminGeneratingDownloaded || Boolean(adminBusyDeckId)}
+                            disabled={
+                              !adminPlaylistUrlsLookValid ||
+                              adminGeneratingDownloaded ||
+                              Boolean(adminBusyDeckId)
+                            }
                             onClick={handleGenerateDownloadedDeck}
                           >
-                            {adminGeneratingDownloaded ? "Letöltött verzió készül..." : "Letöltött verzió készítése"}
+                            {adminGeneratingDownloaded
+                              ? "Letöltött verzió készül..."
+                              : "Letöltött verzió készítése"}
                           </AppButton>
                         </div>
                       </div>
                       {adminDecks.length === 0 ? (
-                        <p className="text-text-muted text-sm">Nincs megjeleníthető pakli.</p>
+                        <p className="text-text-muted text-sm">
+                          Nincs megjeleníthető pakli.
+                        </p>
                       ) : (
                         adminDecks.map((adminDeck) => {
-                      const busy = adminBusyDeckId === adminDeck.id;
-                      const canPrepare = adminDeck.status === "ready" && adminDeck.audioPipeline === "spotify_only";
-                      const canPublish =
-                        adminDeck.status === "ready" &&
-                        !adminDeck.isFeatured &&
-                        adminDeck.audioPipeline !== "spotify_only";
+                          const busy = adminBusyDeckId === adminDeck.id;
+                          const canPrepare =
+                            adminDeck.status === "ready" &&
+                            adminDeck.audioPipeline === "spotify_only";
+                          const canPublish =
+                            adminDeck.status === "ready" &&
+                            !adminDeck.isFeatured &&
+                            adminDeck.audioPipeline !== "spotify_only";
 
-                      return (
-                        <div
-                          key={adminDeck.id}
-                          className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-surface-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate font-semibold">{adminDeck.name}</p>
-                            <p className="mt-0.5 text-xs text-text-muted">
-                              {adminDeck.usableCount} kártya
-                              {adminDeck.totalTracks !== adminDeck.usableCount ? ` / ${adminDeck.totalTracks} szám` : ""} -{" "}
-                              {adminDeck.coveragePct.toFixed(0)}%{" "}
-                              <DeckQualityBadge
-                                audioPipeline={adminDeck.audioPipeline}
-                                featured={adminDeck.isFeatured}
-                                hasDownloadedPreviews={adminDeck.hasDownloadedPreviews}
-                              />
-                              {adminDeck.status !== "ready" ? ` - ${adminDeck.status}` : ""}
-                            </p>
-                          </div>
-                          <div className="flex shrink-0 flex-wrap items-center gap-2">
-                            {canPrepare && (
-                              <AppButton
-                                size="sm"
-                                variant="secondary"
-                                disabled={busy || adminGeneratingDownloaded || Boolean(adminBusyDeckId)}
-                                title="Külön, pontosabb évszámos másolatot készít preview hangfeltöltés nélkül."
-                                onClick={() => handleCreateReliableDeck(adminDeck)}
-                              >
-                                {busy ? "Verzió készül..." : "Megbízható verzió készítése"}
-                              </AppButton>
-                            )}
-                            {canPublish && (
-                              <AppButton
-                                size="sm"
-                                variant="secondary"
-                                disabled={busy || adminGeneratingDownloaded || Boolean(adminBusyDeckId)}
-                                title="Megjeleníti ezt a kész másolatot az Ajánlott paklik között."
-                                onClick={() => handleSetFeaturedDeck(adminDeck, true)}
-                              >
-                                Ajánlottként megjelenít
-                              </AppButton>
-                            )}
-                            {adminDeck.isFeatured && (
-                              <AppButton
-                                size="sm"
-                                variant="danger"
-                                disabled={busy || adminGeneratingDownloaded || Boolean(adminBusyDeckId)}
-                                title="Leveszi ezt a paklit az Ajánlott listából."
-                                onClick={() => handleSetFeaturedDeck(adminDeck, false)}
-                              >
-                                Elrejtés ajánlottból
-                              </AppButton>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
+                          return (
+                            <div
+                              key={adminDeck.id}
+                              className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-surface-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate font-semibold">
+                                  {adminDeck.name}
+                                </p>
+                                <p className="mt-0.5 text-xs text-text-muted">
+                                  {adminDeck.usableCount} kártya
+                                  {adminDeck.totalTracks !==
+                                  adminDeck.usableCount
+                                    ? ` / ${adminDeck.totalTracks} szám`
+                                    : ""}{" "}
+                                  - {adminDeck.coveragePct.toFixed(0)}%{" "}
+                                  <DeckQualityBadge
+                                    audioPipeline={adminDeck.audioPipeline}
+                                    featured={adminDeck.isFeatured}
+                                    hasDownloadedPreviews={
+                                      adminDeck.hasDownloadedPreviews
+                                    }
+                                  />
+                                  {adminDeck.status !== "ready"
+                                    ? ` - ${adminDeck.status}`
+                                    : ""}
+                                </p>
+                              </div>
+                              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                                {canPrepare && (
+                                  <AppButton
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={
+                                      busy ||
+                                      adminGeneratingDownloaded ||
+                                      Boolean(adminBusyDeckId)
+                                    }
+                                    title="Külön, pontosabb évszámos másolatot készít preview hangfeltöltés nélkül."
+                                    onClick={() =>
+                                      handleCreateReliableDeck(adminDeck)
+                                    }
+                                  >
+                                    {busy
+                                      ? "Verzió készül..."
+                                      : "Megbízható verzió készítése"}
+                                  </AppButton>
+                                )}
+                                {canPublish && (
+                                  <AppButton
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={
+                                      busy ||
+                                      adminGeneratingDownloaded ||
+                                      Boolean(adminBusyDeckId)
+                                    }
+                                    title="Megjeleníti ezt a kész másolatot az Ajánlott paklik között."
+                                    onClick={() =>
+                                      handleSetFeaturedDeck(adminDeck, true)
+                                    }
+                                  >
+                                    Ajánlottként megjelenít
+                                  </AppButton>
+                                )}
+                                {adminDeck.isFeatured && (
+                                  <AppButton
+                                    size="sm"
+                                    variant="danger"
+                                    disabled={
+                                      busy ||
+                                      adminGeneratingDownloaded ||
+                                      Boolean(adminBusyDeckId)
+                                    }
+                                    title="Leveszi ezt a paklit az Ajánlott listából."
+                                    onClick={() =>
+                                      handleSetFeaturedDeck(adminDeck, false)
+                                    }
+                                  >
+                                    Elrejtés ajánlottból
+                                  </AppButton>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
                       )}
                     </>
                   )}
@@ -886,10 +1060,22 @@ export default function HostCreatePage() {
                     : "Más játékosok 1 tokenért megpróbálhatják ellopni a rosszul lerakott kártyát."}
                 </p>
               </div>
-              <div className={mode === "pass_and_play" ? "pointer-events-none opacity-50" : undefined}>
+              <div
+                className={
+                  mode === "pass_and_play"
+                    ? "pointer-events-none opacity-50"
+                    : undefined
+                }
+              >
                 <SegmentedControl
                   ariaLabel="Lopás engedélyezése"
-                  value={mode === "pass_and_play" ? "off" : stealEnabled ? "on" : "off"}
+                  value={
+                    mode === "pass_and_play"
+                      ? "off"
+                      : stealEnabled
+                        ? "on"
+                        : "off"
+                  }
                   onChange={(v) => setStealEnabled(v === "on")}
                   options={[
                     { value: "on", label: "Be" },
@@ -916,10 +1102,14 @@ export default function HostCreatePage() {
                 <AppButton
                   size="sm"
                   variant="secondary"
-                  disabled={spotifyStatus === "checking" || spotifyDisconnecting}
+                  disabled={
+                    spotifyStatus === "checking" || spotifyDisconnecting
+                  }
                   onClick={handleConnectSpotify}
                 >
-                  {spotifyStatus === "connected" ? "Fiókváltás" : "Csatlakoztatás"}
+                  {spotifyStatus === "connected"
+                    ? "Fiókváltás"
+                    : "Csatlakoztatás"}
                 </AppButton>
                 {spotifyStatus === "connected" && (
                   <AppButton
@@ -928,14 +1118,21 @@ export default function HostCreatePage() {
                     disabled={spotifyDisconnecting}
                     onClick={handleDisconnectSpotify}
                   >
-                    {spotifyDisconnecting ? "Kijelentkezés..." : "Kijelentkezés"}
+                    {spotifyDisconnecting
+                      ? "Kijelentkezés..."
+                      : "Kijelentkezés"}
                   </AppButton>
                 )}
               </div>
             </div>
 
             {deckSource === "new" && (
-              <AppButton size="lg" fullWidth disabled={!playlistUrl || !playlistUrlsLookValid} onClick={() => handleGenerate()}>
+              <AppButton
+                size="lg"
+                fullWidth
+                disabled={!playlistUrl || !playlistUrlsLookValid}
+                onClick={() => handleGenerate()}
+              >
                 PAKLI GENERÁLÁSA ▶
               </AppButton>
             )}
@@ -954,8 +1151,8 @@ export default function HostCreatePage() {
               {activeGenerationPipeline === "verified_audio"
                 ? "Letöltött verzió készül, preview hangok feltöltésével."
                 : activeGenerationPipeline === "accurate_spotify"
-                ? "Pontosabb évszámos pakli készül, preview hangfeltöltés nélkül."
-                : "Spotify-only pakli készül, ezért nincs Supabase hangfájl-feltöltés."}
+                  ? "Pontosabb évszámos pakli készül, preview hangfeltöltés nélkül."
+                  : "Spotify-only pakli készül, ezért nincs Supabase hangfájl-feltöltés."}
             </p>
             {progress.warning && (
               <p className="rounded-[var(--radius-card)] border border-warning bg-warning/10 px-4 py-3 text-sm text-warning">
@@ -989,11 +1186,13 @@ export default function HostCreatePage() {
                           usable: result.usableCount,
                           coveragePct: result.coveragePct,
                           meetsMinimum: result.meetsMinimum,
-                          spotifyOnlyCount: result.spotifyOnlyCount ?? d.report.spotifyOnlyCount,
+                          spotifyOnlyCount:
+                            result.spotifyOnlyCount ??
+                            d.report.spotifyOnlyCount,
                           excluded: result.excluded,
                         },
                       }
-                    : d
+                    : d,
                 )
               }
             />
@@ -1007,7 +1206,9 @@ export default function HostCreatePage() {
               <RosterBuilder
                 players={roster}
                 onAdd={(entry) => setRoster((r) => [...r, entry])}
-                onRemove={(i) => setRoster((r) => r.filter((_, idx) => idx !== i))}
+                onRemove={(i) =>
+                  setRoster((r) => r.filter((_, idx) => idx !== i))
+                }
                 onConfirm={handleCreatePassAndPlayRoom}
                 confirming={creatingRoster}
               />
@@ -1022,7 +1223,11 @@ export default function HostCreatePage() {
               </AppButton>
             )}
             {!deck.report.meetsMinimum && (
-              <AppButton variant="secondary" fullWidth onClick={() => setPhase("form")}>
+              <AppButton
+                variant="secondary"
+                fullWidth
+                onClick={() => setPhase("form")}
+              >
                 Másik playlist
               </AppButton>
             )}
