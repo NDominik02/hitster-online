@@ -35,8 +35,12 @@ export function adaptDeck(row: DeckRow): Deck {
     starred?: boolean;
     audioPipeline?: string;
     qualityStatus?: string;
+    downloadedPreviewCount?: number;
   };
-  const isStarred = report.starred === true || report.audioPipeline === "verified_audio";
+  const isFeatured = isFeaturedDeckReport(row.report);
+  const hasDownloadedPreviews =
+    typeof report.downloadedPreviewCount === "number" ? report.downloadedPreviewCount > 0 : report.audioPipeline === "verified_audio";
+  const isStarred = isFeatured;
   return {
     id: row.id,
     name: row.name,
@@ -54,6 +58,8 @@ export function adaptDeck(row: DeckRow): Deck {
       excluded: report.excluded ?? [],
       uncertainYearCount: report.uncertainYearCount,
       spotifyOnlyCount: report.spotifyOnlyCount,
+      downloadedPreviewCount: report.downloadedPreviewCount,
+      hasDownloadedPreviews,
       playlistImportWarning: report.playlistImportWarning,
       starred: isStarred,
       audioPipeline: report.audioPipeline,
@@ -68,8 +74,9 @@ export function adaptDeck(row: DeckRow): Deck {
     },
     ownerId: row.owner_id,
     isPublic: row.is_public,
-    isFeatured: isFeaturedDeckReport(row.report),
+    isFeatured,
     isStarred,
+    hasDownloadedPreviews,
     createdAt: row.created_at,
   };
 }

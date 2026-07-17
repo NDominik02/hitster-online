@@ -73,14 +73,23 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const FUNCTION_SELF_URL = `${SUPABASE_URL}/functions/v1/generate_deck`;
 
-type AudioPipeline = 'spotify_only' | 'verified_audio';
+type AudioPipeline = 'spotify_only' | 'accurate_spotify' | 'verified_audio';
 
 function normalizeAudioPipeline(value: unknown): AudioPipeline {
-  return value === 'spotify_only' ? 'spotify_only' : 'verified_audio';
+  if (value === 'spotify_only') return 'spotify_only';
+  if (value === 'accurate_spotify') return 'accurate_spotify';
+  return 'verified_audio';
 }
 
 function normalizeRequestedAudioPipeline(value: unknown): AudioPipeline {
+  if (value === 'accurate_spotify') return 'accurate_spotify';
   return value === 'verified_audio' ? 'verified_audio' : 'spotify_only';
+}
+
+function qualityStatusForPipeline(audioPipeline: AudioPipeline): string {
+  if (audioPipeline === 'spotify_only') return 'fast_spotify';
+  if (audioPipeline === 'accurate_spotify') return 'accurate_spotify';
+  return 'verified';
 }
 
 function inferAudioStorage(contentType: string | null, sourceUrl: string): { extension: 'mp3' | 'm4a'; contentType: string } {
@@ -103,6 +112,7 @@ function finalGenerationDiagnostics(report: Record<string, any>): Record<string,
     ...(typeof report.audioPipeline === 'string' ? { audioPipeline: report.audioPipeline } : {}),
     ...(typeof report.qualityStatus === 'string' ? { qualityStatus: report.qualityStatus } : {}),
     ...(report.starred === true ? { starred: true } : {}),
+    ...(report.promotedFromDeckId ? { promotedFromDeckId: report.promotedFromDeckId } : {}),
     ...(report.playlistName ? { playlistName: report.playlistName } : {}),
     ...(Array.isArray(report.sourcePlaylistIds) ? { sourcePlaylistIds: report.sourcePlaylistIds } : {}),
     ...(Array.isArray(report.sourceReports) ? { sourceReports: report.sourceReports } : {}),
@@ -795,6 +805,7 @@ async function finalizeSpotifyOnlyDeck(
         excluded,
         uncertainYearCount: usableCount,
         spotifyOnlyCount: usableCount,
+        downloadedPreviewCount: 0,
         previewFallbackCount: 0,
         meetsMinimum: usableCount >= MIN_USABLE_CARDS,
       },
@@ -922,7 +933,7 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
             report: {
               ...existingReport,
               audioPipeline,
-              qualityStatus: 'fast_spotify',
+              qualityStatus: qualityStatusForPipeline(audioPipeline),
               processed: 0,
               total: tracks.length,
               step: 'building_spotify_only_cards',
@@ -1030,9 +1041,9 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
             name: playlistName,
             total_tracks: tracks.length,
             report: {
+              ...existingReport,
               audioPipeline,
-              qualityStatus: 'verified',
-              starred: true,
+              qualityStatus: qualityStatusForPipeline(audioPipeline),
               processed: 0,
               total: tracks.length,
               step: 'resolving_years',
@@ -1116,9 +1127,9 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
           name: playlistName,
           total_tracks: tracks.length,
           report: {
+            ...existingReport,
             audioPipeline,
-            qualityStatus: 'verified',
-            starred: true,
+            qualityStatus: qualityStatusForPipeline(audioPipeline),
             processed: 0,
             total: tracks.length,
             step: 'resolving_years',
@@ -1257,6 +1268,27 @@ async function runGenerationWork(deckId: string, playlistId: string, resumeCurso
         .eq('id', deckId);
 
       await invokeNextBatch(deckId, playlistId, cursor);
+      return;
+    }
+
+    if (audioPipeline === 'accurate_spotify') {
+      await supabase
+        .from('decks')
+        .update({
+          report: {
+            ...report,
+            processed: total,
+            total,
+            step: 'building_spotify_only_cards',
+            tracksCache: tracks,
+            playlistName,
+            possiblyTruncatedAt100,
+            playlistImportWarning,
+            processedTracks: accumulated,
+          },
+        })
+        .eq('id', deckId);
+      await finalizeAccurateSpotifyDeck(supabase, deckId, accumulated, total);
       return;
     }
 
@@ -1400,6 +1432,154 @@ async function uploadTrackCard(
   };
 }
 
+async function buildAccurateSpotifyCard(
+  deckId: string,
+  track: ProcessedTrack
+): Promise<{ card: any | null; excluded: any | null }> {
+  if (track.excludeReason === 'no_year') {
+    return {
+      card: null,
+      excluded: {
+        title: track.raw.title,
+        artist: track.raw.artist,
+        reason: 'no_year',
+        index: track.raw.index,
+        hasSource: Boolean(track.raw.uri),
+        ...(track.raw.uri
+          ? {
+              spotifyUri: track.raw.uri,
+              durationMs: track.raw.durationMs,
+              itunesArtworkUrl: track.itunesArtworkUrl,
+              audioSource: 'spotify',
+            }
+          : {}),
+      },
+    };
+  }
+
+  if (!track.raw.uri) {
+    return {
+      card: null,
+      excluded: {
+        title: track.raw.title,
+        artist: track.raw.artist,
+        reason: 'no_preview',
+        index: track.raw.index,
+        detail: 'missing_spotify_uri_for_premium_playback',
+      },
+    };
+  }
+
+  const artworkUrl = track.itunesArtworkUrl ?? (await fetchSpotifyOembedArtwork(track.raw.uri));
+  return {
+    card: {
+      id: crypto.randomUUID(),
+      deck_id: deckId,
+      title: track.raw.title,
+      artist: track.raw.artist,
+      year: track.finalYear,
+      year_source: track.finalYearSource,
+      year_uncertain: track.yearUncertain,
+      audio_url: null,
+      audio_source: 'spotify',
+      artwork_url: artworkUrl,
+      spotify_uri: track.raw.uri,
+      duration_ms: track.raw.durationMs,
+    },
+    excluded: null,
+  };
+}
+
+async function finalizeAccurateSpotifyDeck(
+  supabase: ReturnType<typeof adminClient>,
+  deckId: string,
+  processed: ProcessedTrack[],
+  total: number
+): Promise<void> {
+  const deckCardRows: any[] = [];
+  const excluded: any[] = [];
+
+  for (const track of processed) {
+    const result = await buildAccurateSpotifyCard(deckId, track);
+    if (result.card) deckCardRows.push(result.card);
+    if (result.excluded) excluded.push(result.excluded);
+  }
+
+  if (deckCardRows.length > 0) {
+    const { error: cardsInsertError } = await supabase.from('deck_cards').insert(deckCardRows);
+    if (cardsInsertError) {
+      await supabase
+        .from('decks')
+        .update({ status: 'failed', report: { step: 'failed', reason: 'deck_cards_insert_failed: ' + cardsInsertError.message } })
+        .eq('id', deckId);
+      return;
+    }
+  }
+
+  const usableCount = deckCardRows.length;
+  const coveragePct = total > 0 ? Math.round((usableCount / total) * 1000) / 10 : 0;
+  const uncertainYearCount = deckCardRows.filter((c) => c.year_uncertain).length;
+  const spotifyOnlyCount = deckCardRows.length;
+  const { data: deckRow } = await supabase.from('decks').select('report').eq('id', deckId).single();
+  const report = (deckRow?.report ?? {}) as any;
+
+  await supabase
+    .from('decks')
+    .update({
+      status: 'ready',
+      usable_count: usableCount,
+      coverage_pct: coveragePct,
+      report: {
+        ...finalGenerationDiagnostics(report),
+        processed: total,
+        total,
+        step: 'done',
+        excluded,
+        uncertainYearCount,
+        spotifyOnlyCount,
+        downloadedPreviewCount: 0,
+        previewFallbackCount: 0,
+        meetsMinimum: usableCount >= MIN_USABLE_CARDS,
+      },
+    })
+    .eq('id', deckId);
+}
+
+async function hideReplacedSpotifyOnlySource(supabase: ReturnType<typeof adminClient>, sourceDeckId: unknown): Promise<void> {
+  if (typeof sourceDeckId !== 'string') return;
+  const { data: sourceDeck } = await supabase.from('decks').select('id, report, status').eq('id', sourceDeckId).maybeSingle();
+  const report = (sourceDeck?.report ?? {}) as Record<string, unknown>;
+  if (!sourceDeck || sourceDeck.status === 'deleted' || report.audioPipeline !== 'spotify_only') return;
+
+  const { count: roomCount, error: roomError } = await supabase
+    .from('rooms')
+    .select('id', { count: 'exact', head: true })
+    .eq('deck_id', sourceDeck.id);
+  if (roomError) {
+    console.warn('spotify_only_source_room_check_failed', roomError.message);
+    await supabase.from('decks').update({ status: 'deleted', is_public: false }).eq('id', sourceDeck.id);
+    return;
+  }
+
+  if ((roomCount ?? 0) > 0) {
+    await supabase.from('decks').update({ status: 'deleted', is_public: false }).eq('id', sourceDeck.id);
+    return;
+  }
+
+  const { error: cardsDeleteError } = await supabase.from('deck_cards').delete().eq('deck_id', sourceDeck.id);
+  if (cardsDeleteError) {
+    console.warn('spotify_only_source_cards_delete_failed', cardsDeleteError.message);
+    await supabase.from('decks').update({ status: 'deleted', is_public: false }).eq('id', sourceDeck.id);
+    return;
+  }
+
+  const { error: deckDeleteError } = await supabase.from('decks').delete().eq('id', sourceDeck.id);
+  if (deckDeleteError) {
+    console.warn('spotify_only_source_deck_delete_failed', deckDeleteError.message);
+    await supabase.from('decks').update({ status: 'deleted', is_public: false }).eq('id', sourceDeck.id);
+  }
+}
+
 // Audio upload phase — also time-boxed and self-chaining for large decks,
 // since fetching+uploading ~360KB per track for 100 tracks is itself
 // non-trivial wall-clock time.
@@ -1513,6 +1693,7 @@ async function runAudioUploadPhase(
   const coveragePct = total > 0 ? Math.round((usableCount / total) * 1000) / 10 : 0;
   const uncertainYearCount = deckCardRows.filter((c) => c.year_uncertain).length;
   const spotifyOnlyCount = deckCardRows.filter((c) => c.audio_source === 'spotify').length;
+  const downloadedPreviewCount = deckCardRows.filter((c) => typeof c.audio_url === 'string' && c.audio_url.length > 0).length;
 
   await supabase
     .from('decks')
@@ -1528,11 +1709,14 @@ async function runAudioUploadPhase(
         excluded,
         uncertainYearCount,
         spotifyOnlyCount,
+        downloadedPreviewCount,
         previewFallbackCount,
         meetsMinimum: usableCount >= MIN_USABLE_CARDS,
       },
     })
     .eq('id', deckId);
+
+  await hideReplacedSpotifyOnlySource(supabase, report.promotedFromDeckId);
 }
 
 // Self-chains the background work by making a new HTTP call to this same
@@ -1698,7 +1882,7 @@ Deno.serve(async (req: Request) => {
       owner_id: callerUid,
       spotify_owner_id: spotifyConnection?.spotify_user_id ?? null,
       status: 'generating',
-      is_public: audioPipeline === 'spotify_only',
+      is_public: false,
       report: {
         processed: 0,
         total: 0,
@@ -1706,8 +1890,7 @@ Deno.serve(async (req: Request) => {
         sourcePlaylistIds: playlistIds,
         ...(requestedDeckName ? { deckName: requestedDeckName } : {}),
         audioPipeline,
-        qualityStatus: audioPipeline === 'spotify_only' ? 'fast_spotify' : 'verified',
-        starred: audioPipeline === 'verified_audio',
+        qualityStatus: qualityStatusForPipeline(audioPipeline),
         ...(curationSourceDeckId ? { promotedFromDeckId: curationSourceDeckId } : {}),
       },
     })

@@ -72,8 +72,12 @@ export function DeckLibrary({
               <p className="mt-0.5 text-xs text-text-muted">
                 {deck.usableCount} kártya
                 {deck.totalTracks !== deck.usableCount ? ` / ${deck.totalTracks} szám` : ""} -{" "}
-                {deck.coveragePct.toFixed(0)}% lefedettség - <DeckQualityBadge starred={deck.isStarred} />
-                {deck.isFeatured ? " - ajánlott" : ""}
+                {deck.coveragePct.toFixed(0)}% lefedettség{" "}
+                <DeckQualityBadge
+                  audioPipeline={deck.report.audioPipeline}
+                  featured={deck.isFeatured}
+                  hasDownloadedPreviews={deck.hasDownloadedPreviews}
+                />
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">

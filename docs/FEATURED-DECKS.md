@@ -6,19 +6,20 @@ The host screen lists decks where:
 - `status = 'ready'`
 - `is_public = true`
 - `report.featured = true`
-- `report.starred = true`
 
 Selecting one of these decks does not fetch Spotify again. It reuses the stored
-deck metadata, cards, and uploaded audio.
+deck metadata and cards.
 
 ## Curator Flow
 
-Normal users generate private decks in `spotify_only` mode. These decks do not
-upload preview audio to Supabase Storage and require Spotify Premium playback.
+Normal users generate private decks in either `spotify_only` mode or
+`accurate_spotify` mode. Neither mode uploads preview audio to Supabase Storage;
+both require Spotify Premium playback.
 
-Starred decks are generated with the old, more accurate `verified_audio`
-pipeline. They store preview audio in Supabase Storage. For now only admins can
-generate starred decks. A recommended deck must be starred first.
+Admins can generate `verified_audio` copies. These use the same accurate
+MusicBrainz/iTunes year pipeline as `accurate_spotify`, but also store preview
+audio in Supabase Storage. This is reserved for the small set of decks that must
+remain playable without Spotify Premium.
 
 Admins are allowlisted in `admin_users` by `spotify_user_id`. The host create
 page shows an `Admin` tab only for connected admin/curator accounts.
@@ -26,14 +27,13 @@ page shows an `Admin` tab only for connected admin/curator accounts.
 Curators should use this flow:
 
 1. Pick a user/source deck in the admin list.
-2. Run `Csillagozott verzio keszitese`, which creates a new `verified_audio` copy
-   from the source playlist and stores uploaded preview audio.
+2. Run `Letoltott verzio keszitese`, which creates a new `verified_audio`
+   copy from the source playlist and stores uploaded preview audio.
 3. Publish the prepared copy with `Ajanlottkent megjelenit`.
 
 The publish step calls `set_featured_deck`; direct browser writes to `decks` are
-not allowed. Publishing is rejected if the deck is not starred, is still
-`spotify_only`, is not ready, has fewer than 60 usable cards, or still contains
-Spotify-only cards.
+not allowed. Publishing is rejected if the deck is still `spotify_only`, is not
+ready, has fewer than 60 usable cards, or still contains too few playable cards.
 
 ## Remove From Recommended
 
@@ -43,9 +43,16 @@ the recommended list without touching the original user deck.
 
 ## Ownership Notes
 
-Prepared featured decks are separate curated copies. The original user deck can
-still be renamed, deleted, or edited by its owner without changing the public
-recommended copy.
+Prepared featured decks are separate curated copies. When a `spotify_only`
+source deck is replaced by a `verified_audio` copy, the source deck is deleted
+immediately if no room references it. If an existing room still points at the
+source deck, it is first hidden with `status = 'deleted'` and `is_public = false`
+so active games cannot break.
+
+The `cleanup_deleted_decks` Edge Function permanently removes hidden decks after
+rooms no longer reference them. It deletes Storage audio first, then `deck_cards`,
+then the `decks` row. `supabase/cleanup_deleted_decks_cron.sql` schedules this
+cleanup every six hours.
 
 In-game year disputes always correct the current round. A persistent `deck_cards`
 update still depends on the host owning/managing the deck.

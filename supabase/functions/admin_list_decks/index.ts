@@ -27,6 +27,7 @@ Deno.serve(async (req: Request) => {
   return jsonResponse({
     decks: (data ?? []).map((deck) => {
       const report = (deck.report ?? {}) as Record<string, unknown>;
+      const downloadedPreviewCount = typeof report.downloadedPreviewCount === 'number' ? report.downloadedPreviewCount : null;
       return {
         id: deck.id,
         name: deck.name,
@@ -38,10 +39,12 @@ Deno.serve(async (req: Request) => {
         status: deck.status,
         isPublic: deck.is_public,
         isFeatured: report.featured === true,
-        isStarred: report.starred === true || report.audioPipeline === 'verified_audio',
+        isStarred: report.featured === true,
         audioPipeline: typeof report.audioPipeline === 'string' ? report.audioPipeline : null,
         qualityStatus: typeof report.qualityStatus === 'string' ? report.qualityStatus : null,
         spotifyOnlyCount: typeof report.spotifyOnlyCount === 'number' ? report.spotifyOnlyCount : null,
+        downloadedPreviewCount,
+        hasDownloadedPreviews: downloadedPreviewCount !== null ? downloadedPreviewCount > 0 : report.audioPipeline === 'verified_audio',
         promotedFromDeckId: typeof report.promotedFromDeckId === 'string' ? report.promotedFromDeckId : null,
         createdAt: deck.created_at,
       };

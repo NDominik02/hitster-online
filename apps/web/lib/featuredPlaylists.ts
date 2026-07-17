@@ -1,13 +1,12 @@
 /**
  * Recommended decks are stored decks, not Spotify playlist definitions.
  *
- * Recommended decks are starred decks with `decks.report.featured = true` and
- * `is_public = true`. The deck metadata, cards, and uploaded audio are then
- * reused directly; selecting it never re-imports the Spotify playlist.
+ * Recommended decks have `decks.report.featured = true` and `is_public = true`.
+ * Selecting one reuses the stored deck metadata and cards directly; it never
+ * re-imports the Spotify playlist.
  */
 export interface FeaturedDeckReport {
   featured?: boolean;
-  starred?: boolean;
   featuredAt?: string;
   featuredBy?: string;
 }
@@ -17,7 +16,6 @@ export function isFeaturedDeckReport(report: unknown): boolean {
     report &&
       typeof report === "object" &&
       "featured" in report &&
-      (report as FeaturedDeckReport).featured === true &&
-      (report as FeaturedDeckReport).starred === true
+      (report as FeaturedDeckReport).featured === true
   );
 }

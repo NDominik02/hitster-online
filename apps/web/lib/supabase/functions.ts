@@ -71,7 +71,7 @@ export async function generateDeck(
     playlistUrls?: string[];
     sourceKey?: string;
     deckName?: string;
-    audioPipeline?: "spotify_only" | "verified_audio";
+    audioPipeline?: "spotify_only" | "accurate_spotify" | "verified_audio";
     curationSourceDeckId?: string;
   }
 ): Promise<{ deckId: string }> {
@@ -107,6 +107,8 @@ export interface AdminDeck {
   audioPipeline: string | null;
   qualityStatus: string | null;
   spotifyOnlyCount: number | null;
+  downloadedPreviewCount: number | null;
+  hasDownloadedPreviews: boolean;
   promotedFromDeckId: string | null;
   createdAt: string;
 }
@@ -157,7 +159,7 @@ export async function listFeaturedDecks(limit = 30): Promise<Deck[]> {
     .select("*")
     .eq("status", "ready")
     .eq("is_public", true)
-    .contains("report", { featured: true, starred: true })
+    .contains("report", { featured: true })
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;

@@ -153,6 +153,8 @@ export interface DeckReport {
   excluded: CoverageExcludedTrack[];
   uncertainYearCount?: number;
   spotifyOnlyCount?: number;
+  downloadedPreviewCount?: number;
+  hasDownloadedPreviews?: boolean;
   playlistImportWarning?: string;
   starred?: boolean;
   audioPipeline?: string;
@@ -174,6 +176,7 @@ export interface Deck {
   isPublic?: boolean;
   isFeatured?: boolean;
   isStarred?: boolean;
+  hasDownloadedPreviews?: boolean;
   createdAt?: string;
   /** Generálás közbeni progress (BACKEND-NOTES 4.: decks.report.{processed,total,step}). */
   progress: {

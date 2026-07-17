@@ -42,20 +42,17 @@ Deno.serve(async (req: Request) => {
     if ((deck.usable_count ?? 0) < 60) {
       return errorResponse('deck_too_small', 'Legalabb 60 hasznalhato kartya kell az ajanlott paklihoz.', 409);
     }
-    if (currentReport.starred !== true && currentReport.audioPipeline !== 'verified_audio') {
-      return errorResponse('deck_not_starred', 'Csak csillagozott pakli jelenhet meg ajanlottkent.', 409);
-    }
     if (currentReport.audioPipeline === 'spotify_only') {
-      return errorResponse('deck_not_starred', 'Csak csillagozott pakli jelenhet meg ajanlottkent.', 409);
+      return errorResponse('deck_not_reliable', 'Csak pontosabb evszamos pakli jelenhet meg ajanlottkent.', 409);
     }
 
     nextReport.featured = true;
-    nextReport.starred = true;
     nextReport.featuredAt = new Date().toISOString();
     nextReport.featuredBy = admin.spotifyUserId ?? callerUid;
     nextReport.qualityStatus = currentReport.qualityStatus ?? 'verified';
   } else {
     delete nextReport.featured;
+    delete nextReport.starred;
     delete nextReport.featuredAt;
     delete nextReport.featuredBy;
   }

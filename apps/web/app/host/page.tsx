@@ -130,7 +130,7 @@ export default function HostCreatePage() {
   const [adminDecks, setAdminDecks] = useState<AdminDeck[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminBusyDeckId, setAdminBusyDeckId] = useState<string | null>(null);
-  const [newDeckKind, setNewDeckKind] = useState<"spotify_only" | "starred">("spotify_only");
+  const [newDeckKind, setNewDeckKind] = useState<"spotify_only" | "accurate_spotify">("spotify_only");
 
   useEffect(() => {
     if (spotifyStatus !== "connected") {
@@ -302,7 +302,7 @@ export default function HostCreatePage() {
       return;
     }
     const confirmed = window.confirm(
-      `Csillagozott verziót készítesz ebből a pakliból?\n\n${selected.name}\n\nEz külön, pontosított másolatot generál, és feltölti a preview hangokat.`
+      `Letöltött verziót készítesz ebből a pakliból?\n\n${selected.name}\n\nEz külön, pontosított másolatot generál, és feltölti a preview hangokat.`
     );
     if (!confirmed) return;
 
@@ -311,18 +311,18 @@ export default function HostCreatePage() {
     try {
       const { deckId } = await generateDeck(urls[0], {
         playlistUrls: urls.length > 1 ? urls : undefined,
-        sourceKey: `starred-${selected.id}`,
+        sourceKey: `verified-${selected.id}`,
         deckName: selected.name,
         audioPipeline: "verified_audio",
         curationSourceDeckId: selected.id,
       });
       const prepared = await pollDeckUntilReady(deckId);
       if (prepared.status === "failed") {
-        throw new Error(prepared.progress.failReason || "Nem sikerült előkészíteni az ajánlott paklit.");
+        throw new Error(prepared.progress.failReason || "Nem sikerült elkészíteni a letöltött verziót.");
       }
       await refreshAdminDecks();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nem sikerült előkészíteni az ajánlott paklit.");
+      setError(err instanceof Error ? err.message : "Nem sikerült elkészíteni a letöltött verziót.");
     } finally {
       setAdminBusyDeckId(null);
     }
@@ -403,7 +403,7 @@ export default function HostCreatePage() {
       playlistUrls?: string[];
       sourceKey?: string;
       deckName?: string;
-      audioPipeline?: "spotify_only" | "verified_audio";
+      audioPipeline?: "spotify_only" | "accurate_spotify" | "verified_audio";
       curationSourceDeckId?: string;
     }
   ) {
@@ -428,7 +428,7 @@ export default function HostCreatePage() {
     try {
       await ensureAnonymousSession();
       const requestedAudioPipeline =
-        options?.audioPipeline ?? (!urlOverride && adminStatus?.isAdmin && newDeckKind === "starred" ? "verified_audio" : "spotify_only");
+        options?.audioPipeline ?? (!urlOverride && newDeckKind === "accurate_spotify" ? "accurate_spotify" : "spotify_only");
 
       // A HTTP hívás azonnal visszatér a deckId-vel, a feldolgozás a szerveren fut tovább.
       const { deckId } = await generateDeck(urls[0] ?? url, {
@@ -619,23 +619,21 @@ export default function HostCreatePage() {
                   <p id="playlist-url-help" className="text-sm text-text-muted mt-1">
                     › Egy vagy több Spotify playlist link, soronként külön. Több linkből egy közös, deduplikált pakli készül.
                   </p>
-                  {adminStatus?.isAdmin && (
-                    <div className="mt-4">
-                      <SegmentedControl
-                        label="Generálás módja"
-                        ariaLabel="Generálás módja"
-                        value={newDeckKind}
-                        onChange={setNewDeckKind}
-                        options={[
-                          { value: "spotify_only", label: "Spotify-only" },
-                          { value: "starred", label: "Csillagozott" },
-                        ]}
-                      />
-                      <p className="mt-1 text-sm text-text-muted">
-                        A csillagozott pakli pontosabb és preview hangokat tárol, ezért csak adminok készíthetik.
-                      </p>
-                    </div>
-                  )}
+                  <div className="mt-4">
+                    <SegmentedControl
+                      label="Generálás módja"
+                      ariaLabel="Generálás módja"
+                      value={newDeckKind}
+                      onChange={setNewDeckKind}
+                      options={[
+                        { value: "spotify_only", label: "Spotify-only" },
+                        { value: "accurate_spotify", label: "Pontosabb évszámok" },
+                      ]}
+                    />
+                    <p className="mt-1 text-sm text-text-muted">
+                      A pontosabb évszámos mód tovább tart, de nem tölt fel preview hangokat.
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -658,7 +656,12 @@ export default function HostCreatePage() {
                             <p className="mt-0.5 text-xs text-text-muted">
                               {pl.usableCount} kártya
                               {pl.totalTracks !== pl.usableCount ? ` / ${pl.totalTracks} szám` : ""} -{" "}
-                              {pl.coveragePct.toFixed(0)}% lefedettség - ajánlott
+                              {pl.coveragePct.toFixed(0)}% lefedettség{" "}
+                              <DeckQualityBadge
+                                audioPipeline={pl.report.audioPipeline}
+                                featured={pl.isFeatured}
+                                hasDownloadedPreviews={pl.hasDownloadedPreviews}
+                              />
                             </p>
                           </div>
                           <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -715,11 +718,11 @@ export default function HostCreatePage() {
                   ) : (
                     adminDecks.map((adminDeck) => {
                       const busy = adminBusyDeckId === adminDeck.id;
-                      const canPrepare = adminDeck.status === "ready" && !adminDeck.isStarred;
+                      const canPrepare = adminDeck.status === "ready" && !adminDeck.hasDownloadedPreviews;
                       const canPublish =
                         adminDeck.status === "ready" &&
                         !adminDeck.isFeatured &&
-                        adminDeck.isStarred;
+                        adminDeck.audioPipeline !== "spotify_only";
 
                       return (
                         <div
@@ -731,8 +734,12 @@ export default function HostCreatePage() {
                             <p className="mt-0.5 text-xs text-text-muted">
                               {adminDeck.usableCount} kártya
                               {adminDeck.totalTracks !== adminDeck.usableCount ? ` / ${adminDeck.totalTracks} szám` : ""} -{" "}
-                              {adminDeck.coveragePct.toFixed(0)}% - <DeckQualityBadge starred={adminDeck.isStarred} />
-                              {adminDeck.isFeatured ? " - ajánlott" : ""}
+                              {adminDeck.coveragePct.toFixed(0)}%{" "}
+                              <DeckQualityBadge
+                                audioPipeline={adminDeck.audioPipeline}
+                                featured={adminDeck.isFeatured}
+                                hasDownloadedPreviews={adminDeck.hasDownloadedPreviews}
+                              />
                               {adminDeck.status !== "ready" ? ` - ${adminDeck.status}` : ""}
                             </p>
                           </div>
@@ -742,10 +749,10 @@ export default function HostCreatePage() {
                                 size="sm"
                                 variant="secondary"
                                 disabled={busy}
-                                title="Külön, ellenőrzött, preview hangos csillagozott másolatot készít ebből a pakliból."
+                                title="Külön, pontosabb évszámos, letöltött preview hangos másolatot készít ebből a pakliból."
                                 onClick={() => handlePrepareFeaturedDeck(adminDeck)}
                               >
-                                {busy ? "Verzió készül..." : "Csillagozott verzió készítése"}
+                                {busy ? "Verzió készül..." : "Letöltött verzió készítése"}
                               </AppButton>
                             )}
                             {canPublish && (
@@ -886,8 +893,8 @@ export default function HostCreatePage() {
               currentStep={stepLabel(progress.step)}
             />
             <p className="text-text-muted text-sm">
-              {adminStatus?.isAdmin && newDeckKind === "starred"
-                ? "Csillagozott pakli készül: pontosított generálás és preview hangfeltöltés fut."
+              {newDeckKind === "accurate_spotify"
+                ? "Pontosabb évszámos pakli készül, preview hangfeltöltés nélkül."
                 : "Spotify-only pakli készül, ezért nincs Supabase hangfájl-feltöltés."}
             </p>
             {progress.warning && (
